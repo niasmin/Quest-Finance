@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Dr. Quest</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&family=Mitr:wght@500;600&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root { --panel: rgba(16, 30, 44, 0.85); --text: #eef6f8; --accent: #3ee0c5; --hp: #e5484d; --xp: #4fa3f7; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0c1a24; color: var(--text); font-family: 'Sarabun', sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+
+  #login { position: fixed; inset: 0; overflow-y: auto; background: radial-gradient(circle at 50% 20%, #1f4a5c, #0c1a24 70%); z-index: 10; padding: 24px 16px; }
+  #login form { max-width: 820px; margin: 0 auto; text-align: center; }
+  #login h1 { margin: 0; font-family: 'Mitr', sans-serif; font-size: 44px; color: var(--accent); }
+  #login h1 span { color: #ff6b6b; }
+  #login .tag { margin: 4px 0 20px; opacity: .8; }
+  #nameinput, #passinput { width: min(360px, 100%); padding: 12px 14px; border-radius: 10px; border: none; font: inherit; font-size: 16px; background: #183242; color: var(--text); margin: 4px 0; }
+  #loginnote { font-size: 13px; opacity: .75; margin-top: 6px; }
+  #loginerror { color: #ff8a8a; font-weight: 600; min-height: 1.4em; margin-top: 6px; }
+  #classes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin: 18px 0; text-align: left; }
+  .cls { background: var(--panel); border: 2px solid transparent; border-radius: 12px; padding: 12px; cursor: pointer; transition: transform .1s, border-color .1s; }
+  .cls:hover { transform: translateY(-2px); }
+  .cls.sel { border-color: var(--accent); background: rgba(62, 224, 197, .12); }
+  .cls .head { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
+  .cls .icon { font-size: 28px; }
+  .cls .meta { font-size: 13px; opacity: .85; margin-top: 6px; line-height: 1.5; }
+  .cls .meta b { color: var(--accent); font-weight: 600; }
+  #startbtn { padding: 14px 40px; border-radius: 12px; border: none; background: var(--accent); color: #0c1a24; font: inherit; font-size: 18px; font-weight: 700; cursor: pointer; }
+
+  #hud { position: fixed; top: 12px; left: 12px; background: var(--panel); padding: 10px 14px; border-radius: 12px; width: 250px; display: none; }
+  #hud .name { font-weight: 700; }
+  .bar { height: 10px; background: #2a3a50; border-radius: 6px; overflow: hidden; margin-top: 6px; }
+  .bar > div { height: 100%; transition: width .15s; }
+  #hpbar { background: var(--hp); }
+  #xpbar { background: var(--xp); }
+  #hud small { opacity: .85; display: block; }
+  #skillinfo { margin-top: 6px; font-size: 13px; color: var(--accent); }
+
+  #chat { position: fixed; left: 12px; bottom: 12px; width: min(380px, calc(100vw - 24px)); display: none; }
+  #chatlog { background: var(--panel); border-radius: 12px 12px 0 0; padding: 8px 12px; height: 150px; overflow-y: auto; font-size: 14px; }
+  #chatlog .sys { color: #ffd166; }
+  #chatlog b { color: #9fd0ff; }
+  #chatinput { width: 100%; padding: 8px 12px; border: none; border-radius: 0 0 12px 12px; background: #183242; color: var(--text); font: inherit; }
+
+  #zonename { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); padding: 6px 16px; border-radius: 20px; font-family: 'Mitr', sans-serif; display: none; }
+  #quests { margin-top: 8px; font-size: 13px; border-top: 1px solid rgba(255,255,255,.15); padding-top: 6px; }
+  #quests:empty { display: none; }
+  #quests .q { margin-top: 3px; }
+  #quests .q.ready { color: #ffd166; }
+
+  #bagbtn { position: fixed; top: 12px; right: 12px; z-index: 3; width: 48px; height: 48px; border-radius: 12px; border: none; background: var(--panel); font-size: 24px; cursor: pointer; display: none; }
+  #bag { position: fixed; top: 68px; right: 12px; width: min(340px, calc(100vw - 24px)); max-height: calc(100vh - 90px); overflow-y: auto; background: var(--panel); border-radius: 12px; padding: 12px; display: none; z-index: 3; }
+  #bag h3 { margin: 0 0 8px; font-family: 'Mitr', sans-serif; font-size: 16px; }
+  #bag .stats { font-size: 13px; opacity: .85; margin-bottom: 8px; }
+  #bag .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-bottom: 10px; }
+  #bag .slot { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 6px 8px; font-size: 13px; cursor: pointer; text-align: left; color: var(--text); font-family: inherit; }
+  #bag .slot:hover { border-color: var(--accent); }
+  #bag .slot .ico { font-size: 18px; margin-right: 4px; }
+  #bag .slot small { display: block; opacity: .7; }
+  #bag .empty { opacity: .5; cursor: default; }
+
+  #dialog { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(520px, calc(100vw - 24px)); background: rgba(255,255,255,.96); color: #102030; border-radius: 14px; padding: 14px 16px; box-shadow: 0 10px 40px rgba(0,0,0,.4); display: none; z-index: 4; cursor: pointer; }
+  #dialog .who { font-family: 'Mitr', sans-serif; font-weight: 600; color: #1f6f78; margin-bottom: 4px; }
+  #dialog .text { white-space: pre-line; line-height: 1.5; }
+  #dialog small { display: block; margin-top: 6px; opacity: .55; }
+
+  #help { position: fixed; top: 68px; right: 12px; background: var(--panel); padding: 8px 12px; border-radius: 10px; font-size: 13px; opacity: .9; display: none; }
+
+  /* ---------- RPG-style windows ---------- */
+  :root { --win: linear-gradient(180deg, rgba(40, 58, 128, .94), rgba(18, 26, 70, .94)); --win-border: #eef0ff; }
+  canvas { image-rendering: pixelated; }
+  #hud, #chatlog, #zonename, #bagbtn, #bag, #help, .cls, #dialog, #loginbox {
+    background: var(--win); border: 3px solid var(--win-border); border-radius: 6px;
+    box-shadow: inset 0 0 0 2px #10163a, 0 4px 0 rgba(0, 0, 0, .35);
+  }
+  #chatlog { border-bottom: none; border-radius: 6px 6px 0 0; }
+  #chatinput { border: 3px solid var(--win-border); border-top: 1px solid #6b74b8; border-radius: 0 0 6px 6px; background: #10163a; }
+  #hud .name, #zonename, #bag h3 { text-shadow: 2px 2px 0 #000; }
+  .bar { height: 12px; border-radius: 0; background: #10163a; border: 2px solid #000; }
+  #hpbar { background: linear-gradient(180deg, #ff7a7a 0 40%, #d63031 40%); }
+  #xpbar { background: linear-gradient(180deg, #8fd0ff 0 40%, #2e86de 40%); }
+  #zonename { border-radius: 6px; }
+  #bagbtn { border-radius: 6px; }
+  #bag .slot { border-radius: 4px; background: rgba(0, 0, 0, .25); border: 2px solid rgba(255, 255, 255, .18); }
+  #bag .slot:hover { border-color: #ffd166; }
+
+  #dialog { color: #ffffff; padding: 22px 18px 14px; }
+  #dialog .who { position: absolute; top: -18px; left: 14px; background: var(--win); border: 3px solid var(--win-border); border-radius: 6px; padding: 2px 12px; color: #ffd166; }
+  #dialog .text { font-size: 16px; text-shadow: 1px 1px 0 #000; }
+  #dialog small { color: #c7cdf5; opacity: .8; }
+  #dialog::after { content: '▼'; position: absolute; right: 14px; bottom: 6px; color: #ffd166; font-size: 12px; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  #login { background: #0c1424; image-rendering: pixelated; }
+  #loginbox { max-width: 860px; margin: 0 auto; padding: 22px 18px; }
+  #login h1 { font-family: 'Press Start 2P', monospace; font-size: clamp(22px, 5vw, 38px); color: #ffd166; text-shadow: 4px 4px 0 #8e3b00; letter-spacing: 2px; }
+  #login h1 span { display: block; margin-top: 12px; font-family: 'Mitr', sans-serif; font-size: clamp(22px, 4vw, 30px); color: #ff8fab; text-shadow: 3px 3px 0 #5a1030; letter-spacing: 0; }
+  #nameinput, #passinput { border-radius: 4px; background: #10163a; border: 2px solid #6b74b8; }
+  .cls { border-radius: 6px; }
+  .cls.sel { border-color: #ffd166; background: linear-gradient(180deg, rgba(90, 80, 30, .95), rgba(40, 36, 20, .95)); }
+  .cls .icon { width: 36px; height: 48px; image-rendering: pixelated; flex: none; }
+  .cls .icon img { width: 36px; height: 48px; image-rendering: pixelated; }
+  #startbtn { font-family: 'Mitr', sans-serif; border-radius: 6px; background: #ffd166; color: #3b2400; border: 3px solid #fff; box-shadow: 0 4px 0 #8e3b00; }
+  #startbtn:active { transform: translateY(3px); box-shadow: 0 1px 0 #8e3b00; }
+  #modenote { margin: 0 auto 10px; font-size: 13px; color: #ffd166; }
+
+  #touch { display: none; }
+  @media (pointer: coarse) {
+    #help { display: none !important; }
+    #chat { bottom: auto; top: 150px; width: 260px; }
+    #chatlog { height: 90px; }
+    #touch.on { display: block; }
+    #joy { position: fixed; left: 24px; bottom: 24px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.2); }
+    #joyknob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.35); }
+    #atk, #skl { position: fixed; border-radius: 50%; border: none; color: #fff; font: inherit; font-weight: 700; }
+    #atk { right: 28px; bottom: 36px; width: 90px; height: 90px; background: rgba(229,72,77,.8); font-size: 18px; }
+    #skl { right: 128px; bottom: 30px; width: 70px; height: 70px; background: rgba(62,224,197,.8); color: #0c1a24; font-size: 15px; }
+    #talkbtn, #healbtn { position: fixed; width: 56px; height: 56px; border-radius: 50%; border: none; font: inherit; font-weight: 700; background: rgba(255,255,255,.85); color: #0c1a24; }
+    #talkbtn { right: 40px; bottom: 140px; }
+    #healbtn { right: 110px; bottom: 116px; font-size: 22px; }
+    #help { display: none !important; }
+    #bag { top: 68px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="login">
+  <form id="loginform"><div id="loginbox">
+    <h1>Dr. Quest <span>ล่าเชื้อป่วน</span></h1>
+    <p class="tag">ทีมสหวิชาชีพบุกปราบเชื้อโรค ชวนเพื่อนมาเข้าเวรด้วยกัน!</p>
+    <div id="modenote"></div>
+    <input id="nameinput" maxlength="16" placeholder="ชื่อตัวละคร" autocomplete="username" required><br>
+    <input id="passinput" type="password" maxlength="64" placeholder="รหัสผ่าน (อย่างน้อย 4 ตัว)" autocomplete="current-password" required>
+    <div id="loginnote">ชื่อใหม่ = สร้างตัวละครด้วยอาชีพที่เลือก · ชื่อเดิม = โหลดตัวละครที่บันทึกไว้</div>
+    <div id="loginerror"></div>
+    <div id="classes"></div>
+    <button id="startbtn" type="submit">เข้าเวร!</button>
+  </div></form>
+</div>
+
+<div id="hud">
+  <div class="name" id="hudname"></div>
+  <div class="bar"><div id="hpbar"></div></div>
+  <small id="hptext"></small>
+  <div class="bar"><div id="xpbar"></div></div>
+  <small id="xptext"></small>
+  <div id="skillinfo"></div>
+  <div id="quests"></div>
+</div>
+
+<div id="zonename"></div>
+<button id="bagbtn" title="กระเป๋า (I)">🎒</button>
+<div id="bag"></div>
+<div id="dialog"><div class="who"></div><div class="text"></div><small>แตะเพื่อปิด</small></div>
+
+<div id="help">WASD / ลูกศร = เดิน · Space = โจมตี · Q = สกิล<br>E = คุยกับ NPC · H = ใช้ยาฟื้น HP · I = กระเป๋า · Enter = แชท<br>เดินเข้าประตูวาร์ปเพื่อไปดันเจี้ยน · เขตพักปลอดภัยและฟื้น HP เร็ว</div>
+
+<div id="chat">
+  <div id="chatlog"></div>
+  <input id="chatinput" maxlength="120" placeholder="กด Enter เพื่อพิมพ์…">
+</div>
+
+<div id="touch">
+  <div id="joy"><div id="joyknob"></div></div>
+  <button id="skl">สกิล</button>
+  <button id="talkbtn">คุย</button>
+  <button id="healbtn">🧴</button>
+  <button id="atk">โจมตี</button>
+</div>
+
+<script src="shared.js"></script>
+<script src="engine.js"></script>
+<script src="sprites.js"></script>
+<script src="client.js"></script>
+</body>
+</html>

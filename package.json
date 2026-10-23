@@ -1,0 +1,16 @@
+{
+  "name": "dr-quest",
+  "version": "0.1.0",
+  "description": "Dr. Quest — browser MMORPG where medical professionals battle germs",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
