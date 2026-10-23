@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 // ---------- static file server ----------
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.png': 'image/png', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json',
 };
 const PUBLIC_DIR = path.join(__dirname, 'public');
 

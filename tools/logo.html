@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Dr. Quest logo generator</title>
+<!-- Rendered by tools/render-logo.js; open directly in a browser to preview. -->
+<link href="https://fonts.googleapis.com/css2?family=Mitr:wght@600&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  body { background: #333; color: #fff; font-family: sans-serif; }
+  canvas { display: block; margin: 12px 0; image-rendering: pixelated; background: repeating-conic-gradient(#555 0 25%, #444 0 50%) 0 0 / 20px 20px; }
+</style>
+</head>
+<body>
+<script src="../public/shared.js"></script>
+<script src="../public/sprites.js"></script>
+<script>
+const SPR = Sprites.build(window.GAME_DATA);
+
+function canvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return c;
+}
+
+// Nearest-neighbour upscale so every art pixel becomes a crisp block
+function upscale(src, k) {
+  const c = canvas(src.width * k, src.height * k);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  g.drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
+
+// Render text small, threshold it into a pixel mask, then paint a banded
+// fill, a 1-pixel outline and a drop shadow before scaling it up.
+function pixelText(text, font, { bands, outline, shadow, depth = 2, thick = 1 }) {
+  const probe = canvas(1, 1).getContext('2d');
+  probe.font = font;
+  const m = probe.measureText(text);
+  const pad = 3 + thick;
+  const asc = Math.ceil(m.actualBoundingBoxAscent);
+  const desc = Math.ceil(m.actualBoundingBoxDescent);
+  const w = Math.ceil(m.width) + pad * 2;
+  const h = asc + desc + pad * 2 + depth;
+  const src = canvas(w, h);
+  const sg = src.getContext('2d');
+  sg.font = font;
+  sg.fillStyle = '#fff';
+  sg.fillText(text, pad, pad + asc);
+  const a = sg.getImageData(0, 0, w, h).data;
+  const ink = (x, y) => x >= 0 && y >= 0 && x < w && y < h && a[(y * w + x) * 4 + 3] > 110;
+
+  const out = canvas(w, h);
+  const g = out.getContext('2d');
+  const put = (x, y, color) => {
+    g.fillStyle = color;
+    g.fillRect(x, y, 1, 1);
+  };
+  const near = (x, y) => {
+    for (let dy = -thick; dy <= thick; dy++) for (let dx = -thick; dx <= thick; dx++) if (ink(x + dx, y + dy)) return true;
+    return false;
+  };
+  // Shadow: the outlined shape pushed down
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      for (let d = 1; d <= depth; d++) if (near(x, y - d)) put(x, y, shadow);
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) if (!ink(x, y) && near(x, y)) put(x, y, outline);
+  }
+  const top = pad;
+  const span = asc + desc;
+  for (let y = 0; y < h; y++) {
+    const t = (y - top) / span;
+    const color = bands[Math.max(0, Math.min(bands.length - 1, Math.floor(t * bands.length)))];
+    for (let x = 0; x < w; x++) if (ink(x, y)) put(x, y, color);
+  }
+  return out;
+}
+
+// Ribbon banner (art pixels) sized to hold `inner`
+function ribbon(innerW, innerH) {
+  const tail = 6;
+  const w = innerW + tail * 2 + 8;
+  const h = innerH + 6;
+  const c = canvas(w, h + 3);
+  const g = c.getContext('2d');
+  const rect = (x, y, rw, rh, color) => {
+    g.fillStyle = color;
+    g.fillRect(x, y, rw, rh);
+  };
+  // Folded tails
+  for (const side of [0, 1]) {
+    const x = side ? w - tail - 2 : 0;
+    rect(x, 3, tail + 2, h - 2, '#10163a');
+    rect(x + 1, 4, tail, h - 4, '#a3123a');
+    // Notch
+    const nx = side ? w - 1 : 0;
+    for (let y = 0; y < (h - 2) / 2; y++) {
+      const depth = Math.max(0, 3 - Math.abs(y - (h - 2) / 4));
+      rect(side ? nx - depth : nx, 4 + (h - 4) / 2 - 1, depth, 2, 'rgba(0,0,0,0)');
+    }
+    g.clearRect(side ? w - 3 : 0, 3 + Math.floor((h - 2) / 2) - 1, 3, 3);
+  }
+  // Main band
+  rect(tail, 0, w - tail * 2, h, '#10163a');
+  rect(tail + 1, 1, w - tail * 2 - 2, h - 2, '#e5484d');
+  rect(tail + 1, 1, w - tail * 2 - 2, 2, '#ff8a8a');
+  rect(tail + 1, h - 3, w - tail * 2 - 2, 2, '#b8323a');
+  return c;
+}
+
+function titleArt() {
+  // 16px = two art pixels per font pixel, for chunkier letters
+  return pixelText('DR.QUEST', '16px "Press Start 2P"', {
+    bands: ['#fffbe0', '#ffe08a', '#ffd166', '#ffd166', '#ffc23d', '#f5a623', '#e8891b', '#d9741a'],
+    outline: '#2b1400',
+    shadow: '#7a3300',
+    depth: 3,
+    thick: 2,
+  });
+}
+
+function subtitleArt() {
+  return pixelText('ล่าเชื้อป่วน', '600 15px Mitr', {
+    bands: ['#ffffff', '#ffffff', '#fff1f5', '#ffe0ea'],
+    outline: '#4a0f25',
+    shadow: '#4a0f25',
+    depth: 1,
+  });
+}
+
+// K: screen px per title art pixel, R: ribbon/subtitle scale, C: sprite upscale
+function makeLogo({ K = 4, R = 4, C = 3 } = {}) {
+  const title = upscale(titleArt(), K);
+  const subSmall = subtitleArt();
+  const band = upscale(ribbon(subSmall.width, subSmall.height), R);
+  const sub = upscale(subSmall, R);
+
+  const doctor = upscale(SPR.characters.doctor[0], C);
+  const nurse = upscale(SPR.characters.nurse[1], C);
+  const germ = upscale(SPR.germs.flu[0], C);
+  const germ2 = upscale(SPR.germs.cold[1], C);
+
+  // Heroes overlap the ribbon's left end, germs its right end
+  const overlap = 6 * C;
+  const leftW = nurse.width + doctor.width - 8 * C;
+  const rightW = germ.width + germ2.width - 14 * C;
+  const W = Math.max(title.width, leftW + band.width + rightW - overlap * 2) + 40;
+  const H = title.height + band.height + 60;
+  const c = canvas(W, H);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const bx = Math.round(leftW - overlap + (W - (leftW + band.width + rightW - overlap * 2)) / 2);
+  const by = 10 + title.height - 4 * K;
+  g.drawImage(band, bx, by);
+  g.drawImage(sub, bx + Math.round((band.width - sub.width) / 2), by + Math.round((band.height - sub.height) / 2) - R);
+  const feet = by + band.height + 2 * C;
+  g.drawImage(nurse, bx + overlap - leftW, feet - nurse.height);
+  g.drawImage(doctor, bx + overlap - doctor.width, feet - doctor.height);
+  g.drawImage(germ, bx + band.width - overlap, feet - germ.height + 4 * C);
+  g.drawImage(germ2, bx + band.width - overlap + germ.width - 14 * C, feet - germ2.height - 10 * C);
+  // Title last so it sits on top of everything
+  g.drawImage(title, Math.round((W - title.width) / 2), 10);
+  return trim(c);
+}
+
+// Crop transparent margins, keeping a small border
+function trim(c, pad = 8) {
+  const g = c.getContext('2d');
+  const { data, width, height } = g.getImageData(0, 0, c.width, c.height);
+  let x0 = width, y0 = height, x1 = 0, y1 = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3]) {
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+    }
+  }
+  const out = canvas(x1 - x0 + 1 + pad * 2, y1 - y0 + 1 + pad * 2);
+  out.getContext('2d').drawImage(c, -x0 + pad, -y0 + pad);
+  return out;
+}
+
+// App icon: RPG window frame, hospital red cross, an angry virus in the corner
+function makeIcon(size) {
+  const A = 32; // art grid
+  const k = size / A;
+  const art = canvas(A, A);
+  const g = art.getContext('2d');
+  const rect = (x, y, w, h, color) => {
+    g.fillStyle = color;
+    g.fillRect(x, y, w, h);
+  };
+  for (let y = 0; y < A; y++) rect(0, y, A, 1, y < A / 2 ? '#2f4596' : '#1b2766');
+  rect(0, 0, A, 1, '#eef0ff'); rect(0, A - 1, A, 1, '#eef0ff');
+  rect(0, 0, 1, A, '#eef0ff'); rect(A - 1, 0, 1, A, '#eef0ff');
+  rect(1, 1, A - 2, 1, '#10163a'); rect(1, A - 2, A - 2, 1, '#10163a');
+  rect(1, 1, 1, A - 2, '#10163a'); rect(A - 2, 1, 1, A - 2, '#10163a');
+  // Rounded corners
+  for (const [x, y] of [[0, 0], [A - 1, 0], [0, A - 1], [A - 1, A - 1]]) g.clearRect(x, y, 1, 1);
+  // White plate with red cross
+  const p = size >= 128 ? 4 : 7; // plate offset: up-left when the virus shares the icon
+  rect(p - 1, p - 1, 20, 20, '#10163a');
+  rect(p, p, 18, 18, '#ffffff');
+  rect(p, p + 16, 18, 2, '#d6dbe8');
+  rect(p + 7, p + 2, 4, 14, '#e5484d');
+  rect(p + 2, p + 7, 14, 4, '#e5484d');
+  rect(p + 7, p + 2, 4, 1, '#ff8a8a');
+  rect(p + 2, p + 7, 5, 1, '#ff8a8a');
+  rect(p + 11, p + 7, 5, 1, '#ff8a8a');
+  const out = canvas(size, size);
+  const og = out.getContext('2d');
+  og.imageSmoothingEnabled = false;
+  og.drawImage(art, 0, 0, size, size);
+  // Angry virus peeking in at the corner (whole-number scale keeps it crisp; too small to read on favicons)
+  if (size >= 128) {
+    const virus = SPR.germs.cold[0];
+    const vs = Math.max(1, Math.round((size * 0.36) / virus.width));
+    const vw = virus.width * vs;
+    og.drawImage(virus, size - vw - k * 1, size - vw - k * 1, vw, vw);
+  }
+  return out;
+}
+
+// Share image for link previews
+function makeOG() {
+  const W = 1200;
+  const H = 630;
+  const c = canvas(W, H);
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const tile = SPR.tiles.grass;
+  for (let y = 0; y < H; y += SPR.TILE) {
+    for (let x = 0; x < W; x += SPR.TILE) g.drawImage(tile[(x / SPR.TILE + y / SPR.TILE * 3) % tile.length], x, y);
+  }
+  const grad = g.createRadialGradient(W / 2, H / 2, 100, W / 2, H / 2, 700);
+  grad.addColorStop(0, 'rgba(8,12,30,.35)');
+  grad.addColorStop(1, 'rgba(8,12,30,.85)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+  const big = makeLogo({ K: 6, R: 6, C: 4 });
+  g.drawImage(big, Math.round((W - big.width) / 2), Math.round((H - 90 - big.height) / 2));
+  g.font = '600 34px Mitr';
+  g.textAlign = 'center';
+  g.lineWidth = 6;
+  g.strokeStyle = '#000';
+  g.fillStyle = '#ffffff';
+  const line = 'เกม RPG ทีมหมอปราบเชื้อโรค · เล่นฟรีบนเว็บและมือถือ';
+  g.strokeText(line, W / 2, H - 50);
+  g.fillText(line, W / 2, H - 50);
+  return c;
+}
+
+window.render = async () => {
+  await document.fonts.load('8px "Press Start 2P"');
+  await document.fonts.load('600 15px Mitr');
+  await document.fonts.load('600 34px Mitr');
+  const logo = makeLogo();
+  const files = {
+    'logo.png': logo,
+    'icon-512.png': makeIcon(512),
+    'icon-192.png': makeIcon(192),
+    'apple-touch-icon.png': makeIcon(180),
+    'favicon.png': makeIcon(64),
+    'og-image.png': makeOG(),
+  };
+  const result = {};
+  for (const [name, c] of Object.entries(files)) {
+    document.body.append(c);
+    result[name] = c.toDataURL('image/png').split(',')[1];
+  }
+  return result;
+};
+</script>
+</body>
+</html>
