@@ -1,10 +1,17 @@
-// Dr. Quest — browser client. Renders server state and sends player input.
+// Dr. Quest — browser client. Renders game state and sends player input.
+// Online it talks to the Node server over WebSocket; on static hosting (GitHub Pages)
+// it runs the same engine inside the page as a single-player game.
 const { CLASSES, SLOTS, ITEMS, GERMS, ZONES, NPCS, QUESTS } = window.GAME_DATA;
+const SPR = Sprites.build(window.GAME_DATA);
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const $ = (id) => document.getElementById(id);
 
-let ws = null;
+const params = new URLSearchParams(location.search);
+const OFFLINE = params.has('offline') || location.protocol === 'file:' || location.hostname.endsWith('github.io');
+
+let transport = null; // { send(msg) }
+let localGame = null;
 let myId = null;
 let world = null; // current zone definition
 let selectedClass = 'doctor';
@@ -20,6 +27,7 @@ function resize() {
   canvas.width = window.innerWidth * devicePixelRatio;
   canvas.height = window.innerHeight * devicePixelRatio;
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.imageSmoothingEnabled = false;
 }
 window.addEventListener('resize', resize);
 resize();
@@ -31,7 +39,7 @@ function renderClassPicker() {
     const card = document.createElement('div');
     card.className = `cls${id === selectedClass ? ' sel' : ''}`;
     card.innerHTML = `
-      <div class="head"><span class="icon">${c.icon}</span>${c.name}</div>
+      <div class="head"><span class="icon"><img src="${SPR.characters[id][0].toDataURL()}" alt=""></span>${c.icon} ${c.name}</div>
       <div class="meta">
         อาวุธ: <b>${c.weapon}</b> (${c.ranged ? 'ระยะไกล' : 'ระยะประชิด'})<br>
         สกิล: <b>${c.skill.name}</b><br>${c.skill.desc}
@@ -46,23 +54,85 @@ function renderClassPicker() {
 }
 renderClassPicker();
 
+// Login backdrop: tiled grass from the pixel tileset, darkened
+$('login').style.backgroundImage = `linear-gradient(rgba(8,12,30,.55), rgba(8,12,30,.8)), url(${SPR.tiles.grass[0].toDataURL()})`;
+$('login').style.backgroundSize = `auto, ${SPR.TILE}px`;
+
+if (OFFLINE) {
+  $('passinput').style.display = 'none';
+  $('passinput').required = false;
+  $('modenote').textContent = '🎮 โหมดเล่นคนเดียว — ตัวละครบันทึกไว้ในเบราว์เซอร์เครื่องนี้';
+}
+
 // ---------- connection ----------
 $('loginform').addEventListener('submit', (e) => {
   e.preventDefault();
-  const name = $('nameinput').value.trim();
-  const password = $('passinput').value;
   $('loginerror').textContent = '';
+  const joinMsg = { t: 'join', name: $('nameinput').value.trim(), password: $('passinput').value, classId: selectedClass };
+  if (OFFLINE) joinLocal(joinMsg);
+  else joinOnline(joinMsg);
+});
+
+function joinOnline(joinMsg) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, password, classId: selectedClass }));
+  const ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => ws.send(JSON.stringify(joinMsg));
   ws.onmessage = (ev) => handleMessage(JSON.parse(ev.data));
   ws.onclose = () => {
     if (myId) addChat(null, 'การเชื่อมต่อหลุด — รีเฟรชหน้าเพื่อเข้าใหม่');
   };
-});
+  transport = {
+    send: (msg) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    },
+  };
+}
+
+// Single-player saves live in localStorage; there is no password to check.
+const browserStorage = {
+  key: (name) => `drquest:${name.toLowerCase()}`,
+  read(name) {
+    try {
+      return JSON.parse(localStorage.getItem(this.key(name)));
+    } catch {
+      return null;
+    }
+  },
+  exists(name) {
+    return this.read(name) !== null;
+  },
+  verify: () => true,
+  create(name, password, data) {
+    this.save(name, data);
+  },
+  get(name) {
+    return this.read(name);
+  },
+  save(name, data) {
+    try {
+      localStorage.setItem(this.key(name), JSON.stringify(data));
+    } catch {
+      // Storage full or blocked: the game keeps running, just without saving
+    }
+  },
+};
+
+function joinLocal(joinMsg) {
+  if (!localGame) {
+    localGame = createGame({ storage: browserStorage, requirePassword: false });
+    localGame.start();
+    window.addEventListener('pagehide', () => localGame.saveAll());
+  }
+  const result = localGame.join((msg) => handleMessage(structuredClone(msg)), joinMsg);
+  if (typeof result === 'string') {
+    handleMessage({ t: 'error', text: result });
+    return;
+  }
+  transport = { send: (msg) => localGame.handle(result, msg) };
+}
 
 function send(msg) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  transport?.send(msg);
 }
 
 function syncEntities(map, list) {
@@ -70,7 +140,15 @@ function syncEntities(map, list) {
   for (const s of list) {
     seen.add(s.id);
     const prev = map.get(s.id);
-    map.set(s.id, prev ? Object.assign(prev, s) : { ...s, rx: s.x, ry: s.y });
+    if (prev) {
+      // Remember movement for walk animation and facing
+      const dx = s.x - prev.x;
+      if (dx || s.y !== prev.y) prev.movedAt = performance.now();
+      if (Math.abs(dx) > 0.5) prev.flip = dx < 0;
+      Object.assign(prev, s);
+    } else {
+      map.set(s.id, { ...s, rx: s.x, ry: s.y, movedAt: 0, flip: false });
+    }
   }
   for (const id of map.keys()) if (!seen.has(id)) map.delete(id);
 }
@@ -347,89 +425,111 @@ $('healbtn').addEventListener('touchstart', (e) => {
 });
 
 // ---------- rendering ----------
+const VOID_COLOR = '#0c1424';
+const LAIR_RADIUS = 180;
+
+function label(text, x, y, color = '#ffffff', font = '600 13px Sarabun') {
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#000';
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x, y);
+}
+
+// Draw a sprite with its top-left at (x, y), optionally mirrored
+function drawSprite(img, x, y, flip = false, w = img.width, h = img.height) {
+  x = Math.round(x);
+  y = Math.round(y);
+  if (!flip) {
+    ctx.drawImage(img, x, y, w, h);
+    return;
+  }
+  ctx.save();
+  ctx.translate(x + w, y);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, 0, 0, w, h);
+  ctx.restore();
+}
+
+function groundTile(tx, ty) {
+  const T = SPR.TILE;
+  const cx = tx * T + T / 2;
+  const cy = ty * T + T / 2;
+  const h = SPR.hash(tx, ty, 1);
+  if (Math.hypot(cx - world.safe.x, cy - world.safe.y) < world.safe.r) {
+    const set = world.id === 'hospital' ? SPR.tiles.plaza : SPR.tiles.clinic;
+    return set[Math.floor(h * set.length)];
+  }
+  if (Math.hypot(cx - world.boss.x, cy - world.boss.y) < LAIR_RADIUS) return SPR.tiles.lair[Math.floor(h * SPR.tiles.lair.length)];
+  const kinds = SPR.zoneGround[world.id];
+  const set = SPR.tiles[kinds[Math.floor(h * kinds.length)]];
+  return set[Math.floor(SPR.hash(tx, ty, 2) * set.length)];
+}
+
+// Trees grow only on open grass, away from the hospital, portals and the boss lair
+function treeAt(tx, ty) {
+  if (world.id !== 'hospital' || SPR.hash(tx, ty, 3) > 0.035) return null;
+  const x = tx * SPR.TILE + SPR.TILE / 2;
+  const y = ty * SPR.TILE + SPR.TILE / 2;
+  if (Math.hypot(x - world.safe.x, y - world.safe.y) < world.safe.r + 60) return null;
+  if (Math.hypot(x - world.boss.x, y - world.boss.y) < LAIR_RADIUS + 40) return null;
+  if (world.portals.some((p) => Math.hypot(x - p.x, y - p.y) < 100)) return null;
+  return SPR.trees[Math.floor(SPR.hash(tx, ty, 4) * SPR.trees.length)];
+}
+
 function drawWorld(camX, camY, w, h, time) {
-  const [floorA, floorB] = world.floor;
-  ctx.fillStyle = floorA;
+  const T = SPR.TILE;
+  ctx.fillStyle = VOID_COLOR;
   ctx.fillRect(0, 0, w, h);
-  const tile = 80;
-  ctx.fillStyle = floorB;
-  const startX = Math.floor(camX / tile) * tile;
-  const startY = Math.floor(camY / tile) * tile;
-  for (let x = startX; x < camX + w; x += tile) {
-    for (let y = startY; y < camY + h; y += tile) {
-      if (((x / tile) + (y / tile)) % 2 === 0) ctx.fillRect(x - camX, y - camY, tile, tile);
-    }
+  const tx0 = Math.max(0, Math.floor(camX / T));
+  const ty0 = Math.max(0, Math.floor(camY / T));
+  const tx1 = Math.min(Math.ceil(world.width / T) - 1, Math.floor((camX + w) / T));
+  const ty1 = Math.min(Math.ceil(world.height / T) - 1, Math.floor((camY + h) / T));
+  for (let ty = ty0; ty <= ty1; ty++) {
+    for (let tx = tx0; tx <= tx1; tx++) ctx.drawImage(groundTile(tx, ty), tx * T - camX, ty * T - camY);
   }
 
-  ctx.strokeStyle = '#335';
-  ctx.lineWidth = 6;
-  ctx.strokeRect(-camX, -camY, world.width, world.height);
+  // Trees (scan one extra row below so canopies poking up into view are drawn)
+  for (let ty = ty0; ty <= ty1 + 1; ty++) {
+    for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
+      const tree = treeAt(tx, ty);
+      if (tree) drawSprite(tree, tx * T + T / 2 - tree.width / 2 - camX, ty * T + T - tree.height - camY);
+    }
+  }
 
   // Safe area
-  const t = world.safe;
-  const tx = t.x - camX;
-  const ty = t.y - camY;
-  ctx.beginPath();
-  ctx.arc(tx, ty, t.r, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,.9)';
-  ctx.fill();
-  ctx.strokeStyle = '#3ee0c5';
-  ctx.lineWidth = 6;
-  ctx.stroke();
   if (world.id === 'hospital') {
-    ctx.fillStyle = 'rgba(229,72,77,.18)';
-    ctx.fillRect(tx - 22, ty - 70, 44, 140);
-    ctx.fillRect(tx - 70, ty - 22, 140, 44);
+    const b = SPR.hospital;
+    drawSprite(b, world.safe.x - b.width / 2 - camX, world.safe.y - 125 - b.height - camY);
+  } else {
+    label(world.safe.label, world.safe.x - camX, world.safe.y - world.safe.r + 28 - camY, '#ffffff', '600 18px Mitr');
   }
-  ctx.fillStyle = '#1f6f78';
-  ctx.font = '600 20px Mitr';
-  ctx.textAlign = 'center';
-  ctx.fillText(t.label, tx, ty - t.r + 32);
 
   // Boss lair
-  const b = world.boss;
-  ctx.beginPath();
-  ctx.arc(b.x - camX, b.y - camY, 180, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(139,30,63,.15)';
-  ctx.fill();
-  ctx.fillStyle = 'rgba(139,30,63,.75)';
-  ctx.font = '600 20px Mitr';
-  ctx.fillText(b.label, b.x - camX, b.y - camY - 150);
+  const boss = world.boss;
+  label(world.boss.label, boss.x - camX, boss.y - camY - 150, '#ff8fab', '600 18px Mitr');
 
   // Portals
+  const portalFrame = SPR.portal[Math.floor(time * 8) % SPR.portal.length];
   for (const p of world.portals) {
-    const px = p.x - camX;
-    const py = p.y - camY;
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.arc(px, py, 18 + i * 9 + Math.sin(time * 3 + i) * 3, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(123, 97, 255, ${0.8 - i * 0.22})`;
-      ctx.lineWidth = 4;
-      ctx.stroke();
-    }
-    ctx.fillStyle = '#4b3bb3';
-    ctx.font = '600 15px Mitr';
-    ctx.fillText(p.minLevel ? `${p.label} (Lv.${p.minLevel}+)` : p.label, px, py - 46);
+    drawSprite(portalFrame, p.x - portalFrame.width / 2 - camX, p.y - portalFrame.height / 2 - camY);
+    label(p.minLevel ? `${p.label} (Lv.${p.minLevel}+)` : p.label, p.x - camX, p.y - camY - 42, '#d6ccff', '600 15px Mitr');
   }
 
   // NPCs
   for (const [npcId, npc] of Object.entries(NPCS)) {
     if (npc.zone !== world.id) continue;
+    const img = SPR.characters[npcId][0];
     const nx = npc.x - camX;
-    const ny = npc.y - camY + Math.sin(time * 2) * 2;
-    ctx.font = '32px sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(npc.icon, nx, ny);
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = '#102030';
-    ctx.font = '600 13px Sarabun';
-    ctx.fillText(npc.name, nx, ny - 26);
+    const ny = npc.y - camY;
+    drawSprite(SPR.shadow.small, nx - 15, ny + 8);
+    drawSprite(img, nx - img.width / 2, ny - 34 + (Math.floor(time * 2) % 2));
+    label(npc.name, nx, ny - 42, '#9fe8ff');
     const marker = npcMarker(npcId);
-    if (marker) {
-      ctx.font = '700 22px Mitr';
-      ctx.fillStyle = marker === '?' ? '#2ecc71' : '#f5a623';
-      ctx.fillText(marker, nx, ny - 44);
-    }
+    if (marker) label(marker, nx, ny - 60 + Math.sin(time * 5) * 3, marker === '?' ? '#4cd964' : '#ffd166', '16px "Press Start 2P"');
   }
 }
 
@@ -449,143 +549,55 @@ function npcMarker(npcId) {
 }
 
 function drawHpBar(x, y, hp, maxHp, width) {
-  ctx.fillStyle = '#222';
-  ctx.fillRect(x - width / 2, y, width, 5);
-  ctx.fillStyle = '#e5484d';
-  ctx.fillRect(x - width / 2, y, width * Math.max(0, hp / maxHp), 5);
-}
-
-function drawGermBody(type, x, y, time, id) {
-  const s = type.size;
-  const wobble = Math.sin(time * 4 + id) * 0.08;
-  ctx.fillStyle = type.color;
-  ctx.strokeStyle = 'rgba(0,0,0,.35)';
-  ctx.lineWidth = 2;
-
-  if (type.shape === 'virus') {
-    const spikes = 10;
-    ctx.beginPath();
-    for (let i = 0; i < spikes; i++) {
-      const a = (i / spikes) * Math.PI * 2 + time * 0.8;
-      ctx.moveTo(x + Math.cos(a) * s, y + Math.sin(a) * s);
-      ctx.lineTo(x + Math.cos(a) * s * 1.45, y + Math.sin(a) * s * 1.45);
-    }
-    ctx.stroke();
-    for (let i = 0; i < spikes; i++) {
-      const a = (i / spikes) * Math.PI * 2 + time * 0.8;
-      ctx.beginPath();
-      ctx.arc(x + Math.cos(a) * s * 1.45, y + Math.sin(a) * s * 1.45, s * 0.14, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.beginPath();
-    ctx.arc(x, y, s * (1 + wobble), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  } else if (type.shape === 'bacteria') {
-    const len = s * 1.6;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(Math.sin(time * 2 + id) * 0.3);
-    ctx.beginPath();
-    ctx.roundRect(-len, -s * 0.75, len * 2, s * 1.5, s * 0.75);
-    ctx.fill();
-    ctx.stroke();
-    // Flagella
-    ctx.beginPath();
-    for (let i = 0; i < 3; i++) {
-      ctx.moveTo(len, (i - 1) * s * 0.4);
-      ctx.quadraticCurveTo(len + s * 0.6, (i - 1) * s * 0.4 + Math.sin(time * 8 + i) * 6, len + s, (i - 1) * s * 0.5);
-    }
-    ctx.stroke();
-    ctx.restore();
-  } else if (type.shape === 'worm') {
-    for (let i = 5; i >= 0; i--) {
-      const sx = x - i * s * 0.55;
-      const sy = y + Math.sin(time * 5 + i * 0.9 + id) * s * 0.25;
-      ctx.beginPath();
-      ctx.arc(sx, sy, s * (0.75 - i * 0.06), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-  } else {
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.arc(x + Math.cos(a) * s * 0.55, y + Math.sin(a) * s * 0.55, s * (0.55 + wobble), 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // Angry face
-  ctx.fillStyle = '#111';
-  ctx.beginPath();
-  ctx.arc(x - s * 0.32, y - s * 0.1, s * 0.13, 0, Math.PI * 2);
-  ctx.arc(x + s * 0.32, y - s * 0.1, s * 0.13, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#111';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x - s * 0.5, y - s * 0.42);
-  ctx.lineTo(x - s * 0.15, y - s * 0.28);
-  ctx.moveTo(x + s * 0.5, y - s * 0.42);
-  ctx.lineTo(x + s * 0.15, y - s * 0.28);
-  ctx.moveTo(x - s * 0.25, y + s * 0.35);
-  ctx.quadraticCurveTo(x, y + s * 0.15, x + s * 0.25, y + s * 0.35);
-  ctx.stroke();
+  const ratio = Math.max(0, Math.min(1, hp / maxHp));
+  x = Math.round(x - width / 2);
+  y = Math.round(y);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(x - 1, y - 1, width + 2, 6);
+  ctx.fillStyle = '#3a0d0d';
+  ctx.fillRect(x, y, width, 4);
+  ctx.fillStyle = ratio > 0.5 ? '#4cd964' : ratio > 0.25 ? '#ffcc00' : '#ff3b30';
+  ctx.fillRect(x, y, Math.round(width * ratio), 4);
 }
 
 function drawGerm(g, camX, camY, time) {
   const type = GERMS[g.kind];
+  const frames = SPR.germs[g.kind];
+  const img = frames[(Math.floor(time * 4) + g.id) % frames.length];
   const x = g.rx - camX;
   const y = g.ry - camY;
-  ctx.beginPath();
-  ctx.ellipse(x, y + type.size * 0.9, type.size, type.size * 0.3, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,.15)';
-  ctx.fill();
-  drawGermBody(type, x, y, time, g.id);
+  const shadowW = Math.round(img.width * 0.7);
+  drawSprite(SPR.shadow.big, x - shadowW / 2, y + img.height * 0.32, false, shadowW, 10);
+  drawSprite(img, x - img.width / 2, y - img.height / 2, g.flip);
 
-  const top = y - type.size * 1.5;
-  drawHpBar(x, top - 8, g.hp, g.maxHp, type.boss ? 90 : 36);
-  ctx.fillStyle = type.boss ? '#8b1e3f' : '#203040';
-  ctx.font = type.boss ? '700 15px Sarabun' : '600 12px Sarabun';
-  ctx.textAlign = 'center';
-  ctx.fillText(`${type.name}${g.marked ? ' 🎯' : ''}${g.stunned ? ' 💫' : ''}`, x, top - 12);
+  const top = y - img.height / 2;
+  drawHpBar(x, top - 6, g.hp, g.maxHp, type.boss ? 80 : 32);
+  const status = `${g.marked ? '🎯' : ''}${g.stunned ? '💫' : ''}`;
+  label(`${type.name}${status ? ` ${status}` : ''}`, x, top - 10, type.boss ? '#ff8fab' : '#ffffff', type.boss ? '700 15px Sarabun' : '600 12px Sarabun');
 }
 
-function drawPlayer(p, camX, camY) {
+function drawPlayer(p, camX, camY, time, now) {
   const cls = CLASSES[p.classId];
+  const frames = SPR.characters[p.classId];
+  const moving = now - p.movedAt < 150;
+  const img = frames[moving ? Math.floor(time * 8) % frames.length : 0];
   const x = p.rx - camX;
   const y = p.ry - camY;
+
   ctx.globalAlpha = p.dead ? 0.35 : 1;
-  ctx.beginPath();
-  ctx.ellipse(x, y + 16, 15, 5, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,.2)';
-  ctx.fill();
+  drawSprite(SPR.shadow.small, x - 15, y + 8);
   if (p.buff) {
-    ctx.beginPath();
-    ctx.arc(x, y, 22, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(245,166,35,.8)';
+    ctx.strokeStyle = Math.floor(time * 6) % 2 ? '#ffd166' : '#f5a623';
     ctx.lineWidth = 3;
-    ctx.stroke();
+    ctx.strokeRect(Math.round(x - 22), Math.round(y - 38), 44, 56);
   }
-  // Scrubs-colored body with a white coat collar
-  ctx.beginPath();
-  ctx.arc(x, y, 16, 0, Math.PI * 2);
-  ctx.fillStyle = cls.color;
-  ctx.fill();
-  ctx.lineWidth = p.id === myId ? 3 : 1.5;
-  ctx.strokeStyle = p.id === myId ? '#ff6b6b' : '#203040';
-  ctx.stroke();
-  ctx.font = '18px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(p.dead ? '🚑' : cls.icon, x, y + 1);
-  ctx.textBaseline = 'alphabetic';
+  drawSprite(img, x - img.width / 2, y - 34 - (moving ? Math.floor(time * 8) % 2 : 0), p.flip);
   ctx.globalAlpha = 1;
-  drawHpBar(x, y - 28, p.hp, p.maxHp, 40);
-  ctx.fillStyle = '#102030';
-  ctx.font = '600 13px Sarabun';
-  ctx.fillText(`${cls.name}${p.name} Lv.${p.level}`, x, y - 34);
+  if (p.dead) label('🚑', x, y - 4, '#fff', '22px sans-serif');
+
+  drawHpBar(x, y - 42, p.hp, p.maxHp, 36);
+  label(`${cls.icon} ${p.name}`, x, y - 48, p.id === myId ? '#ffd166' : '#ffffff');
+  label(`Lv.${p.level}`, x, y - 64, '#9fe8ff', '8px "Press Start 2P"');
 }
 
 function drawEffects(camX, camY, dt) {
@@ -645,7 +657,7 @@ function drawEffects(camX, camY, dt) {
       ctx.font = '600 16px Mitr';
       ctx.lineWidth = 4;
       ctx.strokeStyle = '#102030';
-      const sy = p.ry - camY - 56 - fx.age * 20;
+      const sy = p.ry - camY - 82 - fx.age * 20;
       ctx.strokeText(fx.text, p.rx - camX, sy);
       ctx.fillStyle = '#3ee0c5';
       ctx.fillText(fx.text, p.rx - camX, sy);
@@ -653,11 +665,12 @@ function drawEffects(camX, camY, dt) {
     } else {
       // dmg, hurt, heal, text — floating labels
       const label = { dmg: `-${fx.value}`, hurt: `-${fx.value}`, heal: `+${fx.value}`, text: fx.text, loot: `ได้ ${fx.text}` }[fx.kind];
-      const color = { dmg: '#ff9f1c', hurt: '#e5484d', heal: '#2ecc71', text: '#1f6f78', loot: '#7b61ff' }[fx.kind];
+      const color = { dmg: '#ffd166', hurt: '#ff5c5c', heal: '#4cd964', text: '#ffffff', loot: '#c9b8ff' }[fx.kind];
       ctx.globalAlpha = 1 - k;
-      ctx.font = fx.kind === 'text' || fx.kind === 'loot' ? '600 15px Mitr' : '700 18px Sarabun';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#fff';
+      ctx.font = fx.kind === 'text' || fx.kind === 'loot' ? '600 15px Mitr' : '12px "Press Start 2P"';
+      ctx.lineWidth = 4;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#000';
       const ly = fx.y - camY - 26 - fx.age * 40;
       ctx.strokeText(label, fx.x - camX, ly);
       ctx.fillStyle = color;
@@ -715,13 +728,15 @@ function frame(now) {
     }
 
     const self = players.get(myId);
-    const camX = (self ? self.rx : world.safe.x) - w / 2;
-    const camY = (self ? self.ry : world.safe.y) - h / 2;
+    const camX = Math.round((self ? self.rx : world.safe.x) - w / 2);
+    const camY = Math.round((self ? self.ry : world.safe.y) - h / 2);
     const time = now / 1000;
 
     drawWorld(camX, camY, w, h, time);
     for (const g of germs.values()) drawGerm(g, camX, camY, time);
-    for (const p of players.values()) drawPlayer(p, camX, camY);
+    // Draw back-to-front so lower characters overlap higher ones
+    const sorted = [...players.values()].sort((a, b) => a.ry - b.ry);
+    for (const p of sorted) drawPlayer(p, camX, camY, time, now);
     drawEffects(camX, camY, dt);
     drawMinimap(w, h);
   } else {

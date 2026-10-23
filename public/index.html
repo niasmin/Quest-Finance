@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Dr. Quest</title>
-<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&family=Mitr:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&family=Mitr:wght@500;600&family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
   :root { --panel: rgba(16, 30, 44, 0.85); --text: #eef6f8; --accent: #3ee0c5; --hp: #e5484d; --xp: #4fa3f7; }
   * { box-sizing: border-box; }
@@ -68,6 +68,44 @@
 
   #help { position: fixed; top: 68px; right: 12px; background: var(--panel); padding: 8px 12px; border-radius: 10px; font-size: 13px; opacity: .9; display: none; }
 
+  /* ---------- RPG-style windows ---------- */
+  :root { --win: linear-gradient(180deg, rgba(40, 58, 128, .94), rgba(18, 26, 70, .94)); --win-border: #eef0ff; }
+  canvas { image-rendering: pixelated; }
+  #hud, #chatlog, #zonename, #bagbtn, #bag, #help, .cls, #dialog, #loginbox {
+    background: var(--win); border: 3px solid var(--win-border); border-radius: 6px;
+    box-shadow: inset 0 0 0 2px #10163a, 0 4px 0 rgba(0, 0, 0, .35);
+  }
+  #chatlog { border-bottom: none; border-radius: 6px 6px 0 0; }
+  #chatinput { border: 3px solid var(--win-border); border-top: 1px solid #6b74b8; border-radius: 0 0 6px 6px; background: #10163a; }
+  #hud .name, #zonename, #bag h3 { text-shadow: 2px 2px 0 #000; }
+  .bar { height: 12px; border-radius: 0; background: #10163a; border: 2px solid #000; }
+  #hpbar { background: linear-gradient(180deg, #ff7a7a 0 40%, #d63031 40%); }
+  #xpbar { background: linear-gradient(180deg, #8fd0ff 0 40%, #2e86de 40%); }
+  #zonename { border-radius: 6px; }
+  #bagbtn { border-radius: 6px; }
+  #bag .slot { border-radius: 4px; background: rgba(0, 0, 0, .25); border: 2px solid rgba(255, 255, 255, .18); }
+  #bag .slot:hover { border-color: #ffd166; }
+
+  #dialog { color: #ffffff; padding: 22px 18px 14px; }
+  #dialog .who { position: absolute; top: -18px; left: 14px; background: var(--win); border: 3px solid var(--win-border); border-radius: 6px; padding: 2px 12px; color: #ffd166; }
+  #dialog .text { font-size: 16px; text-shadow: 1px 1px 0 #000; }
+  #dialog small { color: #c7cdf5; opacity: .8; }
+  #dialog::after { content: '▼'; position: absolute; right: 14px; bottom: 6px; color: #ffd166; font-size: 12px; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  #login { background: #0c1424; image-rendering: pixelated; }
+  #loginbox { max-width: 860px; margin: 0 auto; padding: 22px 18px; }
+  #login h1 { font-family: 'Press Start 2P', monospace; font-size: clamp(22px, 5vw, 38px); color: #ffd166; text-shadow: 4px 4px 0 #8e3b00; letter-spacing: 2px; }
+  #login h1 span { display: block; margin-top: 12px; font-family: 'Mitr', sans-serif; font-size: clamp(22px, 4vw, 30px); color: #ff8fab; text-shadow: 3px 3px 0 #5a1030; letter-spacing: 0; }
+  #nameinput, #passinput { border-radius: 4px; background: #10163a; border: 2px solid #6b74b8; }
+  .cls { border-radius: 6px; }
+  .cls.sel { border-color: #ffd166; background: linear-gradient(180deg, rgba(90, 80, 30, .95), rgba(40, 36, 20, .95)); }
+  .cls .icon { width: 36px; height: 48px; image-rendering: pixelated; flex: none; }
+  .cls .icon img { width: 36px; height: 48px; image-rendering: pixelated; }
+  #startbtn { font-family: 'Mitr', sans-serif; border-radius: 6px; background: #ffd166; color: #3b2400; border: 3px solid #fff; box-shadow: 0 4px 0 #8e3b00; }
+  #startbtn:active { transform: translateY(3px); box-shadow: 0 1px 0 #8e3b00; }
+  #modenote { margin: 0 auto 10px; font-size: 13px; color: #ffd166; }
+
   #touch { display: none; }
   @media (pointer: coarse) {
     #help { display: none !important; }
@@ -91,16 +129,17 @@
 <canvas id="game"></canvas>
 
 <div id="login">
-  <form id="loginform">
+  <form id="loginform"><div id="loginbox">
     <h1>Dr. Quest <span>ล่าเชื้อป่วน</span></h1>
     <p class="tag">ทีมสหวิชาชีพบุกปราบเชื้อโรค ชวนเพื่อนมาเข้าเวรด้วยกัน!</p>
+    <div id="modenote"></div>
     <input id="nameinput" maxlength="16" placeholder="ชื่อตัวละคร" autocomplete="username" required><br>
     <input id="passinput" type="password" maxlength="64" placeholder="รหัสผ่าน (อย่างน้อย 4 ตัว)" autocomplete="current-password" required>
     <div id="loginnote">ชื่อใหม่ = สร้างตัวละครด้วยอาชีพที่เลือก · ชื่อเดิม = โหลดตัวละครที่บันทึกไว้</div>
     <div id="loginerror"></div>
     <div id="classes"></div>
     <button id="startbtn" type="submit">เข้าเวร!</button>
-  </form>
+  </div></form>
 </div>
 
 <div id="hud">
@@ -134,6 +173,8 @@
 </div>
 
 <script src="shared.js"></script>
+<script src="engine.js"></script>
+<script src="sprites.js"></script>
 <script src="client.js"></script>
 </body>
 </html>
