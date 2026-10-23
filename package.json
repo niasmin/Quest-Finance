@@ -1,0 +1,16 @@
+{
+  "name": "quest-online",
+  "version": "0.1.0",
+  "description": "Browser-based MMORPG prototype with an authoritative Node.js server",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
