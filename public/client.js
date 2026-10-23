@@ -1,12 +1,12 @@
 // Dr. Quest — browser client. Renders server state and sends player input.
-const { CLASSES, GERMS } = window.GAME_DATA;
+const { CLASSES, SLOTS, ITEMS, GERMS, ZONES, NPCS, QUESTS } = window.GAME_DATA;
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const $ = (id) => document.getElementById(id);
 
 let ws = null;
 let myId = null;
-let world = null;
+let world = null; // current zone definition
 let selectedClass = 'doctor';
 const players = new Map(); // id -> { ...serverState, rx, ry } (rx/ry = rendered position)
 const germs = new Map();
@@ -14,6 +14,7 @@ const effects = []; // floating text, projectiles, rings, beams
 const keys = new Set();
 const joystick = { dx: 0, dy: 0 };
 let lastSentInput = '';
+let me = { inventory: {}, equipment: {}, quests: { active: {}, done: [] }, stats: { atk: 0, def: 0, hp: 0, speed: 0 } };
 
 function resize() {
   canvas.width = window.innerWidth * devicePixelRatio;
@@ -49,11 +50,15 @@ renderClassPicker();
 $('loginform').addEventListener('submit', (e) => {
   e.preventDefault();
   const name = $('nameinput').value.trim();
+  const password = $('passinput').value;
+  $('loginerror').textContent = '';
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, classId: selectedClass }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, password, classId: selectedClass }));
   ws.onmessage = (ev) => handleMessage(JSON.parse(ev.data));
-  ws.onclose = () => addChat(null, 'การเชื่อมต่อหลุด — รีเฟรชหน้าเพื่อเข้าใหม่');
+  ws.onclose = () => {
+    if (myId) addChat(null, 'การเชื่อมต่อหลุด — รีเฟรชหน้าเพื่อเข้าใหม่');
+  };
 });
 
 function send(msg) {
@@ -72,14 +77,27 @@ function syncEntities(map, list) {
 
 function handleMessage(msg) {
   switch (msg.t) {
+    case 'error':
+      $('loginerror').textContent = msg.text;
+      break;
     case 'welcome':
       myId = msg.id;
-      world = msg.world;
+      enterZone(msg.zone);
       $('login').style.display = 'none';
-      $('hud').style.display = 'block';
-      $('chat').style.display = 'block';
-      $('help').style.display = 'block';
+      for (const id of ['hud', 'chat', 'help', 'zonename', 'bagbtn']) $(id).style.display = 'block';
       $('touch').classList.add('on');
+      if (msg.isNew) showDialog('director', 'ยินดีต้อนรับน้องใหม่! เดินมาหาผมที่หน้าโรงพยาบาลแล้วกด E (หรือปุ่ม "คุย") เพื่อรับภารกิจแรกนะ');
+      break;
+    case 'zone':
+      enterZone(msg.zone);
+      break;
+    case 'me':
+      me = msg;
+      renderBag();
+      renderQuests();
+      break;
+    case 'dialog':
+      showDialog(msg.npc, msg.text);
       break;
     case 'state':
       syncEntities(players, msg.players);
@@ -95,18 +113,127 @@ function handleMessage(msg) {
   }
 }
 
-// ---------- HUD & chat ----------
+function enterZone(zoneId) {
+  world = ZONES[zoneId];
+  world.id = zoneId;
+  players.clear();
+  germs.clear();
+  effects.length = 0;
+  $('zonename').textContent = world.name;
+}
+
+// ---------- HUD, bag, quests, dialog ----------
 function updateHud() {
-  const me = players.get(myId);
-  if (!me) return;
-  const cls = CLASSES[me.classId];
-  $('hudname').textContent = `${cls.icon} ${cls.name}${me.name} · Lv.${me.level}`;
-  $('hpbar').style.width = `${(me.hp / me.maxHp) * 100}%`;
-  $('hptext').textContent = me.dead ? 'กำลังพักฟื้นใน ICU…' : `HP ${me.hp} / ${me.maxHp}`;
-  $('xpbar').style.width = `${(me.xp / me.xpNext) * 100}%`;
-  $('xptext').textContent = `EXP ${me.xp} / ${me.xpNext}`;
-  $('skillinfo').textContent = `[Q] ${cls.skill.name} — ${me.skillCd > 0 ? `รอ ${me.skillCd.toFixed(1)} วิ` : 'พร้อมใช้!'}${me.buff ? ' · ⚡ บัฟโจมตีเร็ว' : ''}`;
-  $('skl').textContent = me.skillCd > 0 ? Math.ceil(me.skillCd) : 'สกิล';
+  const self = players.get(myId);
+  if (!self) return;
+  const cls = CLASSES[self.classId];
+  $('hudname').textContent = `${cls.icon} ${cls.name}${self.name} · Lv.${self.level}`;
+  $('hpbar').style.width = `${(self.hp / self.maxHp) * 100}%`;
+  $('hptext').textContent = self.dead ? 'กำลังพักฟื้นใน ICU…' : `HP ${self.hp} / ${self.maxHp}`;
+  $('xpbar').style.width = `${(self.xp / self.xpNext) * 100}%`;
+  $('xptext').textContent = `EXP ${self.xp} / ${self.xpNext}`;
+  $('skillinfo').textContent = `[Q] ${cls.skill.name} — ${self.skillCd > 0 ? `รอ ${self.skillCd.toFixed(1)} วิ` : 'พร้อมใช้!'}${self.buff ? ' · ⚡ บัฟโจมตีเร็ว' : ''}`;
+  $('skl').textContent = self.skillCd > 0 ? Math.ceil(self.skillCd) : 'สกิล';
+}
+
+function itemStatText(item) {
+  if (item.heal) return `ฟื้น HP ${item.heal}`;
+  const parts = [];
+  if (item.atk) parts.push(`ATK+${item.atk}`);
+  if (item.def) parts.push(`DEF+${item.def}`);
+  if (item.hp) parts.push(`HP+${item.hp}`);
+  if (item.speed) parts.push(`SPD+${item.speed}`);
+  return parts.join(' ');
+}
+
+function slotButton(html, onClick) {
+  const b = document.createElement('button');
+  b.className = onClick ? 'slot' : 'slot empty';
+  b.innerHTML = html;
+  if (onClick) b.addEventListener('click', onClick);
+  return b;
+}
+
+function renderBag() {
+  const bag = $('bag');
+  bag.innerHTML = '';
+  const s = me.stats;
+  const title = document.createElement('h3');
+  title.textContent = '🎒 อุปกรณ์ที่สวมใส่ (แตะเพื่อถอด)';
+  const stats = document.createElement('div');
+  stats.className = 'stats';
+  stats.textContent = `โบนัสจากอุปกรณ์: ATK+${s.atk} · DEF+${s.def} · HP+${s.hp} · SPD+${s.speed}`;
+  const gear = document.createElement('div');
+  gear.className = 'grid';
+  for (const [slot, label] of Object.entries(SLOTS)) {
+    const itemId = me.equipment[slot];
+    const item = ITEMS[itemId];
+    gear.append(item
+      ? slotButton(`<span class="ico">${item.icon}</span>${item.name}<small>${label} · ${itemStatText(item)}</small>`, () => send({ t: 'unequip', slot }))
+      : slotButton(`<span class="ico">▫️</span>ว่าง<small>${label}</small>`));
+  }
+  const invTitle = document.createElement('h3');
+  invTitle.textContent = 'กระเป๋า (แตะเพื่อใส่/ใช้)';
+  const inv = document.createElement('div');
+  inv.className = 'grid';
+  const entries = Object.entries(me.inventory);
+  if (!entries.length) inv.append(slotButton('ยังไม่มีของ — ไปตีเชื้อเลย!'));
+  for (const [itemId, count] of entries) {
+    const item = ITEMS[itemId];
+    const action = item.heal ? 'ใช้' : `ใส่ (${SLOTS[item.slot]})`;
+    inv.append(slotButton(`<span class="ico">${item.icon}</span>${item.name} x${count}<small>${action} · ${itemStatText(item)}</small>`,
+      () => send({ t: item.heal ? 'use' : 'equip', itemId })));
+  }
+  bag.append(title, stats, gear, invTitle, inv);
+
+  const heals = entries.filter(([id]) => ITEMS[id].heal).reduce((n, [, c]) => n + c, 0);
+  $('healbtn').textContent = heals ? `🧴${heals}` : '🧴';
+}
+
+function renderQuests() {
+  const box = $('quests');
+  box.innerHTML = '';
+  for (const [qid, progress] of Object.entries(me.quests.active)) {
+    const q = QUESTS[qid];
+    const ready = progress >= q.count;
+    const line = document.createElement('div');
+    line.className = ready ? 'q ready' : 'q';
+    line.textContent = ready
+      ? `✅ ${q.name} — กลับไปส่ง ${NPCS[q.npc].name}`
+      : `📜 ${q.name}: ${GERMS[q.target].name} ${progress}/${q.count}`;
+    box.append(line);
+  }
+}
+
+let dialogTimer = null;
+function showDialog(npcId, text) {
+  const npc = NPCS[npcId];
+  const box = $('dialog');
+  box.querySelector('.who').textContent = `${npc.icon} ${npc.name}`;
+  box.querySelector('.text').textContent = text;
+  box.style.display = 'block';
+  clearTimeout(dialogTimer);
+  dialogTimer = setTimeout(() => (box.style.display = 'none'), 12000);
+}
+$('dialog').addEventListener('click', () => ($('dialog').style.display = 'none'));
+
+function toggleBag() {
+  const bag = $('bag');
+  const open = bag.style.display !== 'block';
+  bag.style.display = open ? 'block' : 'none';
+  $('help').style.display = open ? 'none' : 'block';
+}
+$('bagbtn').addEventListener('click', toggleBag);
+
+function useBestHeal() {
+  const self = players.get(myId);
+  if (!self) return;
+  const missing = self.maxHp - self.hp;
+  const heals = Object.keys(me.inventory).filter((id) => ITEMS[id].heal).sort((a, b) => ITEMS[a].heal - ITEMS[b].heal);
+  if (!heals.length) return;
+  // Smallest potion that covers the missing HP, otherwise the biggest one
+  const itemId = heals.find((id) => ITEMS[id].heal >= missing) || heals[heals.length - 1];
+  send({ t: 'use', itemId });
 }
 
 function addChat(from, text) {
@@ -150,8 +277,9 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.code === 'KeyQ') {
-    send({ t: 'skill' });
+  const actions = { KeyQ: () => send({ t: 'skill' }), KeyE: () => send({ t: 'talk' }), KeyH: useBestHeal, KeyI: toggleBag };
+  if (actions[e.code]) {
+    actions[e.code]();
     return;
   }
   keys.add(e.code);
@@ -209,14 +337,22 @@ $('skl').addEventListener('touchstart', (e) => {
   send({ t: 'skill' });
   e.preventDefault();
 });
+$('talkbtn').addEventListener('touchstart', (e) => {
+  send({ t: 'talk' });
+  e.preventDefault();
+});
+$('healbtn').addEventListener('touchstart', (e) => {
+  useBestHeal();
+  e.preventDefault();
+});
 
 // ---------- rendering ----------
-function drawWorld(camX, camY, w, h) {
-  // Clinic floor tiles
-  ctx.fillStyle = '#cfe7e4';
+function drawWorld(camX, camY, w, h, time) {
+  const [floorA, floorB] = world.floor;
+  ctx.fillStyle = floorA;
   ctx.fillRect(0, 0, w, h);
   const tile = 80;
-  ctx.fillStyle = '#c2dfdb';
+  ctx.fillStyle = floorB;
   const startX = Math.floor(camX / tile) * tile;
   const startY = Math.floor(camY / tile) * tile;
   for (let x = startX; x < camX + w; x += tile) {
@@ -229,34 +365,87 @@ function drawWorld(camX, camY, w, h) {
   ctx.lineWidth = 6;
   ctx.strokeRect(-camX, -camY, world.width, world.height);
 
-  // Hospital (safe zone)
-  const t = world.town;
+  // Safe area
+  const t = world.safe;
   const tx = t.x - camX;
   const ty = t.y - camY;
   ctx.beginPath();
   ctx.arc(tx, ty, t.r, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = 'rgba(255,255,255,.9)';
   ctx.fill();
   ctx.strokeStyle = '#3ee0c5';
   ctx.lineWidth = 6;
   ctx.stroke();
-  ctx.fillStyle = 'rgba(229,72,77,.18)';
-  ctx.fillRect(tx - 22, ty - 70, 44, 140);
-  ctx.fillRect(tx - 70, ty - 22, 140, 44);
+  if (world.id === 'hospital') {
+    ctx.fillStyle = 'rgba(229,72,77,.18)';
+    ctx.fillRect(tx - 22, ty - 70, 44, 140);
+    ctx.fillRect(tx - 70, ty - 22, 140, 44);
+  }
   ctx.fillStyle = '#1f6f78';
-  ctx.font = '600 22px Mitr';
+  ctx.font = '600 20px Mitr';
   ctx.textAlign = 'center';
-  ctx.fillText('🏥 โรงพยาบาล', tx, ty - t.r + 36);
+  ctx.fillText(t.label, tx, ty - t.r + 32);
 
   // Boss lair
-  const b = world.bossLair;
+  const b = world.boss;
   ctx.beginPath();
   ctx.arc(b.x - camX, b.y - camY, 180, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(139,30,63,.18)';
+  ctx.fillStyle = 'rgba(139,30,63,.15)';
   ctx.fill();
-  ctx.fillStyle = 'rgba(139,30,63,.7)';
+  ctx.fillStyle = 'rgba(139,30,63,.75)';
   ctx.font = '600 20px Mitr';
-  ctx.fillText('☠ ห้องแล็บเชื้อหลุด', b.x - camX, b.y - camY - 150);
+  ctx.fillText(b.label, b.x - camX, b.y - camY - 150);
+
+  // Portals
+  for (const p of world.portals) {
+    const px = p.x - camX;
+    const py = p.y - camY;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(px, py, 18 + i * 9 + Math.sin(time * 3 + i) * 3, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(123, 97, 255, ${0.8 - i * 0.22})`;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#4b3bb3';
+    ctx.font = '600 15px Mitr';
+    ctx.fillText(p.minLevel ? `${p.label} (Lv.${p.minLevel}+)` : p.label, px, py - 46);
+  }
+
+  // NPCs
+  for (const [npcId, npc] of Object.entries(NPCS)) {
+    if (npc.zone !== world.id) continue;
+    const nx = npc.x - camX;
+    const ny = npc.y - camY + Math.sin(time * 2) * 2;
+    ctx.font = '32px sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(npc.icon, nx, ny);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#102030';
+    ctx.font = '600 13px Sarabun';
+    ctx.fillText(npc.name, nx, ny - 26);
+    const marker = npcMarker(npcId);
+    if (marker) {
+      ctx.font = '700 22px Mitr';
+      ctx.fillStyle = marker === '?' ? '#2ecc71' : '#f5a623';
+      ctx.fillText(marker, nx, ny - 44);
+    }
+  }
+}
+
+// "!" = new quest available, "?" = quest ready to turn in
+function npcMarker(npcId) {
+  const { active, done } = me.quests;
+  let offer = false;
+  for (const [qid, q] of Object.entries(QUESTS)) {
+    if (q.npc !== npcId) continue;
+    if (qid in active) {
+      if (active[qid] >= q.count) return '?';
+      return null;
+    }
+    if (!offer && !done.includes(qid) && (!q.requires || done.includes(q.requires))) offer = true;
+  }
+  return offer ? '!' : null;
 }
 
 function drawHpBar(x, y, hp, maxHp, width) {
@@ -309,6 +498,15 @@ function drawGermBody(type, x, y, time, id) {
     }
     ctx.stroke();
     ctx.restore();
+  } else if (type.shape === 'worm') {
+    for (let i = 5; i >= 0; i--) {
+      const sx = x - i * s * 0.55;
+      const sy = y + Math.sin(time * 5 + i * 0.9 + id) * s * 0.25;
+      ctx.beginPath();
+      ctx.arc(sx, sy, s * (0.75 - i * 0.06), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   } else {
     for (let i = 0; i < 7; i++) {
       const a = (i / 7) * Math.PI * 2;
@@ -394,7 +592,7 @@ function drawEffects(camX, camY, dt) {
   for (let i = effects.length - 1; i >= 0; i--) {
     const fx = effects[i];
     fx.age += dt;
-    const life = fx.kind === 'skillname' || fx.kind === 'text' ? 1.4 : 0.9;
+    const life = { skillname: 1.4, text: 1.4, loot: 2 }[fx.kind] || 0.9;
     if (fx.age > life) {
       effects.splice(i, 1);
       continue;
@@ -454,10 +652,10 @@ function drawEffects(camX, camY, dt) {
       ctx.globalAlpha = 1;
     } else {
       // dmg, hurt, heal, text — floating labels
-      const label = { dmg: `-${fx.value}`, hurt: `-${fx.value}`, heal: `+${fx.value}`, text: fx.text }[fx.kind];
-      const color = { dmg: '#ff9f1c', hurt: '#e5484d', heal: '#2ecc71', text: '#1f6f78' }[fx.kind];
+      const label = { dmg: `-${fx.value}`, hurt: `-${fx.value}`, heal: `+${fx.value}`, text: fx.text, loot: `ได้ ${fx.text}` }[fx.kind];
+      const color = { dmg: '#ff9f1c', hurt: '#e5484d', heal: '#2ecc71', text: '#1f6f78', loot: '#7b61ff' }[fx.kind];
       ctx.globalAlpha = 1 - k;
-      ctx.font = fx.kind === 'text' ? '600 15px Mitr' : '700 18px Sarabun';
+      ctx.font = fx.kind === 'text' || fx.kind === 'loot' ? '600 15px Mitr' : '700 18px Sarabun';
       ctx.lineWidth = 3;
       ctx.strokeStyle = '#fff';
       const ly = fx.y - camY - 26 - fx.age * 40;
@@ -477,9 +675,11 @@ function drawMinimap(w, h) {
   ctx.fillStyle = 'rgba(16,30,44,.85)';
   ctx.fillRect(x, y, size, size);
   ctx.beginPath();
-  ctx.arc(x + world.town.x * s, y + world.town.y * s, world.town.r * s, 0, Math.PI * 2);
+  ctx.arc(x + world.safe.x * s, y + world.safe.y * s, world.safe.r * s, 0, Math.PI * 2);
   ctx.fillStyle = '#fff';
   ctx.fill();
+  ctx.fillStyle = '#7b61ff';
+  for (const p of world.portals) ctx.fillRect(x + p.x * s - 3, y + p.y * s - 3, 6, 6);
   for (const g of germs.values()) {
     const boss = GERMS[g.kind].boss;
     ctx.fillStyle = boss ? '#ff2d6f' : '#e5484d';
@@ -514,12 +714,12 @@ function frame(now) {
       e.ry += (e.y - e.ry) * k;
     }
 
-    const me = players.get(myId);
-    const camX = (me ? me.rx : world.town.x) - w / 2;
-    const camY = (me ? me.ry : world.town.y) - h / 2;
+    const self = players.get(myId);
+    const camX = (self ? self.rx : world.safe.x) - w / 2;
+    const camY = (self ? self.ry : world.safe.y) - h / 2;
     const time = now / 1000;
 
-    drawWorld(camX, camY, w, h);
+    drawWorld(camX, camY, w, h, time);
     for (const g of germs.values()) drawGerm(g, camX, camY, time);
     for (const p of players.values()) drawPlayer(p, camX, camY);
     drawEffects(camX, camY, dt);

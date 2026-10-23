@@ -16,7 +16,9 @@
   #login h1 { margin: 0; font-family: 'Mitr', sans-serif; font-size: 44px; color: var(--accent); }
   #login h1 span { color: #ff6b6b; }
   #login .tag { margin: 4px 0 20px; opacity: .8; }
-  #nameinput { width: min(360px, 100%); padding: 12px 14px; border-radius: 10px; border: none; font: inherit; font-size: 16px; background: #183242; color: var(--text); }
+  #nameinput, #passinput { width: min(360px, 100%); padding: 12px 14px; border-radius: 10px; border: none; font: inherit; font-size: 16px; background: #183242; color: var(--text); margin: 4px 0; }
+  #loginnote { font-size: 13px; opacity: .75; margin-top: 6px; }
+  #loginerror { color: #ff8a8a; font-weight: 600; min-height: 1.4em; margin-top: 6px; }
   #classes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin: 18px 0; text-align: left; }
   .cls { background: var(--panel); border: 2px solid transparent; border-radius: 12px; padding: 12px; cursor: pointer; transition: transform .1s, border-color .1s; }
   .cls:hover { transform: translateY(-2px); }
@@ -42,7 +44,29 @@
   #chatlog b { color: #9fd0ff; }
   #chatinput { width: 100%; padding: 8px 12px; border: none; border-radius: 0 0 12px 12px; background: #183242; color: var(--text); font: inherit; }
 
-  #help { position: fixed; top: 12px; right: 12px; background: var(--panel); padding: 8px 12px; border-radius: 10px; font-size: 13px; opacity: .9; display: none; }
+  #zonename { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); padding: 6px 16px; border-radius: 20px; font-family: 'Mitr', sans-serif; display: none; }
+  #quests { margin-top: 8px; font-size: 13px; border-top: 1px solid rgba(255,255,255,.15); padding-top: 6px; }
+  #quests:empty { display: none; }
+  #quests .q { margin-top: 3px; }
+  #quests .q.ready { color: #ffd166; }
+
+  #bagbtn { position: fixed; top: 12px; right: 12px; z-index: 3; width: 48px; height: 48px; border-radius: 12px; border: none; background: var(--panel); font-size: 24px; cursor: pointer; display: none; }
+  #bag { position: fixed; top: 68px; right: 12px; width: min(340px, calc(100vw - 24px)); max-height: calc(100vh - 90px); overflow-y: auto; background: var(--panel); border-radius: 12px; padding: 12px; display: none; z-index: 3; }
+  #bag h3 { margin: 0 0 8px; font-family: 'Mitr', sans-serif; font-size: 16px; }
+  #bag .stats { font-size: 13px; opacity: .85; margin-bottom: 8px; }
+  #bag .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; margin-bottom: 10px; }
+  #bag .slot { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 6px 8px; font-size: 13px; cursor: pointer; text-align: left; color: var(--text); font-family: inherit; }
+  #bag .slot:hover { border-color: var(--accent); }
+  #bag .slot .ico { font-size: 18px; margin-right: 4px; }
+  #bag .slot small { display: block; opacity: .7; }
+  #bag .empty { opacity: .5; cursor: default; }
+
+  #dialog { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(520px, calc(100vw - 24px)); background: rgba(255,255,255,.96); color: #102030; border-radius: 14px; padding: 14px 16px; box-shadow: 0 10px 40px rgba(0,0,0,.4); display: none; z-index: 4; cursor: pointer; }
+  #dialog .who { font-family: 'Mitr', sans-serif; font-weight: 600; color: #1f6f78; margin-bottom: 4px; }
+  #dialog .text { white-space: pre-line; line-height: 1.5; }
+  #dialog small { display: block; margin-top: 6px; opacity: .55; }
+
+  #help { position: fixed; top: 68px; right: 12px; background: var(--panel); padding: 8px 12px; border-radius: 10px; font-size: 13px; opacity: .9; display: none; }
 
   #touch { display: none; }
   @media (pointer: coarse) {
@@ -55,6 +79,11 @@
     #atk, #skl { position: fixed; border-radius: 50%; border: none; color: #fff; font: inherit; font-weight: 700; }
     #atk { right: 28px; bottom: 36px; width: 90px; height: 90px; background: rgba(229,72,77,.8); font-size: 18px; }
     #skl { right: 128px; bottom: 30px; width: 70px; height: 70px; background: rgba(62,224,197,.8); color: #0c1a24; font-size: 15px; }
+    #talkbtn, #healbtn { position: fixed; width: 56px; height: 56px; border-radius: 50%; border: none; font: inherit; font-weight: 700; background: rgba(255,255,255,.85); color: #0c1a24; }
+    #talkbtn { right: 40px; bottom: 140px; }
+    #healbtn { right: 110px; bottom: 116px; font-size: 22px; }
+    #help { display: none !important; }
+    #bag { top: 68px; }
   }
 </style>
 </head>
@@ -65,7 +94,10 @@
   <form id="loginform">
     <h1>Dr. Quest <span>ล่าเชื้อป่วน</span></h1>
     <p class="tag">ทีมสหวิชาชีพบุกปราบเชื้อโรค ชวนเพื่อนมาเข้าเวรด้วยกัน!</p>
-    <input id="nameinput" maxlength="16" placeholder="ชื่อตัวละคร" autocomplete="off" required>
+    <input id="nameinput" maxlength="16" placeholder="ชื่อตัวละคร" autocomplete="username" required><br>
+    <input id="passinput" type="password" maxlength="64" placeholder="รหัสผ่าน (อย่างน้อย 4 ตัว)" autocomplete="current-password" required>
+    <div id="loginnote">ชื่อใหม่ = สร้างตัวละครด้วยอาชีพที่เลือก · ชื่อเดิม = โหลดตัวละครที่บันทึกไว้</div>
+    <div id="loginerror"></div>
     <div id="classes"></div>
     <button id="startbtn" type="submit">เข้าเวร!</button>
   </form>
@@ -78,9 +110,15 @@
   <div class="bar"><div id="xpbar"></div></div>
   <small id="xptext"></small>
   <div id="skillinfo"></div>
+  <div id="quests"></div>
 </div>
 
-<div id="help">WASD / ลูกศร = เดิน · Space = โจมตี · Q = สกิล · Enter = แชท<br>โรงพยาบาล (วงกลมกลางแผนที่) ปลอดภัยและฟื้น HP เร็ว<br>ยิ่งไกลโรงพยาบาลเชื้อยิ่งโหด · บอสอยู่มุมซ้ายบน ☠</div>
+<div id="zonename"></div>
+<button id="bagbtn" title="กระเป๋า (I)">🎒</button>
+<div id="bag"></div>
+<div id="dialog"><div class="who"></div><div class="text"></div><small>แตะเพื่อปิด</small></div>
+
+<div id="help">WASD / ลูกศร = เดิน · Space = โจมตี · Q = สกิล<br>E = คุยกับ NPC · H = ใช้ยาฟื้น HP · I = กระเป๋า · Enter = แชท<br>เดินเข้าประตูวาร์ปเพื่อไปดันเจี้ยน · เขตพักปลอดภัยและฟื้น HP เร็ว</div>
 
 <div id="chat">
   <div id="chatlog"></div>
@@ -90,6 +128,8 @@
 <div id="touch">
   <div id="joy"><div id="joyknob"></div></div>
   <button id="skl">สกิล</button>
+  <button id="talkbtn">คุย</button>
+  <button id="healbtn">🧴</button>
   <button id="atk">โจมตี</button>
 </div>
 
