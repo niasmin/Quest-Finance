@@ -9,6 +9,10 @@ const $ = (id) => document.getElementById(id);
 
 const params = new URLSearchParams(location.search);
 const OFFLINE = params.has('offline') || location.protocol === 'file:' || location.hostname.endsWith('github.io');
+const TOUCH = matchMedia('(pointer: coarse)').matches;
+// Phones zoom out to 2/3 so more of the map fits; 2/3 keeps every art pixel a whole number of device pixels
+let ZOOM = 1;
+let SNAP = 1; // world-pixel grid that sprites and the camera snap to, so pixels stay crisp when zoomed
 
 let transport = null; // { send(msg) }
 let localGame = null;
@@ -28,6 +32,8 @@ function resize() {
   canvas.height = window.innerHeight * devicePixelRatio;
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   ctx.imageSmoothingEnabled = false;
+  ZOOM = TOUCH && Math.min(window.innerWidth, window.innerHeight) < 700 ? 2 / 3 : 1;
+  SNAP = ZOOM < 1 ? SPR.PX : 1;
 }
 window.addEventListener('resize', resize);
 resize();
@@ -163,6 +169,7 @@ function handleMessage(msg) {
       enterZone(msg.zone);
       $('login').style.display = 'none';
       for (const id of ['hud', 'chat', 'help', 'zonename', 'bagbtn']) $(id).style.display = 'block';
+      if (TOUCH) $('chatbtn').style.display = 'block';
       $('touch').classList.add('on');
       if (msg.isNew) showDialog('director', 'ยินดีต้อนรับน้องใหม่! เดินมาหาผมที่หน้าโรงพยาบาลแล้วกด E (หรือปุ่ม "คุย") เพื่อรับภารกิจแรกนะ');
       break;
@@ -198,6 +205,7 @@ function enterZone(zoneId) {
   germs.clear();
   effects.length = 0;
   $('zonename').textContent = world.name;
+  $('hudzone').textContent = `📍 ${world.name}`;
 }
 
 // ---------- HUD, bag, quests, dialog ----------
@@ -212,6 +220,7 @@ function updateHud() {
   $('xptext').textContent = `EXP ${self.xp} / ${self.xpNext}`;
   $('skillinfo').textContent = `[Q] ${cls.skill.name} — ${self.skillCd > 0 ? `รอ ${self.skillCd.toFixed(1)} วิ` : 'พร้อมใช้!'}${self.buff ? ' · ⚡ บัฟโจมตีเร็ว' : ''}`;
   $('skl').textContent = self.skillCd > 0 ? Math.ceil(self.skillCd) : 'สกิล';
+  $('skl').classList.toggle('cooldown', self.skillCd > 0);
 }
 
 function itemStatText(item) {
@@ -299,6 +308,7 @@ function toggleBag() {
   const bag = $('bag');
   const open = bag.style.display !== 'block';
   bag.style.display = open ? 'block' : 'none';
+  if (open) $('chat').classList.remove('open');
   $('help').style.display = open ? 'none' : 'block';
 }
 $('bagbtn').addEventListener('click', toggleBag);
@@ -326,11 +336,34 @@ function addChat(from, text) {
   }
   const log = $('chatlog');
   log.append(line);
+  if (TOUCH && !$('chat').classList.contains('open')) showToast(line.textContent);
   while (log.children.length > 60) log.firstChild.remove();
   log.scrollTop = log.scrollHeight;
 }
 
+// Phones: chat lives behind the 💬 button; new lines pop up as a toast meanwhile
+let toastTimer = null;
+function showToast(text) {
+  const toast = $('toast');
+  toast.textContent = text;
+  toast.classList.add('show');
+  $('chatbtn').classList.add('unread');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 3500);
+}
+
+$('chatbtn').addEventListener('click', () => {
+  const open = $('chat').classList.toggle('open');
+  $('chatbtn').classList.remove('unread');
+  $('toast').classList.remove('show');
+  if (open) {
+    $('bag').style.display = 'none';
+    $('chatlog').scrollTop = $('chatlog').scrollHeight;
+  }
+});
+
 const chatInput = $('chatinput');
+if (TOUCH) chatInput.placeholder = 'แตะเพื่อพิมพ์แชท…';
 chatInput.addEventListener('keydown', (e) => {
   e.stopPropagation();
   if (e.key === 'Enter') {
@@ -428,21 +461,26 @@ $('healbtn').addEventListener('touchstart', (e) => {
 const VOID_COLOR = '#0c1424';
 const LAIR_RADIUS = 180;
 
+// Text keeps its on-screen size when the world is zoomed out
 function label(text, x, y, color = '#ffffff', font = '600 13px Sarabun') {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1 / ZOOM, 1 / ZOOM);
   ctx.font = font;
   ctx.textAlign = 'center';
   ctx.lineJoin = 'round';
   ctx.lineWidth = 3;
   ctx.strokeStyle = '#000';
-  ctx.strokeText(text, x, y);
+  ctx.strokeText(text, 0, 0);
   ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
 }
 
 // Draw a sprite with its top-left at (x, y), optionally mirrored
 function drawSprite(img, x, y, flip = false, w = img.width, h = img.height) {
-  x = Math.round(x);
-  y = Math.round(y);
+  x = Math.round(x / SNAP) * SNAP;
+  y = Math.round(y / SNAP) * SNAP;
   if (!flip) {
     ctx.drawImage(img, x, y, w, h);
     return;
@@ -654,36 +692,25 @@ function drawEffects(camX, camY, dt) {
       const p = players.get(fx.id);
       if (!p) continue;
       ctx.globalAlpha = 1 - k;
-      ctx.font = '600 16px Mitr';
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#102030';
-      const sy = p.ry - camY - 82 - fx.age * 20;
-      ctx.strokeText(fx.text, p.rx - camX, sy);
-      ctx.fillStyle = '#3ee0c5';
-      ctx.fillText(fx.text, p.rx - camX, sy);
+      label(fx.text, p.rx - camX, p.ry - camY - 82 - fx.age * 20, '#3ee0c5', '600 16px Mitr');
       ctx.globalAlpha = 1;
     } else {
       // dmg, hurt, heal, text — floating labels
-      const label = { dmg: `-${fx.value}`, hurt: `-${fx.value}`, heal: `+${fx.value}`, text: fx.text, loot: `ได้ ${fx.text}` }[fx.kind];
+      const text = { dmg: `-${fx.value}`, hurt: `-${fx.value}`, heal: `+${fx.value}`, text: fx.text, loot: `ได้ ${fx.text}` }[fx.kind];
       const color = { dmg: '#ffd166', hurt: '#ff5c5c', heal: '#4cd964', text: '#ffffff', loot: '#c9b8ff' }[fx.kind];
+      const font = fx.kind === 'text' || fx.kind === 'loot' ? '600 15px Mitr' : '12px "Press Start 2P"';
       ctx.globalAlpha = 1 - k;
-      ctx.font = fx.kind === 'text' || fx.kind === 'loot' ? '600 15px Mitr' : '12px "Press Start 2P"';
-      ctx.lineWidth = 4;
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#000';
-      const ly = fx.y - camY - 26 - fx.age * 40;
-      ctx.strokeText(label, fx.x - camX, ly);
-      ctx.fillStyle = color;
-      ctx.fillText(label, fx.x - camX, ly);
+      label(text, fx.x - camX, fx.y - camY - 26 - fx.age * 40, color, font);
       ctx.globalAlpha = 1;
     }
   }
 }
 
 function drawMinimap(w, h) {
-  const size = 140;
-  const x = w - size - 12;
-  const y = h - size - 12;
+  // Phones: top-right under the buttons, clear of the touch controls
+  const size = TOUCH ? 96 : 140;
+  const x = w - size - (TOUCH ? 8 : 12);
+  const y = TOUCH ? $('bagbtn').getBoundingClientRect().bottom + 8 : h - size - 12;
   const s = size / world.width;
   ctx.fillStyle = 'rgba(16,30,44,.85)';
   ctx.fillRect(x, y, size, size);
@@ -728,17 +755,26 @@ function frame(now) {
     }
 
     const self = players.get(myId);
-    const camX = Math.round((self ? self.rx : world.safe.x) - w / 2);
-    const camY = Math.round((self ? self.ry : world.safe.y) - h / 2);
+    const vw = w / ZOOM; // visible world size
+    const vh = h / ZOOM;
+    const camX = Math.round(((self ? self.rx : world.safe.x) - vw / 2) / SNAP) * SNAP;
+    const camY = Math.round(((self ? self.ry : world.safe.y) - vh / 2) / SNAP) * SNAP;
     const time = now / 1000;
 
-    drawWorld(camX, camY, w, h, time);
+    ctx.save();
+    ctx.scale(ZOOM, ZOOM);
+    drawWorld(camX, camY, vw, vh, time);
     for (const g of germs.values()) drawGerm(g, camX, camY, time);
     // Draw back-to-front so lower characters overlap higher ones
     const sorted = [...players.values()].sort((a, b) => a.ry - b.ry);
     for (const p of sorted) drawPlayer(p, camX, camY, time, now);
     drawEffects(camX, camY, dt);
+    ctx.restore();
     drawMinimap(w, h);
+
+    // Light up the talk button when an NPC is in reach
+    const near = self && Object.values(NPCS).some((n) => n.zone === world.id && Math.hypot(n.x - self.x, n.y - self.y) <= 90);
+    $('talkbtn').classList.toggle('near', Boolean(near));
   } else {
     ctx.fillStyle = '#0c1a24';
     ctx.fillRect(0, 0, w, h);
