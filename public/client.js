@@ -170,6 +170,7 @@ function handleMessage(msg) {
       $('login').style.display = 'none';
       for (const id of ['hud', 'chat', 'help', 'zonename', 'bagbtn']) $(id).style.display = 'block';
       if (TOUCH) $('chatbtn').style.display = 'block';
+      $('autobtn').style.display = 'block';
       $('touch').classList.add('on');
       if (msg.isNew) showDialog('director', 'ยินดีต้อนรับน้องใหม่! เดินมาหาผมที่หน้าโรงพยาบาลแล้วกด E (หรือปุ่ม "คุย") เพื่อรับภารกิจแรกนะ');
       break;
@@ -362,6 +363,53 @@ $('chatbtn').addEventListener('click', () => {
   }
 });
 
+// ---------- auto mode ----------
+// Attacks, casts and drinks potions on the player's behalf; they only steer.
+// On by default on phones; the choice is remembered per browser.
+let autoMode = TOUCH;
+try {
+  const saved = localStorage.getItem('drquest:auto');
+  if (saved !== null) autoMode = saved === '1';
+} catch {
+  // Storage blocked: keep the default
+}
+let autoTimer = 0;
+
+function setAuto(on) {
+  autoMode = on;
+  $('autobtn').classList.toggle('on', on);
+  $('autobtn').textContent = on ? 'AUTO✓' : 'AUTO';
+  try {
+    localStorage.setItem('drquest:auto', on ? '1' : '0');
+  } catch {
+    // Storage blocked: the setting just won't persist
+  }
+}
+setAuto(autoMode);
+$('autobtn').addEventListener('click', () => setAuto(!autoMode));
+
+function autoPlay(dt) {
+  autoTimer -= dt;
+  if (!autoMode || autoTimer > 0) return;
+  autoTimer = 0.15;
+  const self = players.get(myId);
+  if (!self || self.dead) return;
+
+  const cls = CLASSES[self.classId];
+  const skill = cls.skill;
+  let nearest = Infinity;
+  for (const g of germs.values()) nearest = Math.min(nearest, Math.hypot(g.x - self.x, g.y - self.y));
+  const hpRatio = self.hp / self.maxHp;
+
+  // The server enforces every cooldown, so extra requests are simply ignored
+  if (hpRatio < 0.35) useBestHeal();
+  if (self.skillCd <= 0) {
+    const reach = skill.range || skill.radius || skill.length;
+    if (skill.type === 'heal' ? hpRatio < 0.7 : nearest <= reach) send({ t: 'skill' });
+  }
+  if (nearest <= cls.range) send({ t: 'attack' });
+}
+
 const chatInput = $('chatinput');
 if (TOUCH) chatInput.placeholder = 'แตะเพื่อพิมพ์แชท…';
 chatInput.addEventListener('keydown', (e) => {
@@ -388,7 +436,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  const actions = { KeyQ: () => send({ t: 'skill' }), KeyE: () => send({ t: 'talk' }), KeyH: useBestHeal, KeyI: toggleBag };
+  const actions = { KeyQ: () => send({ t: 'skill' }), KeyE: () => send({ t: 'talk' }), KeyH: useBestHeal, KeyI: toggleBag, KeyR: () => setAuto(!autoMode) };
   if (actions[e.code]) {
     actions[e.code]();
     return;
@@ -746,6 +794,8 @@ function frame(now) {
       lastSentInput = key;
       send({ t: 'input', ...input });
     }
+
+    autoPlay(dt);
 
     // Smoothly interpolate toward server positions
     const k = Math.min(1, dt * 12);
