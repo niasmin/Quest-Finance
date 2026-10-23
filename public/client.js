@@ -1,4 +1,5 @@
-// Quest Online — browser client. Renders server state and sends player input.
+// Dr. Quest — browser client. Renders server state and sends player input.
+const { CLASSES, GERMS } = window.GAME_DATA;
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const $ = (id) => document.getElementById(id);
@@ -6,10 +7,10 @@ const $ = (id) => document.getElementById(id);
 let ws = null;
 let myId = null;
 let world = null;
-let monsterTypes = {};
+let selectedClass = 'doctor';
 const players = new Map(); // id -> { ...serverState, rx, ry } (rx/ry = rendered position)
-const monsters = new Map();
-const effects = []; // floating numbers and swing arcs
+const germs = new Map();
+const effects = []; // floating text, projectiles, rings, beams
 const keys = new Set();
 const joystick = { dx: 0, dy: 0 };
 let lastSentInput = '';
@@ -22,13 +23,35 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+// ---------- class picker ----------
+function renderClassPicker() {
+  const box = $('classes');
+  for (const [id, c] of Object.entries(CLASSES)) {
+    const card = document.createElement('div');
+    card.className = `cls${id === selectedClass ? ' sel' : ''}`;
+    card.innerHTML = `
+      <div class="head"><span class="icon">${c.icon}</span>${c.name}</div>
+      <div class="meta">
+        อาวุธ: <b>${c.weapon}</b> (${c.ranged ? 'ระยะไกล' : 'ระยะประชิด'})<br>
+        สกิล: <b>${c.skill.name}</b><br>${c.skill.desc}
+      </div>`;
+    card.addEventListener('click', () => {
+      selectedClass = id;
+      for (const el of box.children) el.classList.remove('sel');
+      card.classList.add('sel');
+    });
+    box.append(card);
+  }
+}
+renderClassPicker();
+
 // ---------- connection ----------
 $('loginform').addEventListener('submit', (e) => {
   e.preventDefault();
   const name = $('nameinput').value.trim();
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, classId: selectedClass }));
   ws.onmessage = (ev) => handleMessage(JSON.parse(ev.data));
   ws.onclose = () => addChat(null, 'การเชื่อมต่อหลุด — รีเฟรชหน้าเพื่อเข้าใหม่');
 });
@@ -52,7 +75,6 @@ function handleMessage(msg) {
     case 'welcome':
       myId = msg.id;
       world = msg.world;
-      monsterTypes = msg.monsterTypes;
       $('login').style.display = 'none';
       $('hud').style.display = 'block';
       $('chat').style.display = 'block';
@@ -61,7 +83,7 @@ function handleMessage(msg) {
       break;
     case 'state':
       syncEntities(players, msg.players);
-      syncEntities(monsters, msg.monsters);
+      syncEntities(germs, msg.germs);
       updateHud();
       break;
     case 'chat':
@@ -77,11 +99,14 @@ function handleMessage(msg) {
 function updateHud() {
   const me = players.get(myId);
   if (!me) return;
-  $('hudname').textContent = `${me.name}  ·  Lv.${me.level}`;
+  const cls = CLASSES[me.classId];
+  $('hudname').textContent = `${cls.icon} ${cls.name}${me.name} · Lv.${me.level}`;
   $('hpbar').style.width = `${(me.hp / me.maxHp) * 100}%`;
-  $('hptext').textContent = me.dead ? 'กำลังเกิดใหม่…' : `HP ${me.hp} / ${me.maxHp}`;
+  $('hptext').textContent = me.dead ? 'กำลังพักฟื้นใน ICU…' : `HP ${me.hp} / ${me.maxHp}`;
   $('xpbar').style.width = `${(me.xp / me.xpNext) * 100}%`;
   $('xptext').textContent = `EXP ${me.xp} / ${me.xpNext}`;
+  $('skillinfo').textContent = `[Q] ${cls.skill.name} — ${me.skillCd > 0 ? `รอ ${me.skillCd.toFixed(1)} วิ` : 'พร้อมใช้!'}${me.buff ? ' · ⚡ บัฟโจมตีเร็ว' : ''}`;
+  $('skl').textContent = me.skillCd > 0 ? Math.ceil(me.skillCd) : 'สกิล';
 }
 
 function addChat(from, text) {
@@ -114,7 +139,7 @@ chatInput.addEventListener('keydown', (e) => {
 
 // ---------- input ----------
 window.addEventListener('keydown', (e) => {
-  if (!myId || document.activeElement === $('nameinput')) return;
+  if (!myId) return;
   if (e.key === 'Enter') {
     chatInput.focus();
     e.preventDefault();
@@ -123,6 +148,10 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     send({ t: 'attack' });
     e.preventDefault();
+    return;
+  }
+  if (e.code === 'KeyQ') {
+    send({ t: 'skill' });
     return;
   }
   keys.add(e.code);
@@ -176,15 +205,18 @@ $('atk').addEventListener('touchstart', (e) => {
   send({ t: 'attack' });
   e.preventDefault();
 });
+$('skl').addEventListener('touchstart', (e) => {
+  send({ t: 'skill' });
+  e.preventDefault();
+});
 
 // ---------- rendering ----------
 function drawWorld(camX, camY, w, h) {
-  ctx.fillStyle = '#2f5d3a';
+  // Clinic floor tiles
+  ctx.fillStyle = '#cfe7e4';
   ctx.fillRect(0, 0, w, h);
-
-  // Grass tiles
   const tile = 80;
-  ctx.fillStyle = '#336640';
+  ctx.fillStyle = '#c2dfdb';
   const startX = Math.floor(camX / tile) * tile;
   const startY = Math.floor(camY / tile) * tile;
   for (let x = startX; x < camX + w; x += tile) {
@@ -193,24 +225,38 @@ function drawWorld(camX, camY, w, h) {
     }
   }
 
-  // World border
-  ctx.strokeStyle = '#111';
+  ctx.strokeStyle = '#335';
   ctx.lineWidth = 6;
   ctx.strokeRect(-camX, -camY, world.width, world.height);
 
-  // Town
+  // Hospital (safe zone)
   const t = world.town;
+  const tx = t.x - camX;
+  const ty = t.y - camY;
   ctx.beginPath();
-  ctx.arc(t.x - camX, t.y - camY, t.r, 0, Math.PI * 2);
-  ctx.fillStyle = '#b79b6c';
+  ctx.arc(tx, ty, t.r, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
   ctx.fill();
-  ctx.strokeStyle = '#7d6440';
-  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#3ee0c5';
+  ctx.lineWidth = 6;
   ctx.stroke();
-  ctx.fillStyle = 'rgba(0,0,0,.35)';
-  ctx.font = '700 22px Sarabun';
+  ctx.fillStyle = 'rgba(229,72,77,.18)';
+  ctx.fillRect(tx - 22, ty - 70, 44, 140);
+  ctx.fillRect(tx - 70, ty - 22, 140, 44);
+  ctx.fillStyle = '#1f6f78';
+  ctx.font = '600 22px Mitr';
   ctx.textAlign = 'center';
-  ctx.fillText('เมืองเริ่มต้น', t.x - camX, t.y - camY - t.r + 34);
+  ctx.fillText('🏥 โรงพยาบาล', tx, ty - t.r + 36);
+
+  // Boss lair
+  const b = world.bossLair;
+  ctx.beginPath();
+  ctx.arc(b.x - camX, b.y - camY, 180, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(139,30,63,.18)';
+  ctx.fill();
+  ctx.fillStyle = 'rgba(139,30,63,.7)';
+  ctx.font = '600 20px Mitr';
+  ctx.fillText('☠ ห้องแล็บเชื้อหลุด', b.x - camX, b.y - camY - 150);
 }
 
 function drawHpBar(x, y, hp, maxHp, width) {
@@ -220,73 +266,204 @@ function drawHpBar(x, y, hp, maxHp, width) {
   ctx.fillRect(x - width / 2, y, width * Math.max(0, hp / maxHp), 5);
 }
 
-function drawMonster(m, camX, camY) {
-  const type = monsterTypes[m.kind];
-  const x = m.rx - camX;
-  const y = m.ry - camY;
-  ctx.beginPath();
-  ctx.ellipse(x, y + type.size * 0.7, type.size, type.size * 0.35, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,.25)';
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(x, y, type.size, 0, Math.PI * 2);
+function drawGermBody(type, x, y, time, id) {
+  const s = type.size;
+  const wobble = Math.sin(time * 4 + id) * 0.08;
   ctx.fillStyle = type.color;
-  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.35)';
+  ctx.lineWidth = 2;
+
+  if (type.shape === 'virus') {
+    const spikes = 10;
+    ctx.beginPath();
+    for (let i = 0; i < spikes; i++) {
+      const a = (i / spikes) * Math.PI * 2 + time * 0.8;
+      ctx.moveTo(x + Math.cos(a) * s, y + Math.sin(a) * s);
+      ctx.lineTo(x + Math.cos(a) * s * 1.45, y + Math.sin(a) * s * 1.45);
+    }
+    ctx.stroke();
+    for (let i = 0; i < spikes; i++) {
+      const a = (i / spikes) * Math.PI * 2 + time * 0.8;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * s * 1.45, y + Math.sin(a) * s * 1.45, s * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, s * (1 + wobble), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if (type.shape === 'bacteria') {
+    const len = s * 1.6;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.sin(time * 2 + id) * 0.3);
+    ctx.beginPath();
+    ctx.roundRect(-len, -s * 0.75, len * 2, s * 1.5, s * 0.75);
+    ctx.fill();
+    ctx.stroke();
+    // Flagella
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      ctx.moveTo(len, (i - 1) * s * 0.4);
+      ctx.quadraticCurveTo(len + s * 0.6, (i - 1) * s * 0.4 + Math.sin(time * 8 + i) * 6, len + s, (i - 1) * s * 0.5);
+    }
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * s * 0.55, y + Math.sin(a) * s * 0.55, s * (0.55 + wobble), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Angry face
   ctx.fillStyle = '#111';
-  ctx.fillRect(x - 6, y - 4, 3, 4);
-  ctx.fillRect(x + 3, y - 4, 3, 4);
-  drawHpBar(x, y - type.size - 10, m.hp, m.maxHp, 34);
-  ctx.fillStyle = '#fff';
-  ctx.font = '12px Sarabun';
+  ctx.beginPath();
+  ctx.arc(x - s * 0.32, y - s * 0.1, s * 0.13, 0, Math.PI * 2);
+  ctx.arc(x + s * 0.32, y - s * 0.1, s * 0.13, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.5, y - s * 0.42);
+  ctx.lineTo(x - s * 0.15, y - s * 0.28);
+  ctx.moveTo(x + s * 0.5, y - s * 0.42);
+  ctx.lineTo(x + s * 0.15, y - s * 0.28);
+  ctx.moveTo(x - s * 0.25, y + s * 0.35);
+  ctx.quadraticCurveTo(x, y + s * 0.15, x + s * 0.25, y + s * 0.35);
+  ctx.stroke();
+}
+
+function drawGerm(g, camX, camY, time) {
+  const type = GERMS[g.kind];
+  const x = g.rx - camX;
+  const y = g.ry - camY;
+  ctx.beginPath();
+  ctx.ellipse(x, y + type.size * 0.9, type.size, type.size * 0.3, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,.15)';
+  ctx.fill();
+  drawGermBody(type, x, y, time, g.id);
+
+  const top = y - type.size * 1.5;
+  drawHpBar(x, top - 8, g.hp, g.maxHp, type.boss ? 90 : 36);
+  ctx.fillStyle = type.boss ? '#8b1e3f' : '#203040';
+  ctx.font = type.boss ? '700 15px Sarabun' : '600 12px Sarabun';
   ctx.textAlign = 'center';
-  ctx.fillText(type.name, x, y - type.size - 14);
+  ctx.fillText(`${type.name}${g.marked ? ' 🎯' : ''}${g.stunned ? ' 💫' : ''}`, x, top - 12);
 }
 
 function drawPlayer(p, camX, camY) {
+  const cls = CLASSES[p.classId];
   const x = p.rx - camX;
   const y = p.ry - camY;
   ctx.globalAlpha = p.dead ? 0.35 : 1;
   ctx.beginPath();
-  ctx.ellipse(x, y + 14, 14, 5, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  ctx.ellipse(x, y + 16, 15, 5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,.2)';
   ctx.fill();
+  if (p.buff) {
+    ctx.beginPath();
+    ctx.arc(x, y, 22, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(245,166,35,.8)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  // Scrubs-colored body with a white coat collar
   ctx.beginPath();
-  ctx.arc(x, y, 14, 0, Math.PI * 2);
-  ctx.fillStyle = p.color;
+  ctx.arc(x, y, 16, 0, Math.PI * 2);
+  ctx.fillStyle = cls.color;
   ctx.fill();
   ctx.lineWidth = p.id === myId ? 3 : 1.5;
-  ctx.strokeStyle = p.id === myId ? '#f2c14e' : '#111';
+  ctx.strokeStyle = p.id === myId ? '#ff6b6b' : '#203040';
   ctx.stroke();
-  ctx.globalAlpha = 1;
-  drawHpBar(x, y - 26, p.hp, p.maxHp, 40);
-  ctx.fillStyle = '#fff';
-  ctx.font = '600 13px Sarabun';
+  ctx.font = '18px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(`${p.name} Lv.${p.level}`, x, y - 32);
+  ctx.textBaseline = 'middle';
+  ctx.fillText(p.dead ? '🚑' : cls.icon, x, y + 1);
+  ctx.textBaseline = 'alphabetic';
+  ctx.globalAlpha = 1;
+  drawHpBar(x, y - 28, p.hp, p.maxHp, 40);
+  ctx.fillStyle = '#102030';
+  ctx.font = '600 13px Sarabun';
+  ctx.fillText(`${cls.name}${p.name} Lv.${p.level}`, x, y - 34);
 }
 
 function drawEffects(camX, camY, dt) {
   for (let i = effects.length - 1; i >= 0; i--) {
     const fx = effects[i];
     fx.age += dt;
-    if (fx.age > 0.9) {
+    const life = fx.kind === 'skillname' || fx.kind === 'text' ? 1.4 : 0.9;
+    if (fx.age > life) {
       effects.splice(i, 1);
       continue;
     }
+    const k = fx.age / life;
+    ctx.textAlign = 'center';
+
     if (fx.kind === 'swing') {
       const p = players.get(fx.id);
-      if (!p || fx.age > 0.2) continue;
+      if (!p || fx.age > 0.25) continue;
       ctx.beginPath();
-      ctx.arc(p.rx - camX, p.ry - camY, 40, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,255,255,${0.6 - fx.age * 3})`;
-      ctx.lineWidth = 3;
+      ctx.arc(p.rx - camX, p.ry - camY, fx.radius * 0.6, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${0.8 - fx.age * 3})`;
+      ctx.lineWidth = 4;
       ctx.stroke();
+      ctx.font = '22px sans-serif';
+      const a = fx.age * 25;
+      ctx.fillText(fx.icon, p.rx - camX + Math.cos(a) * fx.radius * 0.6, p.ry - camY + Math.sin(a) * fx.radius * 0.6);
+    } else if (fx.kind === 'shot') {
+      if (fx.age > 0.25) continue;
+      const t = fx.age / 0.25;
+      ctx.font = '20px sans-serif';
+      ctx.fillText(fx.icon, fx.from.x + (fx.to.x - fx.from.x) * t - camX, fx.from.y + (fx.to.y - fx.from.y) * t - camY);
+    } else if (fx.kind === 'ring') {
+      ctx.beginPath();
+      ctx.arc(fx.x - camX, fx.y - camY, fx.radius * Math.min(1, k * 3), 0, Math.PI * 2);
+      ctx.strokeStyle = fx.color;
+      ctx.globalAlpha = 1 - k;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (fx.kind === 'beam') {
+      ctx.globalAlpha = 1 - k;
+      ctx.strokeStyle = '#f1c40f';
+      ctx.lineCap = 'round';
+      ctx.lineWidth = fx.width;
+      ctx.beginPath();
+      ctx.moveTo(fx.from.x - camX, fx.from.y - camY);
+      ctx.lineTo(fx.to.x - camX, fx.to.y - camY);
+      ctx.stroke();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = fx.width / 3;
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      ctx.globalAlpha = 1;
+    } else if (fx.kind === 'skillname') {
+      const p = players.get(fx.id);
+      if (!p) continue;
+      ctx.globalAlpha = 1 - k;
+      ctx.font = '600 16px Mitr';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#102030';
+      const sy = p.ry - camY - 56 - fx.age * 20;
+      ctx.strokeText(fx.text, p.rx - camX, sy);
+      ctx.fillStyle = '#3ee0c5';
+      ctx.fillText(fx.text, p.rx - camX, sy);
+      ctx.globalAlpha = 1;
     } else {
-      ctx.globalAlpha = 1 - fx.age / 0.9;
-      ctx.fillStyle = fx.kind === 'dmg' ? '#ffe066' : '#ff6b6b';
-      ctx.font = '700 18px Sarabun';
-      ctx.textAlign = 'center';
-      ctx.fillText(`-${fx.value}`, fx.x - camX, fx.y - camY - 24 - fx.age * 40);
+      // dmg, hurt, heal, text — floating labels
+      const label = { dmg: `-${fx.value}`, hurt: `-${fx.value}`, heal: `+${fx.value}`, text: fx.text }[fx.kind];
+      const color = { dmg: '#ff9f1c', hurt: '#e5484d', heal: '#2ecc71', text: '#1f6f78' }[fx.kind];
+      ctx.globalAlpha = 1 - k;
+      ctx.font = fx.kind === 'text' ? '600 15px Mitr' : '700 18px Sarabun';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#fff';
+      const ly = fx.y - camY - 26 - fx.age * 40;
+      ctx.strokeText(label, fx.x - camX, ly);
+      ctx.fillStyle = color;
+      ctx.fillText(label, fx.x - camX, ly);
       ctx.globalAlpha = 1;
     }
   }
@@ -297,16 +474,19 @@ function drawMinimap(w, h) {
   const x = w - size - 12;
   const y = h - size - 12;
   const s = size / world.width;
-  ctx.fillStyle = 'rgba(16,22,34,.8)';
+  ctx.fillStyle = 'rgba(16,30,44,.85)';
   ctx.fillRect(x, y, size, size);
   ctx.beginPath();
   ctx.arc(x + world.town.x * s, y + world.town.y * s, world.town.r * s, 0, Math.PI * 2);
-  ctx.fillStyle = '#b79b6c';
+  ctx.fillStyle = '#fff';
   ctx.fill();
-  ctx.fillStyle = '#e5484d';
-  for (const m of monsters.values()) ctx.fillRect(x + m.x * s - 1, y + m.y * s - 1, 2, 2);
+  for (const g of germs.values()) {
+    const boss = GERMS[g.kind].boss;
+    ctx.fillStyle = boss ? '#ff2d6f' : '#e5484d';
+    ctx.fillRect(x + g.x * s - (boss ? 3 : 1), y + g.y * s - (boss ? 3 : 1), boss ? 6 : 2, boss ? 6 : 2);
+  }
   for (const p of players.values()) {
-    ctx.fillStyle = p.id === myId ? '#f2c14e' : '#9fd0ff';
+    ctx.fillStyle = p.id === myId ? '#3ee0c5' : '#9fd0ff';
     ctx.fillRect(x + p.x * s - 2, y + p.y * s - 2, 4, 4);
   }
 }
@@ -329,7 +509,7 @@ function frame(now) {
 
     // Smoothly interpolate toward server positions
     const k = Math.min(1, dt * 12);
-    for (const e of [...players.values(), ...monsters.values()]) {
+    for (const e of [...players.values(), ...germs.values()]) {
       e.rx += (e.x - e.rx) * k;
       e.ry += (e.y - e.ry) * k;
     }
@@ -337,14 +517,15 @@ function frame(now) {
     const me = players.get(myId);
     const camX = (me ? me.rx : world.town.x) - w / 2;
     const camY = (me ? me.ry : world.town.y) - h / 2;
+    const time = now / 1000;
 
     drawWorld(camX, camY, w, h);
-    for (const m of monsters.values()) drawMonster(m, camX, camY);
+    for (const g of germs.values()) drawGerm(g, camX, camY, time);
     for (const p of players.values()) drawPlayer(p, camX, camY);
     drawEffects(camX, camY, dt);
     drawMinimap(w, h);
   } else {
-    ctx.fillStyle = '#0d1320';
+    ctx.fillStyle = '#0c1a24';
     ctx.fillRect(0, 0, w, h);
   }
   requestAnimationFrame(frame);
