@@ -3,7 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Dr. Quest</title>
+<title>Dr. Quest ล่าเชื้อป่วน</title>
+<meta name="description" content="เกม RPG พิกเซลแนวฮา ทีมหมอ พยาบาล และสหวิชาชีพปราบเชื้อโรค เล่นฟรีบนเว็บและมือถือ">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#121a46">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dr. Quest">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Dr. Quest ล่าเชื้อป่วน">
+<meta property="og:description" content="เกม RPG พิกเซลแนวฮา ทีมหมอ พยาบาล และสหวิชาชีพปราบเชื้อโรค เล่นฟรีบนเว็บและมือถือ">
+<meta property="og:image" content="https://niasmin.github.io/Quest-Finance/og-image.png">
+<meta property="og:url" content="https://niasmin.github.io/Quest-Finance/">
+<meta name="twitter:card" content="summary_large_image">
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&family=Mitr:wght@500;600&family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
   :root { --panel: rgba(16, 30, 44, 0.85); --text: #eef6f8; --accent: #3ee0c5; --hp: #e5484d; --xp: #4fa3f7; }
@@ -102,6 +115,7 @@
   #loginbox { max-width: 860px; margin: 0 auto; padding: 22px 18px; }
   #login h1 { font-family: 'Press Start 2P', monospace; font-size: clamp(22px, 5vw, 38px); color: #ffd166; text-shadow: 4px 4px 0 #8e3b00; letter-spacing: 2px; }
   #login h1 span { display: block; margin-top: 12px; font-family: 'Mitr', sans-serif; font-size: clamp(22px, 4vw, 30px); color: #ff8fab; text-shadow: 3px 3px 0 #5a1030; letter-spacing: 0; }
+  #logo { display: block; width: min(100%, 560px); height: auto; margin: 0 auto 6px; image-rendering: pixelated; }
   #nameinput, #passinput { border-radius: 4px; background: #10163a; border: 2px solid #6b74b8; }
   .cls { border-radius: 6px; }
   .cls.sel { border-color: #ffd166; background: linear-gradient(180deg, rgba(90, 80, 30, .95), rgba(40, 36, 20, .95)); }
@@ -170,7 +184,7 @@
 
 <div id="login">
   <form id="loginform"><div id="loginbox">
-    <h1>Dr. Quest <span>ล่าเชื้อป่วน</span></h1>
+    <h1><img id="logo" src="logo.png" alt="Dr. Quest ล่าเชื้อป่วน"></h1>
     <p class="tag">ทีมสหวิชาชีพบุกปราบเชื้อโรค ชวนเพื่อนมาเข้าเวรด้วยกัน!</p>
     <div id="modenote"></div>
     <input id="nameinput" maxlength="16" placeholder="ชื่อตัวละคร" autocomplete="username" required><br>
