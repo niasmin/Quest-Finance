@@ -32,7 +32,7 @@ const ROOMS = {
 };
 const ROAD_Z = 17;
 const SPAWN = v(7.2, ROAD_Z);
-const PLAYER_START = v(-1, -5);
+const PLAYER_START = v(-0.8, -6.7); // clear of every unlock tile, so switching branches never buys something by accident
 
 // Unlocks are bought one at a time, in this order
 const UNLOCKS = [
@@ -2022,15 +2022,25 @@ function formatDuration(sec) {
   return `${Math.floor(sec)} วินาที`;
 }
 
+// Branches that aren't on screen keep earning at the rate saved with them
+function otherBranchesRate() {
+  return state.branches.reduce((sum, b, i) => sum + (i !== state.branch && b?.idleRate ? b.idleRate : 0), 0);
+}
+
 let pendingIdle = 0;
 function offerIdleEarnings(seconds) {
   if (seconds < 60) return;
-  const { amount, perHour, seconds: counted } = idleIncome(seconds);
+  const here = idleIncome(seconds);
+  const others = Math.floor(otherBranchesRate() * here.seconds);
+  const amount = here.amount + others;
+  const perHour = here.perHour + Math.round(otherBranchesRate() * 3600);
+  const counted = here.seconds;
   const box = document.getElementById('away');
   const text = document.getElementById('awaytext');
   if (amount > 0) {
     pendingIdle = amount;
     text.innerHTML = `คุณไม่อยู่ ${formatDuration(seconds)}<br>พนักงานช่วยกันดูแลคนไข้ได้<br><b>💵 ${amount.toLocaleString()}</b>`
+      + (others > 0 ? `<br><small>(รวมสาขาอื่น 💵${others.toLocaleString()})</small>` : '')
       + (seconds > counted ? '<br><small>(นับสูงสุด 6 ชั่วโมง)</small>' : '')
       + `<br><small>รายได้ตอนไม่อยู่ประมาณ ${perHour.toLocaleString()}/ชม.</small>`;
     document.getElementById('awayok').textContent = 'เก็บเงิน';
@@ -2110,7 +2120,8 @@ function updateBag() {
 }
 function updateGoal() {
   const u = UNLOCKS[state.step];
-  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label} · 💵${u.price}` : '🏆 ครบทุกแผนก! กด ⬆️ เพื่อเปิดสาขาใหม่';
+  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label} · 💵${u.price}`
+    : canOpenBranch() ? '🏆 ครบทุกแผนก! กด 🗺️ เพื่อเปิดสาขาใหม่' : '🏆 สาขานี้ครบทุกแผนกแล้ว!';
 }
 
 // ---------- rating & upgrades UI ----------
@@ -2124,18 +2135,6 @@ const upList = document.getElementById('uplist');
 const upBtn = document.getElementById('upbtn');
 function renderUpgrades() {
   upList.innerHTML = '';
-  if (state.step >= UNLOCKS.length) {
-    const next = (state.branch || 0) + 2;
-    const card = document.createElement('div');
-    card.className = 'branchcard';
-    card.innerHTML = `<b>🏥 พร้อมเปิดสาขา ${next}!</b><br><small>เริ่มใหม่ แต่รายได้ถาวร ×${(1 + 0.5 * (next - 1)).toFixed(1)}</small>`;
-    const btn = document.createElement('button');
-    btn.className = 'btn';
-    btn.textContent = 'เปิดสาขาใหม่';
-    btn.addEventListener('click', openBranch);
-    card.append(btn);
-    upList.append(card);
-  }
   for (const u of UPGRADES) {
     const lvl = upLevel(u.id);
     const maxed = lvl >= u.max;
@@ -2173,7 +2172,8 @@ function cheapestUpgrade() {
 // Red dot on the ⬆️ button when something is affordable
 function updateUpgradeDot() {
   const c = cheapestUpgrade();
-  upBtn.classList.toggle('ready', Boolean((c && state.money >= upCost(c)) || state.step >= UNLOCKS.length));
+  upBtn.classList.toggle('ready', Boolean(c && state.money >= upCost(c)));
+  branchBtn.classList.toggle('ready', canOpenBranch() && state.money >= newBranchCost());
 }
 
 // ---------- daily missions ----------
@@ -2254,20 +2254,97 @@ function updateMissionDot() {
   missionBtn.classList.toggle('ready', Boolean(ready));
 }
 
-// ---------- new branch (prestige) ----------
-function openBranch() {
-  const next = (state.branch || 0) + 2;
-  if (!confirm(`เปิดโรงพยาบาลสาขา ${next}?\n\nเริ่มสร้างใหม่ตั้งแต่ต้น (เงิน แผนก และอัปเกรดรีเซ็ต) แต่รายได้ทุกอย่างถาวร ×${(1 + 0.5 * (next - 1)).toFixed(1)}`)) return;
-  saveBlocked = true;
-  const data = { money: 0, step: 0, paid: 0, savedAt: Date.now(), upgrades: {}, rating: 3, branch: next - 1, daily: state.daily, piles: {} };
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-  } catch {
-    saveBlocked = false;
-    alert('บันทึกไม่ได้ในเบราว์เซอร์นี้');
-    return;
+// ---------- hospital chain: switch between branches, open new ones ----------
+const branchName = (i) => `สาขา ${i + 1}`;
+const branchMultOf = (i) => 1 + 0.5 * i;
+// A new branch can be opened from the newest one once it's fully built
+const canOpenBranch = () => state.branch === state.branches.length - 1 && state.step >= UNLOCKS.length;
+const newBranchCost = () => 5000 * state.branches.length;
+
+let otherBuffer = 0;
+let otherShown = 0;
+function tickOtherBranches(dt) {
+  const rate = otherBranchesRate();
+  if (!rate) return;
+  otherBuffer += rate * dt;
+  if (otherBuffer >= 1) {
+    const whole = Math.floor(otherBuffer);
+    otherBuffer -= whole;
+    addMoney(whole);
+    otherShown += whole;
   }
-  location.reload();
+  // Show a little "+X from other branches" now and then
+  tickOtherBranches.t = (tickOtherBranches.t || 0) + dt;
+  if (tickOtherBranches.t > 15 && otherShown > 0) {
+    floatText(player.group.position, `🏥 +${otherShown.toLocaleString()} จากสาขาอื่น`, '#bfe9ff');
+    otherShown = 0;
+    tickOtherBranches.t = 0;
+  }
+}
+
+const branchPanel = document.getElementById('branches');
+const branchList = document.getElementById('blist');
+const branchBtn = document.getElementById('branchbtn');
+function renderBranches() {
+  branchList.innerHTML = '';
+  state.branches[state.branch] = branchSnapshot();
+  state.branches.forEach((b, i) => {
+    const row = document.createElement('div');
+    row.className = 'uprow';
+    const here = i === state.branch;
+    const step = b?.step || 0;
+    const rate = Math.round((b?.idleRate || 0) * 3600);
+    row.innerHTML = `<div class="upico" style="color:${BRANCH_COLORS[i % BRANCH_COLORS.length]}">🏥</div>
+      <div class="upinfo"><b>${branchName(i)}</b> <span class="lv">รายได้ ×${branchMultOf(i).toFixed(1)}</span><br>
+      <small>⭐ ${(b?.rating ?? 3).toFixed(1)} · ปลดล็อก ${step}/${UNLOCKS.length}${rate ? ` · ตอนไม่อยู่ ~${rate.toLocaleString()}/ชม.` : ''}</small></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn upbuy';
+    btn.textContent = here ? 'อยู่ที่นี่' : 'ไปสาขานี้';
+    btn.disabled = here;
+    btn.addEventListener('click', () => switchBranch(i));
+    row.append(btn);
+    branchList.append(row);
+  });
+  const next = state.branches.length;
+  const card = document.createElement('div');
+  card.className = 'branchcard';
+  if (canOpenBranch()) {
+    const cost = newBranchCost();
+    card.innerHTML = `<b>🏗️ เปิด${branchName(next)}</b><br><small>รายได้ ×${branchMultOf(next).toFixed(1)} · สาขาเดิมยังอยู่และหาเงินต่อ</small>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = `เปิดสาขา · 💵${cost.toLocaleString()}`;
+    btn.disabled = state.money < cost;
+    btn.addEventListener('click', openBranch);
+    card.append(btn);
+  } else {
+    const newest = state.branches.length - 1;
+    card.innerHTML = `<small>สร้าง${branchName(newest)}ให้ครบทุกแผนก แล้วจะเปิด${branchName(next)}ได้</small>`;
+  }
+  branchList.append(card);
+}
+
+// Store this branch, then reload into another one (the scene is rebuilt from the save)
+function switchBranch(i) {
+  if (i === state.branch) return;
+  const data = saveData();
+  data.current = i;
+  data.step = data.branches[i]?.step || 0;
+  replaceSave(data);
+}
+
+function openBranch() {
+  const cost = newBranchCost();
+  const next = state.branches.length;
+  if (!canOpenBranch() || state.money < cost) return;
+  if (!confirm(`เปิด${branchName(next)} ราคา 💵${cost.toLocaleString()}?\n\nสาขาใหม่เริ่มสร้างตั้งแต่ต้น แต่รายได้ ×${branchMultOf(next).toFixed(1)} และสาขาเดิมยังอยู่ หาเงินต่อให้ และกลับไปดูได้ตลอด`)) return;
+  state.money -= cost;
+  const data = saveData();
+  data.branches.push(null);
+  data.current = next;
+  data.branch = next;
+  data.step = 0;
+  replaceSave(data);
 }
 
 // ---------- sound: WebAudio blips and a looping chiptune ----------
@@ -2361,20 +2438,46 @@ function sfxCoin() { tone(880, 0.08, 'square', 0.03); setTimeout(() => tone(1320
 function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'triangle', 0.06), i * 90)); }
 
 // ---------- save / load ----------
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, daily: null, earned: 0 };
+// state.branch is the open branch's index; state.branches holds a snapshot of every
+// branch (null = opened but never played). Money, earnings and missions are shared.
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0 };
 
 let awayOnLoad = 0;
 let localSavedAt = 0;
 let saveBlocked = false; // set while resetting or importing, so pagehide can't write the old game back
 let storageOK = true;
 
-function saveData() {
+// The open branch as a snapshot, including its idle income rate so other branches
+// can keep paying out while it isn't the one on screen
+function branchSnapshot() {
   return {
-    money: state.money, step: state.step, paid: state.paid, savedAt: Date.now(),
-    upgrades: state.upgrades, rating: state.rating, branch: state.branch, daily: state.daily, earned: state.earned,
+    step: state.step, paid: state.paid, upgrades: state.upgrades, rating: state.rating, savedAt: Date.now(),
+    idleRate: idleIncome(3600).perHour / 3600,
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
+}
+
+function saveData() {
+  state.branches[state.branch] = branchSnapshot();
+  return {
+    v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(),
+    current: state.branch, branches: state.branches,
+    // Summary fields the cloud uses for the leaderboard
+    branch: state.branches.length - 1, step: state.step,
+  };
+}
+
+// Saves from before branches were kept: the open branch survives, earlier ones restart fresh
+function migrateSave(data) {
+  if (!data || data.branches) return data;
+  const b = data.branch || 0;
+  const branches = Array(b + 1).fill(null);
+  branches[b] = {
+    step: data.step || 0, paid: data.paid || 0, piles: data.piles || {}, upgrades: data.upgrades || {},
+    roomCash: data.roomCash || { xray: data.xrayCash || 0 }, rating: data.rating, savedAt: data.savedAt,
+  };
+  return { v: 2, money: data.money || 0, earned: data.earned || 0, daily: data.daily || null, savedAt: data.savedAt, current: b, branches, branch: b, step: data.step || 0 };
 }
 
 // Returns true when the save was written and reads back
@@ -2400,7 +2503,7 @@ function parseCode(code) {
   if (!clean.startsWith(CODE_PREFIX)) return null;
   try {
     const data = JSON.parse(atob(clean.slice(CODE_PREFIX.length)));
-    return typeof data.step === 'number' && typeof data.money === 'number' ? data : null;
+    return typeof data.money === 'number' && (typeof data.step === 'number' || Array.isArray(data.branches)) ? data : null;
   } catch {
     return null;
   }
@@ -2416,29 +2519,30 @@ function load() {
   // Ask the browser not to evict our save under storage pressure
   navigator.storage?.persist?.().catch(() => {});
   buildLine(LINES.pill, false);
+  data = migrateSave(data);
   if (!data) return;
   state.money = data.money || 0;
-  state.step = Math.min(data.step || 0, UNLOCKS.length);
-  state.paid = data.paid || 0;
-  state.upgrades = data.upgrades || {};
-  state.rating = typeof data.rating === 'number' ? data.rating : 3;
-  state.branch = data.branch || 0;
   state.daily = data.daily || null;
   state.earned = data.earned || 0;
+  state.branches = Array.isArray(data.branches) && data.branches.length ? data.branches : [null];
+  state.branch = Math.min(Math.max(data.current || 0, 0), state.branches.length - 1);
+  const br = state.branches[state.branch] || {};
+  state.step = Math.min(br.step || 0, UNLOCKS.length);
+  state.paid = br.paid || 0;
+  state.upgrades = br.upgrades || {};
+  state.rating = typeof br.rating === 'number' ? br.rating : 3;
   for (let i = 0; i < state.step; i++) {
     state.unlocked.add(UNLOCKS[i].id);
     applyUnlock(UNLOCKS[i].id, false);
   }
-  for (const [id, p] of Object.entries(data.piles || {})) {
+  for (const [id, p] of Object.entries(br.piles || {})) {
     const line = LINES[id];
     if (!line?.active) continue;
     for (let i = 0; i < Math.min(p.pile, PILE_MAX); i++) line.pile.place(makeItem(line.product));
     for (let i = 0; i < Math.min(p.shelf, SHELF_MAX); i++) line.shelf.place(makeItem(line.product));
     line.cash.add(p.cash || 0);
   }
-  // Older saves kept only the X-ray room's cash
-  const roomCash = data.roomCash || { xray: data.xrayCash || 0 };
-  for (const [id, amount] of Object.entries(roomCash)) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
+  for (const [id, amount] of Object.entries(br.roomCash || {})) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
   shownMoney = state.money;
   if (data.savedAt) awayOnLoad = (Date.now() - data.savedAt) / 1000;
   localSavedAt = data.savedAt || 0;
@@ -2473,6 +2577,7 @@ function frame(now) {
     for (const room of Object.values(ROOMS)) if (room.active) updateRoom(room, dt);
     updatePatients(dt);
     updateSpills(dt);
+    tickOtherBranches(dt);
     staff.forEach((s) => s.update(dt));
     updateAmbulance(dt);
     updateTile(dt);
@@ -2546,7 +2651,7 @@ document.getElementById('resume').addEventListener('click', () => {
 document.getElementById('reset').addEventListener('click', async () => {
   if (!confirm('ลบความคืบหน้าทั้งหมดแล้วเริ่มใหม่?')) return;
   // Overwrite rather than delete, so the newer empty save also replaces the cloud copy
-  await replaceSave({ money: 0, step: 0, paid: 0, piles: {}, upgrades: {}, rating: 3, branch: 0, earned: 0, daily: state.daily });
+  await replaceSave({ v: 2, money: 0, earned: 0, daily: state.daily, current: 0, branches: [null], branch: 0, step: 0 });
 });
 
 // ---------- save status & save codes ----------
@@ -2789,6 +2894,13 @@ updateRating();
 applyBranchLook();
 ensureDaily();
 setInterval(ensureDaily, 60000);
+branchBtn.addEventListener('click', () => {
+  renderBranches();
+  branchPanel.style.display = 'flex';
+});
+document.getElementById('bclose').addEventListener('click', () => {
+  branchPanel.style.display = 'none';
+});
 missionBtn.addEventListener('click', () => {
   ensureDaily();
   renderMissions();
