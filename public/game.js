@@ -2089,6 +2089,7 @@ let shownMoney = 0;
 
 function addMoney(n) {
   state.money += n;
+  if (n > 0) state.earned = (state.earned || 0) + n; // lifetime earnings for the leaderboard
   updateMoney();
 }
 function updateMoney() {
@@ -2360,16 +2361,17 @@ function sfxCoin() { tone(880, 0.08, 'square', 0.03); setTimeout(() => tone(1320
 function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'triangle', 0.06), i * 90)); }
 
 // ---------- save / load ----------
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, daily: null };
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, daily: null, earned: 0 };
 
 let awayOnLoad = 0;
+let localSavedAt = 0;
 let saveBlocked = false; // set while resetting or importing, so pagehide can't write the old game back
 let storageOK = true;
 
 function saveData() {
   return {
     money: state.money, step: state.step, paid: state.paid, savedAt: Date.now(),
-    upgrades: state.upgrades, rating: state.rating, branch: state.branch, daily: state.daily,
+    upgrades: state.upgrades, rating: state.rating, branch: state.branch, daily: state.daily, earned: state.earned,
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
@@ -2422,6 +2424,7 @@ function load() {
   state.rating = typeof data.rating === 'number' ? data.rating : 3;
   state.branch = data.branch || 0;
   state.daily = data.daily || null;
+  state.earned = data.earned || 0;
   for (let i = 0; i < state.step; i++) {
     state.unlocked.add(UNLOCKS[i].id);
     applyUnlock(UNLOCKS[i].id, false);
@@ -2438,6 +2441,7 @@ function load() {
   for (const [id, amount] of Object.entries(roomCash)) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
   shownMoney = state.money;
   if (data.savedAt) awayOnLoad = (Date.now() - data.savedAt) / 1000;
+  localSavedAt = data.savedAt || 0;
 }
 
 // ---------- main loop ----------
@@ -2539,15 +2543,10 @@ document.getElementById('resume').addEventListener('click', () => {
   running = true;
   last = performance.now();
 });
-document.getElementById('reset').addEventListener('click', () => {
+document.getElementById('reset').addEventListener('click', async () => {
   if (!confirm('ลบความคืบหน้าทั้งหมดแล้วเริ่มใหม่?')) return;
-  saveBlocked = true;
-  try {
-    localStorage.removeItem(SAVE_KEY);
-  } catch {
-    // ignore
-  }
-  location.reload();
+  // Overwrite rather than delete, so the newer empty save also replaces the cloud copy
+  await replaceSave({ money: 0, step: 0, paid: 0, piles: {}, upgrades: {}, rating: 3, branch: 0, earned: 0, daily: state.daily });
 });
 
 // ---------- save status & save codes ----------
@@ -2591,17 +2590,177 @@ document.getElementById('loadcode').addEventListener('click', () => {
     return;
   }
   if (!confirm(`โหลดเซฟนี้? (เงิน ${data.money.toLocaleString()} · ปลดล็อก ${data.step} ขั้น) ความคืบหน้าปัจจุบันจะถูกแทนที่`)) return;
-  saveBlocked = true;
+  replaceSave(data);
+});
+window.addEventListener('pagehide', () => {
+  if (save()) cloudPush(true);
+});
+
+// ---------- cloud save (Supabase) ----------
+// Each device keeps a random secret; the server stores only its hash and links it to a
+// save. A transfer code links another device to the same save.
+const CLOUD_URL = 'https://wxwarbeioqqlptyzbykx.supabase.co';
+const CLOUD_KEY = 'sb_publishable_9g0q_evWnjxBGElTtsdYdQ_teojMuGk'; // publishable: safe in the browser
+const DEVICE_KEY = 'drquest-device-key';
+const cloud = { code: null, nickname: null, lastSync: 0, ok: null, busy: false, pendingName: null };
+
+function deviceSecret() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    let secret = localStorage.getItem(DEVICE_KEY);
+    if (!secret) {
+      const bytes = crypto.getRandomValues(new Uint8Array(32));
+      secret = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem(DEVICE_KEY, secret);
+    }
+    return secret;
+  } catch {
+    return null;
+  }
+}
+
+async function rpc(name, body, keepalive = false) {
+  const res = await fetch(`${CLOUD_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: { apikey: CLOUD_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    keepalive,
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(json?.message || `HTTP ${res.status}`);
+  return json;
+}
+
+async function cloudPush(keepalive = false) {
+  const secret = deviceSecret();
+  if (!secret || cloud.busy || saveBlocked) return false;
+  cloud.busy = true;
+  try {
+    const [row] = await rpc('cloud_save', { p_secret: secret, p_data: saveData(), p_nickname: cloud.pendingName }, keepalive);
+    cloud.pendingName = null;
+    cloud.code = row.transfer_code;
+    cloud.nickname = row.nickname;
+    cloud.ok = true;
+    cloud.lastSync = Date.now();
+  } catch {
+    cloud.ok = false;
+  } finally {
+    cloud.busy = false;
+    renderCloud();
+  }
+  return cloud.ok;
+}
+
+// On start: take the cloud copy if it's newer than this device's, otherwise upload ours
+async function cloudSync() {
+  const secret = deviceSecret();
+  if (!secret) return;
+  try {
+    const [row] = await rpc('cloud_load', { p_secret: secret });
+    if (row) {
+      cloud.code = row.transfer_code;
+      cloud.nickname = row.nickname;
+      cloud.ok = true;
+      if ((row.data?.savedAt || 0) > localSavedAt + 5000) {
+        if (!running || confirm('พบเซฟบนคลาวด์ที่ใหม่กว่า โหลดเลยไหม?')) {
+          replaceSave(row.data, false);
+          return;
+        }
+      }
+    }
+    await cloudPush();
+  } catch {
+    cloud.ok = false;
+    renderCloud();
+  }
+}
+
+// Swap in a whole save and restart the page with it (local first, then the cloud)
+async function replaceSave(data, pushToCloud = true) {
+  saveBlocked = true;
+  const fresh = { ...data, savedAt: Date.now() };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(fresh));
   } catch {
     alert('เบราว์เซอร์นี้บันทึกไม่ได้ ลองเปิดเกมใน Safari หรือ Chrome');
     saveBlocked = false;
     return;
   }
+  const secret = deviceSecret();
+  if (pushToCloud && secret) {
+    await Promise.race([
+      rpc('cloud_save', { p_secret: secret, p_data: fresh, p_nickname: null }).catch(() => {}),
+      new Promise((r) => setTimeout(r, 3000)),
+    ]);
+  }
   location.reload();
+}
+
+const cloudEl = document.getElementById('cloudstatus');
+function renderCloud() {
+  if (cloud.ok === null) cloudEl.textContent = '☁️ กำลังเชื่อมต่อคลาวด์…';
+  else if (!cloud.ok) cloudEl.innerHTML = '☁️ ยังเชื่อมคลาวด์ไม่ได้ (เล่นต่อได้ จะลองใหม่อัตโนมัติ)';
+  else {
+    const t = cloud.lastSync ? new Date(cloud.lastSync).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '-';
+    cloudEl.innerHTML = `☁️ บันทึกบนคลาวด์แล้ว (${t})<br>ชื่อ: <b>${escapeHtml(cloud.nickname || '')}</b><br>รหัสย้ายเครื่อง: <b class="code">${cloud.code || '-'}</b>`;
+  }
+}
+function escapeHtml(t) {
+  return t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+document.getElementById('claimcode').addEventListener('click', async () => {
+  const code = prompt('ใส่รหัสย้ายเครื่อง 8 ตัวจากเครื่องเดิม');
+  if (!code) return;
+  try {
+    // Look first, link only after the player confirms
+    const [info] = await rpc('cloud_peek', { p_code: code });
+    if (!info) throw new Error('not found');
+    if (!confirm(`พบเซฟของ "${info.nickname}" (ปลดล็อก ${info.step} ขั้น${info.branch ? ` · สาขา ${info.branch + 1}` : ''}) โหลดมาเล่นที่เครื่องนี้ไหม?\nความคืบหน้าในเครื่องนี้จะถูกแทนที่`)) return;
+    const [row] = await rpc('cloud_claim', { p_code: code, p_secret: deviceSecret() });
+    if (!row) throw new Error('not found');
+    replaceSave(row.data, false);
+  } catch {
+    alert('ไม่พบรหัสนี้ หรือยังเชื่อมต่ออินเทอร์เน็ตไม่ได้');
+  }
 });
-window.addEventListener('pagehide', () => save());
+
+document.getElementById('namebtn').addEventListener('click', async () => {
+  const name = prompt('ตั้งชื่อที่จะแสดงบนกระดานอันดับ (ไม่เกิน 20 ตัวอักษร)', cloud.nickname || '');
+  if (!name || !name.trim()) return;
+  cloud.pendingName = name.trim().slice(0, 20);
+  await cloudPush();
+});
+
+const board = document.getElementById('board');
+document.getElementById('leaderbtn').addEventListener('click', async () => {
+  const list = document.getElementById('boardlist');
+  list.textContent = 'กำลังโหลด…';
+  board.style.display = 'flex';
+  try {
+    await cloudPush();
+    const rows = await rpc('leaderboard', { p_limit: 20 });
+    list.innerHTML = '';
+    rows.forEach((r) => {
+      const row = document.createElement('div');
+      row.className = 'boardrow' + (r.nickname === cloud.nickname && r.earned === state.earned ? ' me' : '');
+      const medal = ['🥇', '🥈', '🥉'][r.rank - 1] || `${r.rank}.`;
+      row.innerHTML = `<span class="rk">${medal}</span><span class="nm">${escapeHtml(r.nickname)}${r.branch ? ` <small>สาขา ${r.branch + 1}</small>` : ''}</span><span class="er">💵${Number(r.earned).toLocaleString()}</span>`;
+      list.append(row);
+    });
+    if (!rows.length) list.textContent = 'ยังไม่มีใครในกระดาน';
+  } catch {
+    list.textContent = 'โหลดไม่ได้ ตรวจสอบอินเทอร์เน็ต';
+  }
+});
+document.getElementById('boardclose').addEventListener('click', () => {
+  board.style.display = 'none';
+});
+
+renderCloud();
+cloudSync();
+setInterval(() => {
+  if (running) cloudPush();
+}, 30000);
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
