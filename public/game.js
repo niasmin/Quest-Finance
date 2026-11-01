@@ -55,7 +55,7 @@ const UNLOCKS = [
   { id: 'surgeon', label: 'จ้างศัลยแพทย์', icon: '🧑‍⚕️', price: 2800, at: v(-1.4, 11.4) },
   { id: 'waiting', label: 'ห้องรอพร้อมเก้าอี้', icon: '🪑', price: 3200, at: v(7.0, -9.7) },
   // Floor 2 (floor: 1): reached by the elevator in the hallway
-  { id: 'elevator', label: 'ลิฟต์ขึ้นชั้น 2', icon: '🛗', price: 4000, at: v(6.4, 12.4) },
+  { id: 'elevator', label: 'ลิฟต์ขึ้นชั้น 2', icon: '🛗', price: 4000, at: v(6.4, 6.4) },
   { id: 'kitchen', label: 'โรงอาหารญาติคนไข้', icon: '🍲', price: 4500, at: v(-1.5, -6.5), floor: 1 },
   { id: 'cook', label: 'จ้างแม่ครัว', icon: '👩‍🍳', price: 5200, at: v(-3.0, -2.5), floor: 1 },
   { id: 'server', label: 'จ้างพนักงานเสิร์ฟ', icon: '🧑‍🍳', price: 5800, at: v(0.6, -2.6), floor: 1 },
@@ -120,6 +120,7 @@ const DEPTS = [
 const BOUNDS = DEPTS.slice(1).map((d) => d.z0);
 const bandOf = (z) => BOUNDS.filter((b) => z > b).length;
 const GATE = v(6.8, 12.8); // just inside the entrance
+const GATE_OUT = v(6.8, 14.5); // just outside it, clear of the south wall
 
 const PILE_MAX = 27; // 3 layers of 3x3 at the machine
 const SHELF_MAX = 16;
@@ -445,8 +446,12 @@ let trashLid = null;
 // so walkers never cut through partition walls
 function route(from, to) {
   const outside = (p) => p.z > FLOOR.z1;
+  // Going in or out: pass through the gate in two steps so nobody walks into the south wall
   if (outside(to) !== outside(from)) {
-    return flatDist(from, GATE) > 0.4 ? (outside(from) ? GATE : route(from, GATE)) : to;
+    // the gate corridor (just inside to just outside the entrance) counts as the passage itself
+    const inGate = Math.abs(from.x - GATE.x) < 1.2 && from.z > GATE.z - 0.5 && from.z < GATE_OUT.z + 0.5;
+    if (outside(from)) return inGate || flatDist(from, GATE_OUT) <= 0.4 ? GATE : GATE_OUT;
+    return inGate ? GATE_OUT : route(from, GATE);
   }
   if (outside(from)) return to;
   const bf = bandOf(from.z);
@@ -1781,7 +1786,7 @@ function applyUnlock(id, animate) {
 // Floor 2 is a raised platform over the same footprint, in the same scene, so both floors
 // keep running whichever one the player is on. It's hidden while the player is downstairs.
 const F2Y = 6;
-const ELEVATOR = v(6.4, 12.4);
+const ELEVATOR = v(6.4, 6.4); // mid-hallway, between the X-ray and dental queues, away from the entrance
 const TRASH2 = v(6.4, 9.6);
 const BASKET_AT = v(2.6, 14.6); // where the cash basket lands, just outside the south wall
 const POT_MAX = 12;
@@ -1907,7 +1912,9 @@ function updateElevator(dt) {
   }
   const near = flatDist(pos, ELEVATOR) < 0.7;
   if (!near) lift.armed = true; // step off before the next ride
-  lift.wait = near && lift.armed ? lift.wait + dt : 0;
+  // Only a player who stops on the pad rides; walking across it does nothing
+  const still = Math.hypot(input.x, input.z) < 0.08;
+  lift.wait = near && lift.armed && still ? lift.wait + dt : 0;
   if (lift.wait > 0.5) {
     lift.wait = 0;
     lift.riding = true;
@@ -3804,4 +3811,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
