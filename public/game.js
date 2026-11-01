@@ -32,6 +32,8 @@ const ROOMS = {
 };
 const ROAD_Z = 17;
 const SPAWN = v(7.2, ROAD_Z);
+// Bin in the hallway for dumping whatever the player is carrying
+const TRASH = v(6.3, 2.0);
 const PLAYER_START = v(-0.8, -6.7); // clear of every unlock tile, so switching branches never buys something by accident
 
 // Unlocks are bought one at a time, in this order
@@ -407,6 +409,28 @@ function decorateDept(id, animate) {
   scene.add(sign);
   if (animate) popIn(sign);
 }
+
+function buildTrash() {
+  const bin = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.34, 0.85, 16), mat(0xe5484d));
+  body.position.y = 0.43;
+  body.castShadow = true;
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.46, 0.1, 16), mat(0xb8323a));
+  lid.position.y = 0.9;
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.43, 0.41, 0.1, 16), mat(0xffd166));
+  band.position.y = 0.55;
+  bin.add(body, lid, band);
+  const post = box(0.08, 2.0, 0.08, 0xdfe6ee);
+  post.position.set(0.6, 1.0, 0);
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 0.55), new THREE.MeshBasicMaterial({ map: signTex('🗑️ ทิ้งของ', '#e5484d'), side: THREE.DoubleSide }));
+  board.position.set(0.6, 2.2, 0);
+  bin.add(post, board);
+  bin.position.set(TRASH.x, 0, TRASH.z);
+  scene.add(bin);
+  zoneRing(TRASH, 0xe5484d);
+  trashLid = lid;
+}
+let trashLid = null;
 
 // Next point to walk toward on the way to `to`: through a door or along the hallway,
 // so walkers never cut through partition walls
@@ -1729,6 +1753,18 @@ function playerActions(dt) {
   if (actTimer > 0) return;
   const pos = player.group.position;
   const stack = player.stack;
+  // Standing at the bin empties the bag, one item at a time
+  if (flatDist(pos, TRASH) < ZONE_R + 0.2 && stack.count > 0) {
+    const item = stack.take();
+    fly(item, item.position.clone(), () => TRASH.clone().setY(0.9), (m) => {
+      scene.remove(m);
+      if (trashLid) trashLid.rotation.z = 0.5; // lid flaps open
+    }, 0.22, 0.6);
+    actTimer = 0.05;
+    sfxPop();
+    updateBag();
+    return;
+  }
   for (const line of Object.values(LINES)) {
     if (!line.active) continue;
     // Pick up from the machine pile
@@ -1874,6 +1910,17 @@ function autoTasks() {
     if (stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) {
       tasks.push({ at: line.drop, keep: () => stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX });
     }
+  }
+  // Carrying things there's no use for (a carrier nurse already stocks that line,
+  // or the shelf has been full for a while): take them to the bin
+  const deliverable = lines.some((l) => stack.countOf(l.product) > 0 && l.shelf.total < SHELF_MAX);
+  auto.stuckCarry = stack.count > 0 && !deliverable ? (auto.stuckCarry || 0) + 0.3 : 0;
+  const unwanted = stack.items.some((m) => {
+    const line = LINES[m.userData.type];
+    return !line?.active || line.carrier;
+  });
+  if (stack.count > 0 && !deliverable && (unwanted || auto.stuckCarry > 8)) {
+    tasks.push({ at: TRASH, keep: () => player.stack.count > 0 });
   }
   for (const line of lines) {
     const front = line.queue[0];
@@ -2589,6 +2636,7 @@ function frame(now) {
     }
   }
   for (const belt of belts) belt.material.map.offset.x -= dt * 0.9;
+  if (trashLid) trashLid.rotation.z *= Math.max(0, 1 - dt * 6);
   updateFlyers(dt);
   updatePops(dt);
   updateConfetti(dt);
@@ -2605,6 +2653,7 @@ function frame(now) {
 // ---------- start ----------
 buildWorld();
 buildPartitions();
+buildTrash();
 decorateDept('pill', false);
 load();
 spawnCrew();
