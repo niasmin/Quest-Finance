@@ -54,6 +54,15 @@ const UNLOCKS = [
   { id: 'surgery', label: 'ห้องผ่าตัด', icon: '🫀', price: 2500, at: v(2.2, 11.4) },
   { id: 'surgeon', label: 'จ้างศัลยแพทย์', icon: '🧑‍⚕️', price: 2800, at: v(-1.4, 11.4) },
   { id: 'waiting', label: 'ห้องรอพร้อมเก้าอี้', icon: '🪑', price: 3200, at: v(7.0, -9.7) },
+  // Floor 2 (floor: 1): reached by the elevator in the hallway
+  { id: 'elevator', label: 'ลิฟต์ขึ้นชั้น 2', icon: '🛗', price: 4000, at: v(6.4, 12.4) },
+  { id: 'kitchen', label: 'โรงอาหารญาติคนไข้', icon: '🍲', price: 4500, at: v(-1.5, -6.5), floor: 1 },
+  { id: 'cook', label: 'จ้างแม่ครัว', icon: '👩‍🍳', price: 5200, at: v(-3.0, -2.5), floor: 1 },
+  { id: 'server', label: 'จ้างพนักงานเสิร์ฟ', icon: '🧑‍🍳', price: 5800, at: v(0.6, -2.6), floor: 1 },
+  { id: 'ward', label: 'หอผู้ป่วยใน', icon: '🛏️', price: 6500, at: v(-2.0, 7.2), floor: 1 },
+  { id: 'beds2', label: 'เพิ่มเตียง 2 เตียง', icon: '🛏️', price: 7200, at: v(4.4, 7.2), floor: 1 },
+  { id: 'wardnurse', label: 'จ้างพยาบาลประจำหอ', icon: '👩‍⚕️', price: 8000, at: v(-4.2, 6.5), floor: 1 },
+  { id: 'beds3', label: 'เพิ่มเตียงอีก 2 เตียง', icon: '🛏️', price: 9000, at: v(1.2, 10.8), floor: 1 },
 ];
 
 // Waiting room: two rows of chairs at the quiet north end of the hallway, facing south
@@ -193,9 +202,9 @@ const tmpV = new THREE.Vector3();
 
 // ---------- world ----------
 const FLOOR = { x0: -9, x1: 9, z0: -11, z1: 13.5 };
-const colliders = []; // axis-aligned boxes the player can't walk through: {x0, x1, z0, z1}
-function addCollider(cx, cz, w, d) {
-  colliders.push({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2 });
+const colliders = []; // axis-aligned boxes the player can't walk through: {x0, x1, z0, z1, floor}
+function addCollider(cx, cz, w, d, floor = 0) {
+  colliders.push({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2, floor });
 }
 
 function buildWorld() {
@@ -446,7 +455,8 @@ function route(from, to) {
   if (from.x > HALL_X) return v(Math.max(from.x, HALL_X + 1), to.z); // hallway runs the full length
   const sgn = bt > bf ? 1 : -1;
   const b = BOUNDS[sgn > 0 ? bf : bf - 1];
-  const inDoor = Math.abs(from.x - DOOR_X) < 0.5 && Math.abs(from.z - b) < 0.8;
+  // Generous enough that stopping anywhere near the approach point counts as at the door
+  const inDoor = Math.abs(from.x - DOOR_X) < 0.6 && Math.abs(from.z - b) < 1.05;
   return inDoor ? v(DOOR_X, b + sgn * 0.9) : v(DOOR_X, b - sgn * 0.7);
 }
 
@@ -465,6 +475,7 @@ const CASH_H = 0.08;
 const itemGeo = new THREE.BoxGeometry(0.44, 0.19, 0.34);
 const cashGeo = new THREE.BoxGeometry(0.5, 0.07, 0.3);
 function makeItem(type) {
+  if (type === 'raw' || type === 'bowl' || type === 'iv') return makeFloor2Item(type);
   let m;
   if (type === 'cash') {
     m = new THREE.Mesh(cashGeo, [0x2e9e4f, 0x2e9e4f, 0x8be08f, 0x2e9e4f, 0x2e9e4f, 0x2e9e4f].map(mat));
@@ -491,6 +502,7 @@ class Stack {
     return this.group.localToWorld(this.layout(i).clone());
   }
   place(mesh) {
+    mesh.visible = true;
     this.group.add(mesh);
     mesh.position.copy(this.layout(this.items.length));
     mesh.rotation.set(0, 0, 0);
@@ -698,6 +710,9 @@ function makeBubble() {
 // ---------- floating text ----------
 const floats = [];
 function floatText(worldPos, text, color = '#ffffff') {
+  // Only show popups from the floor being viewed
+  const upstairs = worldPos.y >= F2Y - 1;
+  if (F2.group.visible !== upstairs && worldPos !== player.group.position) return;
   const el = document.createElement('div');
   el.className = 'float';
   el.textContent = text;
@@ -728,7 +743,7 @@ function burst(pos) {
   const colors = [0xffd166, 0xe5484d, 0x3d8bfd, 0x3fbf5f, 0xffffff];
   for (let i = 0; i < 40; i++) {
     const m = box(0.12, 0.12, 0.04, pick(colors), { shadow: false });
-    m.position.set(pos.x, 0.6, pos.z);
+    m.position.set(pos.x, pos.y + 0.6, pos.z);
     scene.add(m);
     confetti.push({ m, vel: new THREE.Vector3(rand(-3, 3), rand(5, 9), rand(-3, 3)), t: 0 });
   }
@@ -804,7 +819,7 @@ class MoneyPile {
   }
   // Player standing on the pile sweeps it up
   collect(dt) {
-    if (this.amount <= 0 || flatDist(player.group.position, this.pos) > 1.2) return;
+    if (this.amount <= 0 || player.floor !== 0 || flatDist(player.group.position, this.pos) > 1.2) return;
     this.timer -= dt;
     if (this.timer > 0) return;
     this.timer = 0.03;
@@ -943,7 +958,7 @@ function updateLine(line, dt) {
 
   // Serving: needs someone at the cashier spot and stock on the shelf
   const front = line.queue[0];
-  const staffed = line.cashierNurse || flatDist(player.group.position, line.cashier) < ZONE_R;
+  const staffed = line.cashierNurse || (player.floor === 0 && flatDist(player.group.position, line.cashier) < ZONE_R);
   line.serveTimer -= dt;
   if (front && front.arrived && staffed && line.shelf.count > 0 && front.got + front.pending < front.need && line.serveTimer <= 0) {
     line.serveTimer = 0.22 / staffMult();
@@ -1096,7 +1111,7 @@ function updateRoom(room, dt) {
   room.bigIcon.rotation.y += dt;
   room.bigIcon.position.y = 3.0 + Math.sin(performance.now() / 700) * 0.12;
   const front = room.queue[0];
-  const staffed = room.staffHired || flatDist(player.group.position, room.operator) < ZONE_R;
+  const staffed = room.staffHired || (player.floor === 0 && flatDist(player.group.position, room.operator) < ZONE_R);
   const working = Boolean(front && front.arrived && staffed);
   if (working) {
     room.scan += dt * (room.staffHired ? staffMult() : 1);
@@ -1351,6 +1366,9 @@ function updatePatients(dt) {
     }
   }
   for (let i = patients.length - 1; i >= 0; i--) if (!patients[i].update(dt)) patients.splice(i, 1);
+  // Bubbles draw on top of everything, so hide downstairs ones while the player is upstairs
+  const downstairs = !F2.group.visible;
+  for (const p of patients) p.bubble.visible = downstairs;
 }
 
 function buildWaitingRoom(animate) {
@@ -1645,12 +1663,14 @@ function makeTile(u) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 1.9), [
     mat(0x2b2d42), mat(0x2b2d42), new THREE.MeshBasicMaterial({ map: tex }), mat(0x2b2d42), mat(0x2b2d42), mat(0x2b2d42),
   ]);
+  // Floor-2 tiles live in the floor-2 group so they hide and show with it
+  const parent = u.floor ? F2.group : scene;
   mesh.position.set(u.at.x, 0.16, u.at.z);
   mesh.receiveShadow = true;
-  scene.add(mesh);
+  parent.add(mesh);
   const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 4), mat(0x3fbf5f));
   arrow.rotation.x = Math.PI;
-  scene.add(arrow);
+  parent.add(arrow);
   let lastDrawn = -1;
   const draw = () => {
     const frac = state.paid / u.price;
@@ -1685,7 +1705,8 @@ function makeTile(u) {
 
 function showNextTile() {
   if (tile) {
-    scene.remove(tile.mesh, tile.arrow);
+    tile.mesh.parent?.remove(tile.mesh);
+    tile.arrow.parent?.remove(tile.arrow);
     tile = null;
   }
   const u = UNLOCKS[state.step];
@@ -1701,7 +1722,7 @@ function updateTile(dt) {
   const { u } = tile;
   tile.arrow.position.set(u.at.x, 2.2 + Math.sin(performance.now() / 250) * 0.25, u.at.z);
   tile.arrow.rotation.y += dt * 2;
-  if (flatDist(player.group.position, u.at) > 1.0 || state.money <= 0) return;
+  if (player.floor !== (u.floor || 0) || lift.riding || flatDist(player.group.position, u.at) > 1.0 || state.money <= 0) return;
   tile.timer -= dt;
   if (tile.timer > 0) return;
   tile.timer = 0.05;
@@ -1712,15 +1733,16 @@ function updateTile(dt) {
   const bill = makeItem('cash');
   const from = player.group.position.clone().setY(1.3);
   bill.position.copy(from);
-  fly(bill, from, () => u.at.clone().setY(0.2), (m) => scene.remove(m), 0.2, 0.6);
+  fly(bill, from, () => u.at.clone().setY((u.floor ? F2Y : 0) + 0.2), (m) => scene.remove(m), 0.2, 0.6);
   tile.draw();
   if (state.paid >= u.price) {
     state.paid = 0;
     state.step++;
     state.unlocked.add(u.id);
     applyUnlock(u.id, true);
-    burst(u.at);
-    floatText(u.at, `ปลดล็อก! ${u.icon}`, '#ffd166');
+    const at = u.at.clone().setY(u.floor ? F2Y : 0);
+    burst(at);
+    floatText(at, `ปลดล็อก! ${u.icon}`, '#ffd166');
     sfxUnlock();
     showNextTile();
     save();
@@ -1741,10 +1763,708 @@ function applyUnlock(id, animate) {
     case 'surgery': buildRoom(ROOMS.surgery, animate); decorateDept('surgery', animate); break;
     case 'surgeon': hireRoomStaff(ROOMS.surgery, animate); break;
     case 'waiting': buildWaitingRoom(animate); break;
+    case 'elevator': buildElevator(animate); buildFloor2(animate); buildBasket(); break;
+    case 'kitchen': buildKitchen(animate); break;
+    case 'cook': hireCook(animate); break;
+    case 'server': hireServer(animate); break;
+    case 'ward': buildWard(animate); break;
+    case 'beds2': addBeds(2, animate); break;
+    case 'wardnurse': hireWardNurse(animate); break;
+    case 'beds3': addBeds(2, animate); break;
     case 'ambulance': buildAmbulance(animate); break;
     default: break; // bag1, bag2, speed: read from state.unlocked where needed
   }
   updateBag();
+}
+
+// ---------- floor 2: elevator, relatives' cafeteria, inpatient ward, cash basket ----------
+// Floor 2 is a raised platform over the same footprint, in the same scene, so both floors
+// keep running whichever one the player is on. It's hidden while the player is downstairs.
+const F2Y = 6;
+const ELEVATOR = v(6.4, 12.4);
+const TRASH2 = v(6.4, 9.6);
+const BASKET_AT = v(2.6, 14.6); // where the cash basket lands, just outside the south wall
+const POT_MAX = 12;
+const F2_PILE_MAX = 18;
+const BOWL_PRICE = 12;
+const BED_RATE = 0.9; // money per second while a bed's drip is running
+const K = {
+  rawMachine: v(-6.5, -8.5), rawPickup: v(-4.2, -8.5), pot: v(-1.5, -6.5), potInput: v(-3.2, -5.6),
+  bowlPickup: v(-1.5, -4.3), counter: v(1.8, -6.2), drop: v(0.6, -8.2), serve: v(0.6, -4.6),
+};
+const W = { ivMachine: v(-6.5, 4.0), ivPickup: v(-4.2, 4.0) };
+const BED_SPOTS = [v(-2.0, 7.2), v(1.2, 7.2), v(4.4, 7.2), v(-2.0, 10.8), v(1.2, 10.8), v(4.4, 10.8)];
+const bedZone = (b) => v(b.at.x - 1.05, b.at.z);
+
+const F2 = {
+  group: new THREE.Group(), built: false, kitchen: false, ward: false, bank: 0,
+  raw: null, bowls: null, shelf: null, potRaw: 0, potTimer: 0, rawTimer: 0, serveTimer: 0,
+  customers: [], cook: null, server: null, ivPile: null, ivTimer: 0, beds: [], wardNurse: null,
+  crowd: null, steam: [],
+};
+F2.group.position.y = F2Y;
+F2.group.visible = false;
+scene.add(F2.group);
+player.floor = 0;
+
+// Platform, rail and floor-2 elevator pad
+function buildFloor2(animate) {
+  const g = F2.group;
+  const tex = canvasTexture(256, 256, (c) => {
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        c.fillStyle = (x + y) % 2 ? '#eef3f8' : '#dfe8f1';
+        c.fillRect(x * 32, y * 32, 32, 32);
+      }
+    }
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  const fw = FLOOR.x1 - FLOOR.x0 + 0.6;
+  const fd = FLOOR.z1 - FLOOR.z0 + 0.6;
+  tex.repeat.set(fw / 8, fd / 8);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(fw, 0.4, fd), [mat(0xc9d6df), mat(0xc9d6df), new THREE.MeshLambertMaterial({ map: tex }), mat(0x9aa8b5), mat(0xc9d6df), mat(0xc9d6df)]);
+  deck.position.set(0, -0.2, (FLOOR.z0 + FLOOR.z1) / 2);
+  deck.receiveShadow = true;
+  deck.castShadow = true;
+  g.add(deck);
+  // Red safety rail around the edge, like a mezzanine
+  const rail = (cx, cz, w, d) => {
+    const r = box(w, 0.7, d, 0xe5484d);
+    r.position.set(cx, 0.35, cz);
+    g.add(r);
+    addCollider(cx, cz, w, d, 1);
+  };
+  const cz = (FLOOR.z0 + FLOOR.z1) / 2;
+  rail(FLOOR.x0 - 0.15, cz, 0.2, fd);
+  rail(FLOOR.x1 + 0.15, cz, 0.2, fd);
+  rail(0, FLOOR.z0 - 0.15, fw, 0.2);
+  rail(0, FLOOR.z1 + 0.15, fw, 0.2);
+  const pad = zoneRing(ELEVATOR, 0x7b61ff);
+  g.add(pad);
+  // A second bin up here
+  const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.34, 0.85, 16), mat(0xe5484d));
+  bin.position.set(TRASH2.x, 0.43, TRASH2.z);
+  g.add(bin);
+  g.add(zoneRing(TRASH2, 0xe5484d));
+  F2.built = true;
+  if (animate) popIn(deck);
+}
+
+// ---------- elevator ----------
+const lift = { built: false, cab: null, riding: false, from: 0, to: 0, t: 0, wait: 0, armed: true };
+function buildElevator(animate) {
+  const shaft = new THREE.Group();
+  for (const [dx, dz] of [[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) {
+    const post = box(0.14, F2Y + 2.2, 0.14, 0x7b61ff);
+    post.position.set(dx, (F2Y + 2.2) / 2, dz);
+    shaft.add(post);
+  }
+  const top = box(2.0, 0.2, 2.0, 0x5a43d6);
+  top.position.y = F2Y + 2.2;
+  shaft.add(top);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.48), new THREE.MeshBasicMaterial({ map: signTex('🛗 ลิฟต์', '#7b61ff'), side: THREE.DoubleSide }));
+  sign.position.set(0, 2.4, 0.95);
+  shaft.add(sign);
+  const sign2 = sign.clone();
+  sign2.position.y = F2Y + 1.9;
+  shaft.add(sign2);
+  shaft.position.set(ELEVATOR.x, 0, ELEVATOR.z);
+  scene.add(shaft);
+  lift.cab = box(1.7, 0.12, 1.7, 0xb8a9ff);
+  lift.cab.position.set(ELEVATOR.x, 0.1, ELEVATOR.z);
+  scene.add(lift.cab);
+  scene.add(zoneRing(ELEVATOR, 0x7b61ff));
+  lift.built = true;
+  if (animate) popIn(shaft);
+}
+
+function setFloor(f) {
+  player.floor = f;
+  player.group.position.y = f ? F2Y : 0;
+  F2.group.visible = f === 1;
+  auto.task = null;
+}
+
+function updateElevator(dt) {
+  if (!lift.built) return false;
+  const pos = player.group.position;
+  if (lift.riding) {
+    lift.t = Math.min(1, lift.t + dt / 1.4);
+    const e = lift.t * lift.t * (3 - 2 * lift.t);
+    const y = lift.from + (lift.to - lift.from) * e;
+    pos.set(ELEVATOR.x, y, ELEVATOR.z);
+    lift.cab.position.y = y + 0.1;
+    // Swap which floor is drawn halfway through the ride
+    F2.group.visible = lift.to > lift.from ? lift.t > 0.5 : lift.t < 0.5;
+    animatePerson(player, false, dt);
+    if (lift.t >= 1) {
+      lift.riding = false;
+      lift.armed = false;
+      setFloor(lift.to > 0 ? 1 : 0);
+      tone(1320, 0.25, 'sine', 0.06);
+    }
+    return true;
+  }
+  const near = flatDist(pos, ELEVATOR) < 0.7;
+  if (!near) lift.armed = true; // step off before the next ride
+  lift.wait = near && lift.armed ? lift.wait + dt : 0;
+  if (lift.wait > 0.5) {
+    lift.wait = 0;
+    lift.riding = true;
+    lift.t = 0;
+    lift.from = player.floor ? F2Y : 0;
+    lift.to = player.floor ? 0 : F2Y;
+    tone(988, 0.2, 'sine', 0.06);
+  }
+  return false;
+}
+
+// ---------- cafeteria ----------
+const rawGeo = new THREE.BoxGeometry(0.44, 0.19, 0.34);
+const bowlGeo = new THREE.CylinderGeometry(0.22, 0.16, 0.19, 14);
+const ivGeo = new THREE.BoxGeometry(0.34, 0.19, 0.28);
+function makeFloor2Item(type) {
+  let m;
+  if (type === 'raw') m = new THREE.Mesh(rawGeo, [0xd9b382, 0xd9b382, 0xf3e2c0, 0xd9b382, 0xd9b382, 0xd9b382].map(mat));
+  else if (type === 'bowl') m = new THREE.Mesh(bowlGeo, [mat(0xffffff), mat(0xf5a623), mat(0xffffff)]);
+  else m = new THREE.Mesh(ivGeo, [0x9fd8ff, 0x9fd8ff, 0xffffff, 0x9fd8ff, 0x9fd8ff, 0x9fd8ff].map(mat));
+  m.castShadow = true;
+  m.userData.type = type;
+  m.userData.f2 = true;
+  return m;
+}
+
+function f2Machine(at, color, label) {
+  const root = new THREE.Group();
+  const body = box(2.4, 1.4, 1.4, color);
+  body.position.y = 0.7;
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.5), new THREE.MeshBasicMaterial({ map: signTex(label, '#2b2d42'), side: THREE.DoubleSide }));
+  sign.position.set(0, 1.75, 0.72);
+  root.add(body, sign);
+  root.position.set(at.x, 0, at.z);
+  F2.group.add(root);
+  addCollider(at.x, at.z, 2.4, 1.4, 1);
+  return root;
+}
+
+function f2Pile(at) {
+  const s = new Stack(F2.group, gridLayout(ITEM_H));
+  s.group.position.set(at.x, 0.02, at.z);
+  return s;
+}
+
+function sitPose(p) {
+  p.body.position.y = -0.22;
+  p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
+  p.arms[0].rotation.x = p.arms[1].rotation.x = -0.3;
+}
+
+function newCustomer(c) {
+  c.need = 1 + Math.floor(Math.random() * 3);
+  c.got = 0;
+  c.pending = 0;
+  c.waited = 0;
+  c.happy = 0;
+  c.drawn = '';
+}
+
+function buildKitchen(animate) {
+  const roots = [f2Machine(K.rawMachine, 0xc8a26b, '🌾 คลังวัตถุดิบ')];
+  F2.raw = f2Pile(K.rawPickup);
+  F2.group.add(zoneRing(K.rawPickup, 0xffffff));
+  // Giant pot on a stove
+  const pot = new THREE.Group();
+  const stove = box(1.7, 0.5, 1.7, 0x4b5a70);
+  stove.position.y = 0.25;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.7, 1.0, 20), mat(0x9aa8b5));
+  body.position.y = 1.0;
+  body.castShadow = true;
+  const soup = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.05, 20), mat(0xf5c16c));
+  soup.position.y = 1.48;
+  pot.add(stove, body, soup);
+  for (let i = 0; i < 5; i++) {
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
+    puff.userData.phase = i / 5;
+    pot.add(puff);
+    F2.steam.push(puff);
+  }
+  pot.position.set(K.pot.x, 0, K.pot.z);
+  F2.group.add(pot);
+  roots.push(pot);
+  addCollider(K.pot.x, K.pot.z, 1.7, 1.7, 1);
+  F2.group.add(zoneRing(K.potInput, 0xffd166));
+  F2.bowls = f2Pile(K.bowlPickup);
+  F2.group.add(zoneRing(K.bowlPickup, 0xffffff));
+  // Serving counter facing the stands
+  const counter = new THREE.Group();
+  const desk = box(1.0, 1.0, 5.0, 0xffffff);
+  desk.position.y = 0.5;
+  const top = box(1.1, 0.1, 5.1, 0xf5a623);
+  top.position.y = 1.03;
+  counter.add(desk, top);
+  counter.position.set(K.counter.x, 0, K.counter.z);
+  F2.group.add(counter);
+  roots.push(counter);
+  addCollider(K.counter.x, K.counter.z, 1.1, 5.1, 1);
+  F2.shelf = new Stack(counter, (i) => new THREE.Vector3(((i % 2) - 0.5) * 0.46, 1.17 + Math.floor(i / 8) * ITEM_H, (Math.floor((i % 8) / 2) - 1.5) * 0.5 - 1.2));
+  F2.group.add(zoneRing(K.drop, 0xffd166));
+  F2.group.add(zoneRing(K.serve, 0x3fbf5f));
+  // Stands: five tiers; the front row are real customers, the rest an instanced crowd
+  const tiers = 5;
+  for (let k = 0; k < tiers; k++) {
+    const step = box(1.15, 0.2 + 0.35 * k, 7.6, k % 2 ? 0x3d5a80 : 0x48688f);
+    step.position.set(3.2 + k * 1.15, (0.2 + 0.35 * k) / 2, -5.7);
+    F2.group.add(step);
+    roots.push(step);
+  }
+  addCollider(3.2 + (tiers * 1.15) / 2 - 0.58, -5.7, tiers * 1.15, 7.6, 1);
+  for (let i = 0; i < 7; i++) {
+    const person = makePerson({ shirt: pick(SHIRTS) });
+    person.group.position.set(3.2, 0.2, -8.6 + i * 0.95);
+    person.group.rotation.y = -Math.PI / 2;
+    sitPose(person);
+    F2.group.add(person.group);
+    const bubble = makeBubble();
+    bubble.position.y = 2.2;
+    person.group.add(bubble);
+    const c = { person, bubble };
+    newCustomer(c);
+    c.happy = i * 0.7; // staggered first orders
+    F2.customers.push(c);
+  }
+  const count = (tiers - 1) * 8;
+  const bodies = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.25, 0.3, 4, 8), new THREE.MeshLambertMaterial(), count);
+  const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.24, 10, 8), new THREE.MeshLambertMaterial(), count);
+  const color = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    bodies.setColorAt(i, color.setHex(pick(SHIRTS)));
+    heads.setColorAt(i, color.setHex(pick(SKIN)));
+  }
+  bodies.frustumCulled = heads.frustumCulled = false; // instances sit far from the mesh origin
+  F2.group.add(bodies, heads);
+  F2.crowd = { bodies, heads, count, m: new THREE.Matrix4() };
+  F2.kitchen = true;
+  if (animate) roots.forEach(popIn);
+}
+
+function updateCrowd(t) {
+  const { bodies, heads, count, m } = F2.crowd;
+  for (let i = 0; i < count; i++) {
+    const tier = 1 + Math.floor(i / 8);
+    const x = 3.2 + tier * 1.15;
+    const z = -8.9 + (i % 8) * 0.95 + (tier % 2) * 0.3;
+    const y = 0.2 + 0.35 * tier + Math.abs(Math.sin(t * 3 + i)) * 0.08;
+    m.makeTranslation(x, y + 0.45, z);
+    bodies.setMatrixAt(i, m);
+    m.makeTranslation(x, y + 0.98, z);
+    heads.setMatrixAt(i, m);
+  }
+  bodies.instanceMatrix.needsUpdate = true;
+  heads.instanceMatrix.needsUpdate = true;
+}
+
+function f2Pay(amount, at) {
+  F2.bank += amount;
+  missionProgress('earn', amount);
+  floatText(at.clone().setY(F2Y + 0.6), `+${amount}`, '#8be08f');
+  sfxCoin();
+}
+
+function updateKitchen(dt) {
+  const t = performance.now() / 1000;
+  // Store refills itself
+  F2.rawTimer -= dt;
+  if (F2.rawTimer <= 0 && F2.raw.total < F2_PILE_MAX) {
+    F2.rawTimer = 1.0 / machineMult();
+    const item = makeFloor2Item('raw');
+    item.position.set(K.rawMachine.x + 1.2, F2Y + 0.8, K.rawMachine.z);
+    moveToStack(item, F2.raw, 0.3);
+  }
+  // Pot turns raw ingredients into bowls of rice porridge
+  const cooking = F2.potRaw > 0 && F2.bowls.total < F2_PILE_MAX;
+  if (cooking) {
+    F2.potTimer += dt * machineMult();
+    if (F2.potTimer >= 1.6) {
+      F2.potTimer = 0;
+      F2.potRaw--;
+      const bowl = makeFloor2Item('bowl');
+      bowl.position.set(K.pot.x, F2Y + 1.6, K.pot.z);
+      moveToStack(bowl, F2.bowls, 0.35);
+    }
+  }
+  F2.steam.forEach((p) => {
+    const k = (t * 0.6 + p.userData.phase) % 1;
+    p.visible = cooking || F2.potRaw > 0;
+    p.position.set(Math.sin(k * 9 + p.userData.phase * 6) * 0.3, 1.6 + k * 1.6, Math.cos(k * 7) * 0.3);
+    p.material.opacity = 0.6 * (1 - k);
+  });
+  // Serving the front row
+  const staffed = F2.server || (player.floor === 1 && flatDist(player.group.position, K.serve) < ZONE_R);
+  F2.serveTimer -= dt;
+  for (const c of F2.customers) {
+    if (c.happy > 0) {
+      c.happy -= dt;
+      if (c.happy <= 0) newCustomer(c);
+    } else {
+      c.waited += dt;
+    }
+    const want = c.happy > 0 ? '😊' : c.waited > 35 ? '😡' : `${c.need - c.got}`;
+    if (want !== c.drawn) {
+      c.drawn = want;
+      if (c.happy > 0 || c.waited > 35) c.bubble.userData.draw(want, '');
+      else c.bubble.userData.draw('🍲', want);
+    }
+  }
+  if (staffed && F2.serveTimer <= 0 && F2.shelf.count > 0) {
+    const c = F2.customers.find((x) => x.happy <= 0 && x.got + x.pending < x.need);
+    if (c) {
+      F2.serveTimer = 0.25 / staffMult();
+      const bowl = F2.shelf.take();
+      c.pending++;
+      fly(bowl, bowl.position.clone(), () => c.person.group.getWorldPosition(new THREE.Vector3()).setY(F2Y + 1.0), (m) => {
+        scene.remove(m);
+        c.pending--;
+        c.got++;
+        if (c.got >= c.need) {
+          const tip = c.waited < 15 ? 1.2 : 1;
+          f2Pay(Math.round(c.need * BOWL_PRICE * priceMult() * tip), c.person.group.getWorldPosition(new THREE.Vector3()));
+          c.happy = rand(2, 4);
+          c.drawn = '';
+        }
+      });
+    }
+  }
+  updateCrowd(t);
+}
+
+// ---------- inpatient ward ----------
+function buildWard(animate) {
+  const roots = [f2Machine(W.ivMachine, 0x7fc8f8, '💧 คลังน้ำเกลือ')];
+  F2.ivPile = f2Pile(W.ivPickup);
+  F2.group.add(zoneRing(W.ivPickup, 0xffffff));
+  F2.ward = true;
+  addBeds(2, false);
+  if (animate) roots.forEach(popIn);
+}
+
+function addBeds(n, animate) {
+  for (let i = 0; i < n && F2.beds.length < BED_SPOTS.length; i++) {
+    const at = BED_SPOTS[F2.beds.length];
+    const root = new THREE.Group();
+    const frame = box(1.0, 0.5, 2.0, 0xdfe6ee);
+    frame.position.y = 0.25;
+    const mattress = box(0.95, 0.12, 1.9, 0xffffff);
+    mattress.position.y = 0.56;
+    const pillow = box(0.7, 0.12, 0.35, 0xbfe0ff);
+    pillow.position.set(0, 0.66, -0.75);
+    const pole = box(0.05, 1.7, 0.05, 0xbbbbbb);
+    pole.position.set(0.62, 0.85, -0.8);
+    const bag = box(0.24, 0.4, 0.06, 0x9fd8ff);
+    bag.position.set(0.62, 1.55, -0.8);
+    root.add(frame, mattress, pillow, pole, bag);
+    root.position.set(at.x, 0, at.z);
+    F2.group.add(root); // no collider: beds are low, and rows of them shouldn't wall off the ward
+    const bed = { at, root, bag, iv: 0.6, patient: null, stay: 0, empty: 1 + i * 2, earn: 0, drawn: '' };
+    bed.ring = zoneRing(bedZone(bed), 0x9fd8ff);
+    F2.group.add(bed.ring);
+    bed.bubble = makeBubble();
+    bed.bubble.position.set(at.x, 1.9, at.z);
+    F2.group.add(bed.bubble);
+    F2.beds.push(bed);
+    if (animate) popIn(root);
+  }
+}
+
+function updateWard(dt) {
+  F2.ivTimer -= dt;
+  if (F2.ivTimer <= 0 && F2.ivPile.total < F2_PILE_MAX) {
+    F2.ivTimer = 1.6 / machineMult();
+    const item = makeFloor2Item('iv');
+    item.position.set(W.ivMachine.x + 1.2, F2Y + 0.8, W.ivMachine.z);
+    moveToStack(item, F2.ivPile, 0.3);
+  }
+  for (const bed of F2.beds) {
+    if (!bed.patient) {
+      bed.empty -= dt;
+      if (bed.empty <= 0) {
+        // Admit a new patient, lying down with the head on the pillow
+        const p = makePerson({ shirt: 0xa7d8ee, pants: 0xa7d8ee });
+        p.group.rotation.x = -Math.PI / 2;
+        p.group.position.set(bed.at.x, 0.62, bed.at.z + 0.85);
+        F2.group.add(p.group);
+        bed.patient = p;
+        bed.stay = 0;
+      }
+    } else {
+      bed.stay += dt;
+      if (bed.iv > 0) {
+        bed.iv = Math.max(0, bed.iv - dt / 45);
+        bed.earn += BED_RATE * priceMult() * dt;
+        if (bed.earn >= 5) {
+          const whole = Math.floor(bed.earn);
+          bed.earn -= whole;
+          f2Pay(whole, bed.at);
+        }
+      }
+      if (bed.stay > 150) {
+        F2.group.remove(bed.patient.group); // discharged, all better
+        floatText(bed.at.clone().setY(F2Y), '🎉 หายดีแล้ว!', '#ffffff');
+        bed.patient = null;
+        bed.empty = 5;
+      }
+    }
+    bed.bag.scale.y = Math.max(0.05, bed.iv);
+    bed.bag.position.y = 1.35 + 0.2 * bed.iv;
+    const want = !bed.patient ? '' : bed.iv < 0.25 ? '💧' : '';
+    if (want !== bed.drawn) {
+      bed.drawn = want;
+      bed.bubble.visible = Boolean(want);
+      if (want) bed.bubble.userData.draw('💧', '!', '#e5484d');
+    }
+  }
+}
+
+// ---------- floor-2 staff ----------
+// A worker that loops through [pickup, drop] legs, carrying up to `cap` items
+function makeRunner(opts, legs, cap = 6) {
+  const person = makePerson(opts);
+  person.group.position.copy(legs[0].at);
+  F2.group.add(person.group);
+  const stack = new Stack(person.body, columnLayout(0.75, -0.42));
+  const w = { person, stack, leg: 0, timer: 0, idle: 0 };
+  w.update = (dt) => {
+    const leg = legs[w.leg];
+    const there = walkTo(person, leg.at, 3.4 * staffMult(), dt);
+    animatePerson(person, !there, dt, stack.total > 0);
+    if (!there) return;
+    w.timer -= dt;
+    if (w.timer > 0) return;
+    w.timer = 0.12 / staffMult();
+    if (leg.pick) {
+      const from = leg.pick();
+      if (from && from.count > 0 && stack.total < cap) {
+        moveToStack(from.take(), stack, 0.2);
+        w.idle = 0;
+        return;
+      }
+      w.idle += 0.12;
+      if (stack.total >= cap || (stack.count > 0 && w.idle > 1.2)) w.leg = (w.leg + 1) % legs.length;
+    } else {
+      if (stack.count > 0 && leg.drop(stack)) {
+        w.idle = 0;
+        return;
+      }
+      // Done here, or stuck (e.g. the pot is full): move on and come back later
+      w.idle += 0.12;
+      if (stack.total === 0 || w.idle > 1.5) {
+        w.leg = (w.leg + 1) % legs.length;
+        w.idle = 0;
+      }
+    }
+  };
+  staff.push(w);
+  return w;
+}
+
+function dropIntoPot(stack) {
+  if (F2.potRaw >= POT_MAX) return false;
+  const item = stack.take('raw');
+  if (!item) return false;
+  F2.potRaw++;
+  fly(item, item.position.clone(), () => K.pot.clone().setY(F2Y + 1.5), (m) => scene.remove(m), 0.25, 0.8);
+  return true;
+}
+function dropOnCounter(stack) {
+  if (F2.shelf.total >= 16) return false;
+  const item = stack.take('bowl');
+  if (!item) return false;
+  moveToStack(item, F2.shelf, 0.2);
+  return true;
+}
+function refillBed(stack, bed) {
+  if (!bed?.patient || bed.iv > 0.7) return false;
+  const item = stack.take('iv');
+  if (!item) return false;
+  fly(item, item.position.clone(), () => bed.bag.getWorldPosition(new THREE.Vector3()), (m) => scene.remove(m), 0.25, 0.6);
+  bed.iv = 1;
+  return true;
+}
+const neediestBed = () => F2.beds.filter((b) => b.patient && b.iv < 0.5).sort((a, b) => a.iv - b.iv)[0];
+
+function hireCook(animate) {
+  F2.cook = makeRunner({ shirt: 0xffffff, pants: 0x2b2d42, cap: true }, [
+    { at: K.rawPickup, pick: () => F2.raw },
+    { at: K.potInput, drop: dropIntoPot },
+    { at: K.bowlPickup, pick: () => F2.bowls },
+    { at: K.drop, drop: dropOnCounter },
+  ]);
+  if (animate) popIn(F2.cook.person.group);
+}
+function hireServer(animate) {
+  const p = makePerson({ shirt: 0xf5a623, pants: 0x2b2d42 });
+  p.group.position.set(K.serve.x, 0, K.serve.z);
+  p.group.rotation.y = Math.PI / 2;
+  F2.group.add(p.group);
+  F2.server = p;
+  staff.push({ person: p, update: (dt) => animatePerson(p, false, dt) });
+  if (animate) popIn(p.group);
+}
+function hireWardNurse(animate) {
+  F2.wardNurse = makeRunner({ shirt: 0x48cae4, pants: 0x48cae4, cap: true }, [
+    { at: W.ivPickup, pick: () => (neediestBed() ? F2.ivPile : null) },
+    { get at() { return neediestBed() ? bedZone(neediestBed()) : W.ivPickup; }, drop: (s) => refillBed(s, neediestBed()) },
+  ], 4);
+  if (animate) popIn(F2.wardNurse.person.group);
+}
+
+// ---------- cash basket: floor-2 earnings ride a rope down to the ground ----------
+const basket = { built: false, mesh: null, rope: null, y: F2Y + 0.3, state: 'top', load: 0, wait: 0, pile: null };
+function buildBasket() {
+  const crane = new THREE.Group();
+  const post = box(0.16, 2.2, 0.16, 0xf5a623);
+  post.position.set(0, F2Y + 1.1, -0.6);
+  const arm = box(0.12, 0.12, 1.0, 0xf5a623);
+  arm.position.set(0, F2Y + 2.2, -0.1);
+  crane.add(post, arm);
+  crane.position.set(BASKET_AT.x, 0, BASKET_AT.z);
+  scene.add(crane);
+  basket.mesh = new THREE.Group();
+  const tray = box(0.9, 0.3, 0.7, 0x8a5a30);
+  const cash = box(0.7, 0.12, 0.5, 0x2e9e4f);
+  cash.position.y = 0.2;
+  basket.cash = cash;
+  basket.mesh.add(tray, cash);
+  basket.mesh.position.set(BASKET_AT.x, basket.y, BASKET_AT.z + 0.4);
+  scene.add(basket.mesh);
+  basket.rope = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1, 6), mat(0x444444));
+  scene.add(basket.rope);
+  basket.pile = new MoneyPile(BASKET_AT.clone().add(v(0, 0.1)));
+  basket.built = true;
+}
+function updateBasket(dt) {
+  if (!basket.built) return;
+  if (basket.state === 'top') {
+    basket.wait += dt;
+    if (basket.wait > 3 && F2.bank >= 1) {
+      basket.load = Math.floor(F2.bank);
+      F2.bank -= basket.load;
+      basket.state = 'down';
+      basket.wait = 0;
+    }
+  } else if (basket.state === 'down') {
+    basket.y = Math.max(0.3, basket.y - dt * 3);
+    if (basket.y <= 0.3) {
+      basket.pile.add(basket.load);
+      floatText(BASKET_AT, `💰 +${basket.load.toLocaleString()} จากชั้น 2`, '#8be08f');
+      basket.load = 0;
+      basket.state = 'up';
+    }
+  } else {
+    basket.y = Math.min(F2Y + 0.3, basket.y + dt * 3);
+    if (basket.y >= F2Y + 0.3) basket.state = 'top';
+  }
+  basket.cash.visible = basket.load > 0 || (basket.state === 'top' && F2.bank >= 1);
+  basket.mesh.position.y = basket.y;
+  const ropeTop = F2Y + 2.2;
+  const len = ropeTop - basket.y - 0.15;
+  basket.rope.scale.y = Math.max(0.01, len);
+  basket.rope.position.set(BASKET_AT.x, basket.y + 0.15 + len / 2, BASKET_AT.z + 0.4);
+  basket.pile.collect(dt);
+}
+
+// ---------- player on floor 2 ----------
+function floor2Actions(pos, stack) {
+  const near = (p) => flatDist(pos, p) < ZONE_R + 0.2;
+  if (near(TRASH2) && stack.count > 0) {
+    const item = stack.take();
+    fly(item, item.position.clone(), () => TRASH2.clone().setY(F2Y + 0.9), (m) => scene.remove(m), 0.22, 0.6);
+    return true;
+  }
+  if (F2.kitchen) {
+    if (near(K.rawPickup) && F2.raw.count > 0 && stack.total < bagCapacity()) return moveToStack(F2.raw.take(), stack, 0.2), true;
+    if (near(K.potInput) && dropIntoPot(stack)) return true;
+    if (near(K.bowlPickup) && F2.bowls.count > 0 && stack.total < bagCapacity()) return moveToStack(F2.bowls.take(), stack, 0.2), true;
+    if (near(K.drop) && dropOnCounter(stack)) return true;
+  }
+  if (F2.ward) {
+    if (near(W.ivPickup) && F2.ivPile.count > 0 && stack.total < bagCapacity()) return moveToStack(F2.ivPile.take(), stack, 0.2), true;
+    for (const bed of F2.beds) if (near(bedZone(bed)) && refillBed(stack, bed)) return true;
+  }
+  return false;
+}
+
+// What should the doctor do upstairs? (used by AUTO and the guide arrow)
+function floor2Tasks() {
+  const stack = player.stack;
+  const cap = bagCapacity();
+  const tasks = [];
+  const tileHere = tile && (tile.u.floor || 0) === 1;
+  if (tile && state.money >= tile.u.price - state.paid) {
+    const t = tile;
+    tasks.push(tileHere ? { at: t.u.at, keep: () => tile === t && state.money > 0 } : { at: ELEVATOR, keep: () => player.floor === 1 });
+  }
+  if (stack.countOf('raw') > 0 && F2.potRaw < POT_MAX) tasks.push({ at: K.potInput, keep: () => stack.countOf('raw') > 0 && F2.potRaw < POT_MAX });
+  if (stack.countOf('bowl') > 0 && F2.shelf.total < 16) tasks.push({ at: K.drop, keep: () => stack.countOf('bowl') > 0 && F2.shelf.total < 16 });
+  const bed = neediestBed();
+  if (stack.countOf('iv') > 0 && bed) tasks.push({ at: bedZone(bed), keep: () => stack.countOf('iv') > 0 && bed.iv < 0.7 });
+  const usable = stack.items.every((m) => ['raw', 'bowl', 'iv'].includes(m.userData.type));
+  if (stack.count > 0 && (!usable || !tasks.length)) tasks.push({ at: TRASH2, keep: () => player.stack.count > 0 });
+  if (F2.kitchen && !F2.server && F2.shelf.count > 0 && F2.customers.some((c) => c.happy <= 0)) {
+    tasks.push({ at: K.serve, keep: () => F2.shelf.count > 0 && F2.customers.some((c) => c.happy <= 0 && c.got + c.pending < c.need) });
+  }
+  if (F2.kitchen && !F2.cook && stack.total < cap) {
+    if (F2.bowls.count > 0 && F2.shelf.total < 16) tasks.push({ at: K.bowlPickup, keep: () => stack.total < cap && F2.bowls.count > 0 });
+    if (F2.raw.count > 0 && F2.potRaw < POT_MAX) tasks.push({ at: K.rawPickup, keep: () => stack.total < cap && F2.raw.count > 0 && stack.countOf('raw') + F2.potRaw < POT_MAX });
+  }
+  if (F2.ward && !F2.wardNurse && bed && stack.total < cap && F2.ivPile.count > 0) {
+    tasks.push({ at: W.ivPickup, keep: () => stack.countOf('iv') < 3 && F2.ivPile.count > 0 });
+  }
+  // Nothing to do up here: go down (cash waits in the basket pile)
+  tasks.push({ at: ELEVATOR, keep: () => player.floor === 1 });
+  return tasks;
+}
+
+// Upstairs income for the away-earnings estimate (per second, before the away rate)
+function floor2PerSecond() {
+  let rate = 0;
+  if (F2.kitchen && F2.cook && F2.server) rate += (machineMult() / 1.6) * BOWL_PRICE * priceMult();
+  if (F2.ward && F2.wardNurse) rate += F2.beds.length * BED_RATE * priceMult() * (150 / 155);
+  return rate;
+}
+
+function floor2Snapshot() {
+  if (!F2.built) return null;
+  return {
+    bank: Math.floor(F2.bank), basket: basket.pile ? basket.pile.amount + basket.load : 0, potRaw: F2.potRaw,
+    raw: F2.raw?.count || 0, bowls: F2.bowls?.count || 0, shelf: F2.shelf?.count || 0, iv: F2.ivPile?.count || 0,
+    beds: F2.beds.map((b) => +b.iv.toFixed(2)),
+  };
+}
+function restoreFloor2(s) {
+  if (!s || !F2.built) return;
+  F2.bank = s.bank || 0;
+  if (basket.pile) basket.pile.add(s.basket || 0);
+  const fill = (stack, n, type) => {
+    for (let i = 0; i < Math.min(n || 0, F2_PILE_MAX); i++) stack.place(makeFloor2Item(type));
+  };
+  if (F2.kitchen) {
+    F2.potRaw = Math.min(s.potRaw || 0, POT_MAX);
+    fill(F2.raw, s.raw, 'raw');
+    fill(F2.bowls, s.bowls, 'bowl');
+    for (let i = 0; i < Math.min(s.shelf || 0, 16); i++) F2.shelf.place(makeFloor2Item('bowl'));
+  }
+  if (F2.ward) {
+    fill(F2.ivPile, s.iv, 'iv');
+    (s.beds || []).forEach((iv, i) => {
+      if (F2.beds[i]) F2.beds[i].iv = iv;
+    });
+  }
+}
+
+function updateFloor2(dt) {
+  if (F2.kitchen) updateKitchen(dt);
+  if (F2.ward) updateWard(dt);
+  updateBasket(dt);
 }
 
 // ---------- player actions ----------
@@ -1754,6 +2474,14 @@ function playerActions(dt) {
   if (actTimer > 0) return;
   const pos = player.group.position;
   const stack = player.stack;
+  if (player.floor === 1) {
+    if (floor2Actions(pos, stack)) {
+      actTimer = 0.07;
+      sfxPop();
+      updateBag();
+    }
+    return;
+  }
   // Standing at the bin empties the bag, one item at a time
   if (flatDist(pos, TRASH) < ZONE_R + 0.2 && stack.count > 0) {
     const item = stack.take();
@@ -1853,6 +2581,7 @@ function readInput() {
 // Push a circle out of every collider box
 function collide(pos, r = 0.35) {
   for (const c of colliders) {
+    if (c.floor !== player.floor) continue;
     const cx = Math.max(c.x0, Math.min(pos.x, c.x1));
     const cz = Math.max(c.z0, Math.min(pos.z, c.z1));
     const dx = pos.x - cx;
@@ -1869,9 +2598,15 @@ function collide(pos, r = 0.35) {
   }
   pos.x = Math.max(-40, Math.min(40, pos.x));
   pos.z = Math.max(-30, Math.min(30, pos.z));
+  if (player.floor === 1) {
+    // Stay on the platform upstairs
+    pos.x = Math.max(FLOOR.x0 + 0.2, Math.min(FLOOR.x1 - 0.2, pos.x));
+    pos.z = Math.max(FLOOR.z0 + 0.2, Math.min(FLOOR.z1 - 0.2, pos.z));
+  }
 }
 
 function updatePlayer(dt) {
+  if (updateElevator(dt)) return;
   readInput();
   autopilot(dt);
   const speed = 6.2 * speedMult();
@@ -1899,6 +2634,7 @@ try {
 const AUTO_DELAY = 2; // seconds without input before the autopilot takes over
 
 function autoTasks() {
+  if (player.floor === 1) return floor2Tasks();
   const stack = player.stack;
   const cap = bagCapacity();
   const lines = Object.values(LINES).filter((l) => l.active);
@@ -1906,7 +2642,9 @@ function autoTasks() {
   const tasks = [];
   if (tile && state.money >= tile.u.price - state.paid) {
     const t = tile;
-    tasks.push({ at: t.u.at, keep: () => tile === t && state.money > 0 });
+    // Upstairs tiles: ride the elevator first
+    if (t.u.floor) tasks.push({ at: ELEVATOR, keep: () => player.floor === 0 });
+    else tasks.push({ at: t.u.at, keep: () => tile === t && state.money > 0 });
   }
   for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
     if (stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) {
@@ -1933,7 +2671,7 @@ function autoTasks() {
   for (const room of rooms) {
     if (!room.staffHired && room.queue[0]?.arrived) tasks.push({ at: room.operator, keep: () => room.queue[0]?.arrived });
   }
-  const piles = [...lines, ...rooms].map((x) => x.cash).sort((a, b) => b.amount - a.amount);
+  const piles = [...lines, ...rooms].map((x) => x.cash).concat(basket.pile ? [basket.pile] : []).sort((a, b) => b.amount - a.amount);
   if (piles[0]?.amount >= 15) tasks.push({ at: piles[0].pos, keep: () => piles[0].amount > 0 });
   if (stack.total < cap) {
     for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
@@ -1978,11 +2716,11 @@ function autopilot(dt) {
   }
   if (!auto.task) return;
   const pos = player.group.position;
-  const way = route(pos, auto.task.at);
+  const way = player.floor === 1 ? auto.task.at : route(pos, auto.task.at);
   const dx = way.x - pos.x;
   const dz = way.z - pos.z;
   const d = Math.hypot(dx, dz);
-  if (d < 0.25) return;
+  if (d < 0.25 && way === auto.task.at) return;
   // If a wall or counter blocks the straight line, side-step for a moment
   if (auto.nudge > 0) {
     auto.nudge -= dt;
@@ -2059,6 +2797,7 @@ function idleIncome(seconds) {
   rooms.forEach((room) => {
     if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), staffMult() / room.time) * room.price * priceMult();
   });
+  perSecond += floor2PerSecond();
   const t = Math.min(seconds, OFFLINE_CAP);
   return { amount: Math.floor(perSecond * t * OFFLINE_RATE), perHour: Math.round(perSecond * 3600 * OFFLINE_RATE), seconds: t };
 }
@@ -2116,10 +2855,12 @@ function guideTarget() {
     const at = TUTORIAL[state.tutorial].at?.();
     if (at) return at;
   }
+  if (player.floor === 1) return floor2Tasks()[0]?.at || null;
   const stack = player.stack;
   const pill = LINES.pill;
   const piles = [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.cash);
-  if (tile && state.money >= tile.u.price - state.paid) return tile.u.at;
+  if (basket.pile) piles.push(basket.pile);
+  if (tile && state.money >= tile.u.price - state.paid) return tile.u.floor ? ELEVATOR : tile.u.at;
   if (stack.count > 0) {
     for (const line of Object.values(LINES)) if (line.active && stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) return line.drop;
   }
@@ -2138,7 +2879,7 @@ function updateGuide() {
     return;
   }
   guideHolder.visible = true;
-  guideHolder.position.set(pos.x, 0.25, pos.z);
+  guideHolder.position.set(pos.x, pos.y + 0.25, pos.z);
   guideHolder.rotation.y = Math.atan2(target.x - pos.x, target.z - pos.z);
   guide.position.z = 1.3 + Math.sin(performance.now() / 180) * 0.12;
 }
@@ -2173,7 +2914,7 @@ function updateBag() {
 }
 function updateGoal() {
   const u = UNLOCKS[state.step];
-  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label} · 💵${u.price}`
+  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label}${u.floor ? ' (ชั้น 2)' : ''} · 💵${u.price}`
     : canOpenBranch() ? '🏆 ครบทุกแผนก! กด 🗺️ เพื่อเปิดสาขาใหม่' : '🏆 สาขานี้ครบทุกแผนกแล้ว!';
 }
 
@@ -2577,6 +3318,7 @@ function branchSnapshot() {
   return {
     step: state.step, paid: state.paid, upgrades: state.upgrades, rating: state.rating, savedAt: Date.now(),
     idleRate: idleIncome(3600).perHour / 3600,
+    f2: floor2Snapshot(),
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
@@ -2669,6 +3411,7 @@ function load() {
     line.cash.add(p.cash || 0);
   }
   for (const [id, amount] of Object.entries(br.roomCash || {})) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
+  restoreFloor2(br.f2);
   shownMoney = state.money;
   if (data.savedAt) awayOnLoad = (Date.now() - data.savedAt) / 1000;
   localSavedAt = data.savedAt || 0;
@@ -2683,7 +3426,7 @@ function updateCamera(dt, snap = false) {
   camPos.copy(player.group.position).addScaledVector(camOffset, k);
   if (snap) camera.position.copy(camPos);
   else camera.position.lerp(camPos, Math.min(1, dt * 6));
-  camera.lookAt(player.group.position.x, 0.5, player.group.position.z - 0.5);
+  camera.lookAt(player.group.position.x, player.group.position.y + 0.5, player.group.position.z - 0.5);
   // Keep the sun's shadow box centred on the action
   sun.position.set(player.group.position.x + 9, 18, player.group.position.z + 8);
   sun.target.position.set(player.group.position.x, 0, player.group.position.z);
@@ -2704,6 +3447,7 @@ function frame(now) {
     updatePatients(dt);
     updateSpills(dt);
     tickOtherBranches(dt);
+    updateFloor2(dt);
     staff.forEach((s) => s.update(dt));
     updateAmbulance(dt);
     updateTile(dt);
@@ -2716,6 +3460,8 @@ function frame(now) {
   }
   for (const belt of belts) belt.material.map.offset.x -= dt * 0.9;
   if (trashLid) trashLid.rotation.z *= Math.max(0, 1 - dt * 6);
+  // Floor-2 items in flight hide with floor 2
+  for (const f of flyers) if (f.mesh.userData.f2) f.mesh.visible = F2.group.visible || f.mesh.parent !== scene;
   updateFlyers(dt);
   updatePops(dt);
   updateConfetti(dt);
@@ -3058,4 +3804,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
