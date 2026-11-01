@@ -455,7 +455,8 @@ function route(from, to) {
   if (from.x > HALL_X) return v(Math.max(from.x, HALL_X + 1), to.z); // hallway runs the full length
   const sgn = bt > bf ? 1 : -1;
   const b = BOUNDS[sgn > 0 ? bf : bf - 1];
-  const inDoor = Math.abs(from.x - DOOR_X) < 0.5 && Math.abs(from.z - b) < 0.8;
+  // Generous enough that stopping anywhere near the approach point counts as at the door
+  const inDoor = Math.abs(from.x - DOOR_X) < 0.6 && Math.abs(from.z - b) < 1.05;
   return inDoor ? v(DOOR_X, b + sgn * 0.9) : v(DOOR_X, b - sgn * 0.7);
 }
 
@@ -709,6 +710,9 @@ function makeBubble() {
 // ---------- floating text ----------
 const floats = [];
 function floatText(worldPos, text, color = '#ffffff') {
+  // Only show popups from the floor being viewed
+  const upstairs = worldPos.y >= F2Y - 1;
+  if (F2.group.visible !== upstairs && worldPos !== player.group.position) return;
   const el = document.createElement('div');
   el.className = 'float';
   el.textContent = text;
@@ -739,7 +743,7 @@ function burst(pos) {
   const colors = [0xffd166, 0xe5484d, 0x3d8bfd, 0x3fbf5f, 0xffffff];
   for (let i = 0; i < 40; i++) {
     const m = box(0.12, 0.12, 0.04, pick(colors), { shadow: false });
-    m.position.set(pos.x, 0.6, pos.z);
+    m.position.set(pos.x, pos.y + 0.6, pos.z);
     scene.add(m);
     confetti.push({ m, vel: new THREE.Vector3(rand(-3, 3), rand(5, 9), rand(-3, 3)), t: 0 });
   }
@@ -1362,6 +1366,9 @@ function updatePatients(dt) {
     }
   }
   for (let i = patients.length - 1; i >= 0; i--) if (!patients[i].update(dt)) patients.splice(i, 1);
+  // Bubbles draw on top of everything, so hide downstairs ones while the player is upstairs
+  const downstairs = !F2.group.visible;
+  for (const p of patients) p.bubble.visible = downstairs;
 }
 
 function buildWaitingRoom(animate) {
@@ -1733,8 +1740,9 @@ function updateTile(dt) {
     state.step++;
     state.unlocked.add(u.id);
     applyUnlock(u.id, true);
-    burst(u.at);
-    floatText(u.at, `ปลดล็อก! ${u.icon}`, '#ffd166');
+    const at = u.at.clone().setY(u.floor ? F2Y : 0);
+    burst(at);
+    floatText(at, `ปลดล็อก! ${u.icon}`, '#ffd166');
     sfxUnlock();
     showNextTile();
     save();
@@ -2155,8 +2163,7 @@ function addBeds(n, animate) {
     bag.position.set(0.62, 1.55, -0.8);
     root.add(frame, mattress, pillow, pole, bag);
     root.position.set(at.x, 0, at.z);
-    F2.group.add(root);
-    addCollider(at.x, at.z, 1.0, 2.0, 1);
+    F2.group.add(root); // no collider: beds are low, and rows of them shouldn't wall off the ward
     const bed = { at, root, bag, iv: 0.6, patient: null, stay: 0, empty: 1 + i * 2, earn: 0, drawn: '' };
     bed.ring = zoneRing(bedZone(bed), 0x9fd8ff);
     F2.group.add(bed.ring);
@@ -2393,7 +2400,8 @@ function floor2Tasks() {
   const tasks = [];
   const tileHere = tile && (tile.u.floor || 0) === 1;
   if (tile && state.money >= tile.u.price - state.paid) {
-    tasks.push(tileHere ? { at: tile.u.at, keep: () => tile && state.money > 0 } : { at: ELEVATOR, keep: () => player.floor === 1 });
+    const t = tile;
+    tasks.push(tileHere ? { at: t.u.at, keep: () => tile === t && state.money > 0 } : { at: ELEVATOR, keep: () => player.floor === 1 });
   }
   if (stack.countOf('raw') > 0 && F2.potRaw < POT_MAX) tasks.push({ at: K.potInput, keep: () => stack.countOf('raw') > 0 && F2.potRaw < POT_MAX });
   if (stack.countOf('bowl') > 0 && F2.shelf.total < 16) tasks.push({ at: K.drop, keep: () => stack.countOf('bowl') > 0 && F2.shelf.total < 16 });
@@ -2712,7 +2720,7 @@ function autopilot(dt) {
   const dx = way.x - pos.x;
   const dz = way.z - pos.z;
   const d = Math.hypot(dx, dz);
-  if (d < 0.25) return;
+  if (d < 0.25 && way === auto.task.at) return;
   // If a wall or counter blocks the straight line, side-step for a moment
   if (auto.nudge > 0) {
     auto.nudge -= dt;
