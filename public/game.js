@@ -21,8 +21,17 @@ function makeLine(id, z) {
   };
 }
 const LINES = { pill: makeLine('pill', -7), vaccine: makeLine('vaccine', -1) };
-const XRAY = { bed: v(2.2, 4.6), operator: v(0.4, 4.6), money: v(0.3, 6.6), active: false, queue: [], scan: 0, operatorHired: false, price: 25 };
-const SPAWN = v(7.2, 11);
+// Service rooms: a patient lies on the bed while someone stands at the operator spot
+function makeRoom(id, z, { price, time, icon, money }) {
+  return { id, bed: v(2.2, z), operator: v(0.4, z), money, price, time, icon, active: false, queue: [], scan: 0, staffHired: false };
+}
+const ROOMS = {
+  xray: makeRoom('xray', 4.6, { price: 25, time: 2.2, icon: '🩻', money: v(0.3, 6.6) }),
+  dental: makeRoom('dental', 8.2, { price: 40, time: 2.6, icon: '🦷', money: v(0.3, 10.1) }),
+  surgery: makeRoom('surgery', 11.4, { price: 90, time: 4.0, icon: '🫀', money: v(-1.6, 12.4) }),
+};
+const ROAD_Z = 17;
+const SPAWN = v(7.2, ROAD_Z);
 const PLAYER_START = v(-1, -4);
 
 // Unlocks are bought one at a time, in this order
@@ -37,7 +46,11 @@ const UNLOCKS = [
   { id: 'xray', label: 'ห้องเอกซเรย์', icon: '🩻', price: 800, at: v(2.2, 4.6) },
   { id: 'radtech', label: 'จ้างนักรังสีเทคนิค', icon: '🧑‍🔬', price: 900, at: v(-1.4, 4.6) },
   { id: 'bag2', label: 'กระเป๋าใหญ่สุด', icon: '🎒', price: 1000, at: v(-2.2, -9.4) },
-  { id: 'ambulance', label: 'รถพยาบาลรับคนไข้', icon: '🚑', price: 1200, at: v(5.6, 9.2) },
+  { id: 'ambulance', label: 'รถพยาบาลรับคนไข้', icon: '🚑', price: 1200, at: v(5.6, 15.2) },
+  { id: 'dental', label: 'ห้องทันตกรรม', icon: '🦷', price: 1500, at: v(2.2, 8.2) },
+  { id: 'dentist', label: 'จ้างทันตแพทย์', icon: '🧑‍⚕️', price: 1700, at: v(-1.4, 8.2) },
+  { id: 'surgery', label: 'ห้องผ่าตัด', icon: '🫀', price: 2500, at: v(2.2, 11.4) },
+  { id: 'surgeon', label: 'จ้างศัลยแพทย์', icon: '🧑‍⚕️', price: 2800, at: v(-3.4, 11) },
 ];
 
 const PILE_MAX = 27; // 3 layers of 3x3 at the machine
@@ -120,7 +133,7 @@ const flatDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const tmpV = new THREE.Vector3();
 
 // ---------- world ----------
-const FLOOR = { x0: -9, x1: 9, z0: -11, z1: 7.5 };
+const FLOOR = { x0: -9, x1: 9, z0: -11, z1: 13.5 };
 const colliders = []; // axis-aligned boxes the player can't walk through: {x0, x1, z0, z1}
 function addCollider(cx, cz, w, d) {
   colliders.push({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2 });
@@ -162,8 +175,9 @@ function buildWorld() {
     scene.add(m);
     addCollider(cx, cz, w, d);
   };
-  wall(-9.15, -1.75, 0.3, fd + 0.3);
-  wall(9.15, -1.75, 0.3, fd + 0.3);
+  const cz = (FLOOR.z0 + FLOOR.z1) / 2;
+  wall(-9.15, cz, 0.3, fd + 0.3);
+  wall(9.15, cz, 0.3, fd + 0.3);
   wall(0, FLOOR.z0 - 0.15, fw + 0.6, 0.3);
   wall(-2.25, FLOOR.z1 + 0.15, 13.5, 0.3);
 
@@ -199,19 +213,19 @@ function buildWorld() {
   // Road with dashes
   const road = new THREE.Mesh(new THREE.PlaneGeometry(160, 3.4), mat(0x55606e));
   road.rotation.x = -Math.PI / 2;
-  road.position.set(0, 0.02, 11);
+  road.position.set(0, 0.02, ROAD_Z);
   road.receiveShadow = true;
   scene.add(road);
   for (let x = -60; x < 60; x += 3) {
     const dash = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.18), mat(0xffffff));
     dash.rotation.x = -Math.PI / 2;
-    dash.position.set(x, 0.03, 11);
+    dash.position.set(x, 0.03, ROAD_Z);
     scene.add(dash);
   }
   // Path from the road to the entrance
-  const path = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 2.4), mat(0xe8dcc8));
+  const path = new THREE.Mesh(new THREE.PlaneGeometry(3.6, ROAD_Z - FLOOR.z1 - 1.7), mat(0xe8dcc8));
   path.rotation.x = -Math.PI / 2;
-  path.position.set(7.1, 0.025, 8.6);
+  path.position.set(7.1, 0.025, (FLOOR.z1 + ROAD_Z - 1.7) / 2);
   scene.add(path);
 
   // Trees, kept off the floor, road and path
@@ -220,7 +234,7 @@ function buildWorld() {
     const x = rand(-30, 30);
     const z = rand(-26, 26);
     const onFloor = x > FLOOR.x0 - 1.5 && x < FLOOR.x1 + 1.5 && z > -15.5 && z < FLOOR.z1 + 1.2;
-    if (onFloor || (z > 8.6 && z < 13.4)) continue;
+    if (onFloor || (z > ROAD_Z - 2.4 && z < ROAD_Z + 2.4)) continue;
     const tree = new THREE.Group();
     const trunk = box(0.35, 1.2, 0.35, 0x8a5a30);
     trunk.position.y = 0.6;
@@ -743,10 +757,18 @@ function updateLine(line, dt) {
   line.cash.collect(dt);
 }
 
-// ---------- X-ray room ----------
-function buildXray(animate) {
-  const root = new THREE.Group();
-  root.position.set(XRAY.bed.x, 0, XRAY.bed.z);
+// ---------- service rooms ----------
+// Floating sign texture drawn on a dark rounded card
+function signTexture(draw) {
+  return canvasTexture(128, 128, (g) => {
+    g.fillStyle = '#16213e';
+    roundRect(g, 4, 4, 120, 120, 16);
+    g.fill();
+    draw(g);
+  });
+}
+
+function xrayModel(root, room) {
   const bed = box(1.0, 0.55, 2.2, 0xffffff);
   bed.position.y = 0.28;
   const pad = box(0.9, 0.08, 2.0, 0x8ecae6);
@@ -754,66 +776,138 @@ function buildXray(animate) {
   const arch = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.2, 10, 24, Math.PI), mat(0xdfe6ee));
   arch.position.y = 0.3;
   arch.castShadow = true;
-  const beam = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.25), new THREE.MeshBasicMaterial({ color: 0x5dff9a, transparent: true, opacity: 0.0, side: THREE.DoubleSide }));
+  const beam = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.25), new THREE.MeshBasicMaterial({ color: 0x5dff9a, transparent: true, opacity: 0, side: THREE.DoubleSide }));
   beam.rotation.x = -Math.PI / 2;
   beam.position.y = 1.0;
   root.add(bed, pad, arch, beam);
-  XRAY.beam = beam;
-  // Floating X-ray film sign
-  const film = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.4), new THREE.MeshBasicMaterial({
-    map: canvasTexture(128, 128, (g) => {
-      g.fillStyle = '#16213e';
-      roundRect(g, 4, 4, 120, 120, 16);
-      g.fill();
-      g.strokeStyle = '#cfe8ff';
-      g.lineWidth = 7;
-      g.lineCap = 'round';
-      g.beginPath(); g.moveTo(64, 22); g.lineTo(64, 106); g.stroke();
-      for (let k = 0; k < 4; k++) {
-        g.beginPath(); g.ellipse(64, 44 + k * 14, 30, 7, 0, Math.PI, 0); g.stroke();
-      }
-    }),
-    side: THREE.DoubleSide,
-  }));
-  film.position.y = 3.0;
-  root.add(film);
-  XRAY.film = film;
+  room.effect = (on, t) => {
+    beam.material.opacity = on ? 0.7 : 0;
+    beam.position.z = Math.sin(t * 5) * 0.9;
+  };
+  return signTexture((g) => {
+    g.strokeStyle = '#cfe8ff';
+    g.lineWidth = 7;
+    g.lineCap = 'round';
+    g.beginPath(); g.moveTo(64, 22); g.lineTo(64, 106); g.stroke();
+    for (let k = 0; k < 4; k++) {
+      g.beginPath(); g.ellipse(64, 44 + k * 14, 30, 7, 0, Math.PI, 0); g.stroke();
+    }
+  });
+}
+
+function dentalModel(root, room) {
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.4, 12), mat(0xdfe6ee));
+  base.position.y = 0.2;
+  const seat = box(0.9, 0.25, 1.2, 0x48cae4);
+  seat.position.set(0, 0.55, 0.15);
+  const back = box(0.9, 0.25, 1.1, 0x48cae4);
+  back.position.set(0, 0.85, -0.75);
+  back.rotation.x = -0.7;
+  const pole = box(0.1, 1.9, 0.1, 0xdfe6ee);
+  pole.position.set(-0.75, 0.95, -0.6);
+  const arm = box(0.1, 0.1, 0.9, 0xdfe6ee);
+  arm.position.set(-0.75, 1.9, -0.2);
+  const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.2, 0.14, 16), new THREE.MeshBasicMaterial({ color: 0xbbbbbb }));
+  lamp.position.set(-0.5, 1.85, 0.25);
+  lamp.rotation.z = 0.5;
+  root.add(base, seat, back, pole, arm, lamp);
+  // Giant floating tooth
+  const tooth = new THREE.Group();
+  const crown = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 12), mat(0xffffff));
+  crown.scale.set(1, 0.8, 0.85);
+  tooth.add(crown);
+  for (const side of [-1, 1]) {
+    const root2 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.08, 0.7, 10), mat(0xffffff));
+    root2.position.set(side * 0.24, -0.5, 0);
+    root2.rotation.z = side * 0.25;
+    tooth.add(root2);
+  }
+  tooth.traverse((o) => { o.castShadow = true; });
+  room.bigIcon = tooth;
+  room.effect = (on, t) => {
+    lamp.material.color.setHex(on ? (Math.floor(t * 6) % 2 ? 0xfff3a0 : 0xffe066) : 0xbbbbbb);
+  };
+  return null;
+}
+
+function surgeryModel(root, room) {
+  const mat2 = box(2.6, 0.03, 3.2, 0x2a9d8f, { shadow: false });
+  mat2.position.y = 0.14;
+  const table = box(0.9, 0.7, 2.2, 0x7fb7be);
+  table.position.y = 0.35;
+  const sheet = box(0.95, 0.06, 1.6, 0x52b788);
+  sheet.position.set(0, 0.73, 0.2);
+  const pole = box(0.1, 2.4, 0.1, 0xdfe6ee);
+  pole.position.set(-1.0, 1.2, -1.0);
+  const lampArm = box(0.1, 0.1, 1.1, 0xdfe6ee);
+  lampArm.position.set(-1.0, 2.4, -0.5);
+  const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.45, 0.18, 20), new THREE.MeshBasicMaterial({ color: 0xbbbbbb }));
+  lamp.position.set(-0.6, 2.3, 0.1);
+  const monitor = box(0.6, 0.45, 0.1, 0x1d2433);
+  monitor.position.set(1.1, 1.4, -1.0);
+  const stand = box(0.08, 1.2, 0.08, 0xdfe6ee);
+  stand.position.set(1.1, 0.6, -1.0);
+  root.add(mat2, table, sheet, pole, lampArm, lamp, monitor, stand);
+  room.effect = (on, t) => {
+    lamp.material.color.setHex(on ? 0xfffbe0 : 0xbbbbbb);
+    monitor.material = mat(on && Math.floor(t * 3) % 2 ? 0x2dd36f : 0x1d2433);
+  };
+  return signTexture((g) => {
+    g.strokeStyle = '#2dd36f';
+    g.lineWidth = 7;
+    g.lineJoin = 'round';
+    g.beginPath();
+    g.moveTo(14, 70); g.lineTo(42, 70); g.lineTo(52, 40); g.lineTo(64, 100); g.lineTo(76, 54); g.lineTo(84, 70); g.lineTo(114, 70);
+    g.stroke();
+  });
+}
+
+const ROOM_MODELS = { xray: xrayModel, dental: dentalModel, surgery: surgeryModel };
+
+function buildRoom(room, animate) {
+  const root = new THREE.Group();
+  root.position.set(room.bed.x, 0, room.bed.z);
+  const tex = ROOM_MODELS[room.id](root, room);
+  if (tex) {
+    room.bigIcon = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.4), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
+  }
+  room.bigIcon.position.y = 3.0;
+  root.add(room.bigIcon);
   scene.add(root);
-  addCollider(XRAY.bed.x, XRAY.bed.z, 1.1, 2.3);
-  XRAY.cash = new MoneyPile(XRAY.money);
-  zoneRing(XRAY.operator, 0x3fbf5f);
-  XRAY.active = true;
+  addCollider(room.bed.x, room.bed.z, 1.1, 2.3);
+  room.cash = new MoneyPile(room.money);
+  zoneRing(room.operator, 0x3fbf5f);
+  room.active = true;
   if (animate) popIn(root);
 }
 
-function updateXray(dt) {
-  XRAY.film.rotation.y += dt;
-  XRAY.film.position.y = 3.0 + Math.sin(performance.now() / 700) * 0.12;
-  const front = XRAY.queue[0];
-  const staffed = XRAY.operatorHired || flatDist(player.group.position, XRAY.operator) < ZONE_R;
-  if (front && front.arrived && staffed) {
-    XRAY.scan += dt;
-    XRAY.beam.material.opacity = 0.7;
-    XRAY.beam.position.z = Math.sin(XRAY.scan * 5) * 0.9;
-    if (XRAY.scan >= 2.2) {
-      XRAY.scan = 0;
-      XRAY.cash.add(XRAY.price);
-      floatText(XRAY.money, `+${XRAY.price}`, '#8be08f');
+function updateRoom(room, dt) {
+  room.bigIcon.rotation.y += dt;
+  room.bigIcon.position.y = 3.0 + Math.sin(performance.now() / 700) * 0.12;
+  const front = room.queue[0];
+  const staffed = room.staffHired || flatDist(player.group.position, room.operator) < ZONE_R;
+  const working = Boolean(front && front.arrived && staffed);
+  if (working) {
+    room.scan += dt;
+    if (room.scan >= room.time) {
+      room.scan = 0;
+      room.cash.add(room.price);
+      floatText(room.money, `+${room.price}`, '#8be08f');
       sfxCoin();
       front.leave();
-      XRAY.queue.shift();
+      room.queue.shift();
     }
-  } else {
-    XRAY.beam.material.opacity = 0;
   }
-  XRAY.cash.collect(dt);
+  room.effect(working, room.scan);
+  room.cash.collect(dt);
 }
 
 // ---------- patients ----------
 const patients = [];
 
 function queueSlot(kind, i) {
-  if (kind === 'xray') return i === 0 ? XRAY.bed.clone() : v(XRAY.bed.x + 1.3 + i * 1.05, XRAY.bed.z);
+  const room = ROOMS[kind];
+  if (room) return i === 0 ? room.bed.clone() : v(room.bed.x + 1.3 + i * 1.05, room.bed.z);
   const f = LINES[kind].front;
   return v(f.x + i * 1.05, f.z);
 }
@@ -824,7 +918,7 @@ class Patient {
     this.person = makePerson({ shirt: pick(SHIRTS) });
     this.person.group.position.copy(SPAWN);
     scene.add(this.person.group);
-    this.need = kind === 'xray' ? 1 : kind === 'pill' ? 1 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 2);
+    this.need = ROOMS[kind] ? 1 : kind === 'pill' ? 1 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 2);
     this.got = 0;
     this.pending = 0;
     this.arrived = false;
@@ -836,7 +930,7 @@ class Patient {
   }
   refreshBubble() {
     if (this.leaving) this.bubble.userData.draw('😊', '');
-    else if (this.kind === 'xray') this.bubble.userData.draw('🩻', '');
+    else if (ROOMS[this.kind]) this.bubble.userData.draw(ROOMS[this.kind].icon, '');
     else this.bubble.userData.draw(PRODUCTS[this.kind].icon, String(this.need - this.got));
   }
   leave() {
@@ -848,7 +942,7 @@ class Patient {
     let target;
     if (this.leaving) target = SPAWN;
     else {
-      const queue = this.kind === 'xray' ? XRAY.queue : LINES[this.kind].queue;
+      const queue = (ROOMS[this.kind] || LINES[this.kind]).queue;
       target = queueSlot(this.kind, queue.indexOf(this));
     }
     const arrived = walkTo(this.person, target, 3.2, dt);
@@ -871,14 +965,14 @@ let spawnTimer = 1;
 function updatePatients(dt) {
   spawnTimer -= dt;
   if (spawnTimer <= 0) {
-    spawnTimer = (state.unlocked.has('ambulance') ? 1.9 : 3.2) * rand(0.7, 1.3);
+    spawnTimer = (state.unlocked.has('ambulance') ? 1.7 : 3.2) * rand(0.7, 1.3);
     const options = [];
     for (const line of Object.values(LINES)) if (line.active && line.queue.length < 6) options.push(line.id, line.id);
-    if (XRAY.active && XRAY.queue.length < 5) options.push('xray');
+    for (const room of Object.values(ROOMS)) if (room.active && room.queue.length < 5) options.push(room.id);
     if (options.length) {
       const kind = pick(options);
       const p = new Patient(kind);
-      (kind === 'xray' ? XRAY.queue : LINES[kind].queue).push(p);
+      (ROOMS[kind] || LINES[kind]).queue.push(p);
       patients.push(p);
     }
   }
@@ -938,14 +1032,20 @@ function hireCarrier(line, animate) {
   if (animate) popIn(nurse.group);
 }
 
-function hireRadtech(animate) {
-  const tech = makePerson({ shirt: 0x7f8c8d, apron: 0xf1c40f });
-  tech.group.position.copy(XRAY.operator);
-  tech.group.rotation.y = Math.PI / 2;
-  scene.add(tech.group);
-  XRAY.operatorHired = true;
-  staff.push({ person: tech, update: (dt) => animatePerson(tech, false, dt) });
-  if (animate) popIn(tech.group);
+const ROOM_STAFF = {
+  xray: { shirt: 0x7f8c8d, apron: 0xf1c40f }, // radiologic technologist in a lead apron
+  dental: { shirt: 0x7fc8f8, coat: 0xffffff },
+  surgery: { shirt: 0x2a9d8f, pants: 0x2a9d8f, hair: 0x2a9d8f }, // green scrubs and surgical cap
+};
+
+function hireRoomStaff(room, animate) {
+  const person = makePerson(ROOM_STAFF[room.id]);
+  person.group.position.copy(room.operator);
+  person.group.rotation.y = Math.PI / 2;
+  scene.add(person.group);
+  room.staffHired = true;
+  staff.push({ person, update: (dt) => animatePerson(person, false, dt) });
+  if (animate) popIn(person.group);
 }
 
 // Decorative ambulance driving along the road
@@ -969,7 +1069,7 @@ function buildAmbulance(animate) {
     wheel.position.set(x, 0.3, z);
     g.add(wheel);
   }
-  g.position.set(-40, 0, 10.2);
+  g.position.set(-40, 0, ROAD_Z - 0.8);
   scene.add(g);
   ambulance = { g, light };
   if (animate) popIn(g);
@@ -1082,8 +1182,12 @@ function applyUnlock(id, animate) {
     case 'cashier2': hireCashier(LINES.vaccine, animate); break;
     case 'carrier1': hireCarrier(LINES.pill, animate); break;
     case 'carrier2': hireCarrier(LINES.vaccine, animate); break;
-    case 'xray': buildXray(animate); break;
-    case 'radtech': hireRadtech(animate); break;
+    case 'xray': buildRoom(ROOMS.xray, animate); break;
+    case 'radtech': hireRoomStaff(ROOMS.xray, animate); break;
+    case 'dental': buildRoom(ROOMS.dental, animate); break;
+    case 'dentist': hireRoomStaff(ROOMS.dental, animate); break;
+    case 'surgery': buildRoom(ROOMS.surgery, animate); break;
+    case 'surgeon': hireRoomStaff(ROOMS.surgery, animate); break;
     case 'ambulance': buildAmbulance(animate); break;
     default: break; // bag1, bag2, speed: read from state.unlocked where needed
   }
@@ -1228,17 +1332,14 @@ scene.add(guideHolder);
 function guideTarget() {
   const stack = player.stack;
   const pill = LINES.pill;
-  const cashLeft = Object.values(LINES).some((l) => l.active && l.cash.amount > 0) || (XRAY.active && XRAY.cash.amount > 0);
+  const piles = [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.cash);
   if (tile && state.money >= tile.u.price - state.paid) return tile.u.at;
   if (stack.count > 0) {
     for (const line of Object.values(LINES)) if (line.active && stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) return line.drop;
   }
   if (!pill.cashierNurse && pill.queue[0]?.arrived && pill.shelf.count > 0) return pill.cashier;
-  if (cashLeft) {
-    const piles = [...Object.values(LINES).filter((l) => l.active).map((l) => l.cash), ...(XRAY.active ? [XRAY.cash] : [])];
-    const best = piles.filter((p) => p.amount > 0).sort((a, b) => b.amount - a.amount)[0];
-    if (best) return best.pos;
-  }
+  const best = piles.filter((p) => p.amount > 0).sort((a, b) => b.amount - a.amount)[0];
+  if (best) return best.pos;
   if (stack.count === 0 && pill.pile.count > 0) return pill.pickup;
   return tile ? tile.u.at : null;
 }
@@ -1288,19 +1389,84 @@ function updateGoal() {
   goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label} · 💵${u.price}` : '🏆 โรงพยาบาลครบทุกแผนกแล้ว!';
 }
 
-// ---------- sound (tiny WebAudio blips) ----------
+// ---------- sound: WebAudio blips and a looping chiptune ----------
 let audio = null;
-function tone(freq, dur, type = 'sine', vol = 0.06) {
+let master = null;
+let soundOn = true;
+try {
+  soundOn = localStorage.getItem('drquest-sound') !== 'off';
+} catch {
+  // Storage blocked: default to sound on
+}
+
+function initAudio() {
+  if (audio) return;
+  try {
+    audio = new (window.AudioContext || window.webkitAudioContext)();
+  } catch {
+    audio = null;
+    return;
+  }
+  master = audio.createGain();
+  master.gain.value = soundOn ? 1 : 0;
+  master.connect(audio.destination);
+  startMusic();
+}
+
+function tone(freq, dur, type = 'sine', vol = 0.06, at = null) {
   if (!audio) return;
+  const t = at ?? audio.currentTime;
   const o = audio.createOscillator();
   const g = audio.createGain();
   o.type = type;
   o.frequency.value = freq;
-  g.gain.setValueAtTime(vol, audio.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + dur);
-  o.connect(g).connect(audio.destination);
-  o.start();
-  o.stop(audio.currentTime + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(master);
+  o.start(t);
+  o.stop(t + dur);
+}
+
+const midi = (n) => 440 * 2 ** ((n - 69) / 12);
+// Two 4-bar phrases over C - Am - F - G, one note per eighth (0 = rest)
+const MELODY = [
+  72, 76, 79, 76, 74, 72, 74, 76, 76, 0, 72, 0, 69, 72, 74, 0,
+  77, 76, 74, 72, 74, 76, 77, 79, 79, 0, 77, 76, 74, 0, 71, 0,
+  72, 76, 79, 84, 83, 79, 76, 79, 81, 79, 76, 72, 76, 0, 74, 0,
+  77, 81, 79, 77, 76, 74, 72, 74, 71, 74, 79, 77, 76, 74, 72, 0,
+];
+const BASS = [48, 45, 41, 43];
+const STEP = 60 / 138 / 2;
+let musicStep = 0;
+let musicTime = 0;
+
+function startMusic() {
+  musicTime = audio.currentTime + 0.1;
+  setInterval(() => {
+    if (!audio || audio.state !== 'running') return;
+    // Schedule a little ahead so timing stays tight
+    while (musicTime < audio.currentTime + 0.15) {
+      const note = MELODY[musicStep % MELODY.length];
+      if (note) tone(midi(note), STEP * 0.9, 'square', 0.022, musicTime);
+      if (musicStep % 2 === 0) {
+        const root = BASS[Math.floor(musicStep / 8) % BASS.length];
+        tone(midi(musicStep % 4 === 0 ? root : root + 12), STEP * 1.6, 'triangle', 0.05, musicTime);
+      }
+      musicTime += STEP;
+      musicStep++;
+    }
+  }, 40);
+}
+
+function setSound(on) {
+  soundOn = on;
+  if (master) master.gain.value = on ? 1 : 0;
+  document.getElementById('soundbtn').textContent = on ? '🔊' : '🔇';
+  try {
+    localStorage.setItem('drquest-sound', on ? 'on' : 'off');
+  } catch {
+    // Storage blocked: the setting just won't persist
+  }
 }
 let lastPop = 0;
 function sfxPop() {
@@ -1320,7 +1486,7 @@ function save() {
   const data = {
     money: state.money, step: state.step, paid: state.paid,
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
-    xrayCash: XRAY.active ? XRAY.cash.amount : 0,
+    roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -1352,7 +1518,9 @@ function load() {
     for (let i = 0; i < Math.min(p.shelf, SHELF_MAX); i++) line.shelf.place(makeItem(line.product));
     line.cash.add(p.cash || 0);
   }
-  if (XRAY.active) XRAY.cash.add(data.xrayCash || 0);
+  // Older saves kept only the X-ray room's cash
+  const roomCash = data.roomCash || { xray: data.xrayCash || 0 };
+  for (const [id, amount] of Object.entries(roomCash)) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
   shownMoney = state.money;
 }
 
@@ -1382,7 +1550,7 @@ function frame(now) {
     updatePlayer(dt);
     playerActions(dt);
     for (const line of Object.values(LINES)) if (line.active) updateLine(line, dt);
-    if (XRAY.active) updateXray(dt);
+    for (const room of Object.values(ROOMS)) if (room.active) updateRoom(room, dt);
     updatePatients(dt);
     staff.forEach((s) => s.update(dt));
     updateAmbulance(dt);
@@ -1421,12 +1589,15 @@ function start() {
   document.getElementById('hud').style.display = 'flex';
   goalEl.style.display = 'block';
   document.getElementById('hint').style.display = 'block';
-  try {
-    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
-  } catch {
-    audio = null;
-  }
+  initAudio();
+  audio?.resume();
 }
+document.getElementById('soundbtn').addEventListener('click', () => {
+  initAudio();
+  audio?.resume();
+  setSound(!soundOn);
+});
+setSound(soundOn);
 document.getElementById('startbtn').addEventListener('click', start);
 
 const menu = document.getElementById('menu');
@@ -1455,4 +1626,4 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { state, player, LINES, XRAY, UNLOCKS, input: touchVec, patients };
+window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients };
