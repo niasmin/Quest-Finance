@@ -35,7 +35,16 @@
   #bag { font-size: 16px; }
   #bag.full { background: rgba(229, 72, 77, .85); }
   #right { display: flex; flex-direction: column; gap: 8px; }
-  #menubtn, #soundbtn { pointer-events: auto; border: none; color: #fff; font: inherit; font-size: 18px; width: 40px; height: 40px; padding: 0; cursor: pointer; }
+  #autobtn.on { background: linear-gradient(180deg, #ffe08a, #f5a623); box-shadow: 0 0 10px rgba(255, 209, 102, .8); }
+  #autobadge { white-space: nowrap; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(66px + env(safe-area-inset-bottom)); font-size: 15px; display: none; pointer-events: none; }
+  #autobadge.show { display: block; }
+  #away { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 11; }
+  #away .box { background: #fff; color: #1d2433; border-radius: 22px; padding: 24px; width: min(330px, 88vw); text-align: center; line-height: 1.6; }
+  #away .big { font-size: 46px; }
+  #away b { font-size: 28px; color: #2e9e4f; }
+  #away small { color: #6b7790; }
+  #away .btn { margin-top: 14px; }
+  #menubtn, #soundbtn, #autobtn { pointer-events: auto; border: none; color: #fff; font: inherit; font-size: 18px; width: 40px; height: 40px; padding: 0; cursor: pointer; }
   #goal { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 15px; display: none; white-space: nowrap; max-width: 94vw; overflow: hidden; text-overflow: ellipsis; }
 
   #joy { position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.25); border: 3px solid rgba(255,255,255,.6); display: none; pointer-events: none; }
@@ -80,10 +89,13 @@
   <div id="right">
     <button id="menubtn" class="pill" aria-label="เมนู">⚙️</button>
     <button id="soundbtn" class="pill" aria-label="เสียง">🔊</button>
+    <button id="autobtn" class="pill" aria-label="เล่นอัตโนมัติ">🤖</button>
   </div>
 </div>
 <div id="goal" class="pill"></div>
 <div id="hint" class="pill">ลากนิ้วบนจอเพื่อเดิน</div>
+<div id="autobadge" class="pill">🤖 AUTO เล่นให้อยู่ · แตะจอเพื่อเล่นเอง</div>
+<div id="away"><div class="box"><div class="big">🏥</div><p id="awaytext"></p><button id="awayok" class="btn">เก็บเงิน</button></div></div>
 <div id="joy"><div id="knob"></div></div>
 
 <div id="start">

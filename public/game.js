@@ -998,6 +998,7 @@ function hireCarrier(line, animate) {
   scene.add(nurse.group);
   const stack = new Stack(nurse.body, columnLayout(0.75, -0.42));
   const worker = { person: nurse, stack, mode: 'pick', timer: 0, idle: 0 };
+  line.carrier = worker;
   worker.update = (dt) => {
     worker.timer -= dt;
     if (worker.mode === 'pick') {
@@ -1307,6 +1308,7 @@ function collide(pos, r = 0.35) {
 
 function updatePlayer(dt) {
   readInput();
+  autopilot(dt);
   const speed = 6.2;
   const moving = Math.hypot(input.x, input.z) > 0.08;
   playerVel.set(input.x * speed, 0, input.z * speed);
@@ -1318,6 +1320,190 @@ function updatePlayer(dt) {
   // Lean the stack against the motion
   const lean = moving ? 0.12 : 0;
   player.stack.group.rotation.x += (lean * -1 - player.stack.group.rotation.x) * Math.min(1, dt * 6);
+}
+
+// ---------- autopilot ----------
+// With AUTO on, the doctor plays by itself once the player stops steering.
+// It picks the most useful job, walks there and stays until the job is done.
+const auto = { on: true, idle: 0, task: null, retarget: 0, stuck: 0, nudge: 0, nudgeDir: 0, lastDist: Infinity };
+try {
+  auto.on = localStorage.getItem('drquest-auto') !== 'off';
+} catch {
+  // Storage blocked: default to on
+}
+const AUTO_DELAY = 2; // seconds without input before the autopilot takes over
+
+function autoTasks() {
+  const stack = player.stack;
+  const cap = bagCapacity();
+  const lines = Object.values(LINES).filter((l) => l.active);
+  const rooms = Object.values(ROOMS).filter((r) => r.active);
+  const tasks = [];
+  if (tile && state.money >= tile.u.price - state.paid) {
+    const t = tile;
+    tasks.push({ at: t.u.at, keep: () => tile === t && state.money > 0 });
+  }
+  for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
+    if (stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) {
+      tasks.push({ at: line.drop, keep: () => stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX });
+    }
+  }
+  for (const line of lines) {
+    const front = line.queue[0];
+    if (!line.cashierNurse && front?.arrived && line.shelf.count > 0) {
+      tasks.push({ at: line.cashier, keep: () => line.queue[0] && (line.queue[0].pending > 0 || line.shelf.count > 0) });
+    }
+  }
+  for (const room of rooms) {
+    if (!room.staffHired && room.queue[0]?.arrived) tasks.push({ at: room.operator, keep: () => room.queue[0]?.arrived });
+  }
+  const piles = [...lines, ...rooms].map((x) => x.cash).sort((a, b) => b.amount - a.amount);
+  if (piles[0]?.amount >= 15) tasks.push({ at: piles[0].pos, keep: () => piles[0].amount > 0 });
+  if (stack.total < cap) {
+    for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
+      if (!line.carrier && line.pile.count > 0 && line.shelf.total + stack.total < SHELF_MAX) {
+        tasks.push({ at: line.pickup, keep: () => stack.total < cap && line.pile.count > 0 });
+      }
+    }
+  }
+  if (piles[0]?.amount > 0) tasks.push({ at: piles[0].pos, keep: () => piles[0].amount > 0 });
+  // Nothing urgent: wait at the busiest unstaffed cashier so patients get served
+  const waitAt = lines.find((l) => !l.cashierNurse && l.queue.length);
+  if (waitAt) tasks.push({ at: waitAt.cashier, keep: () => false });
+  return tasks;
+}
+
+function autopilot(dt) {
+  const steering = Math.hypot(input.x, input.z) > 0.08;
+  if (steering) {
+    auto.idle = 0;
+    auto.task = null;
+  } else {
+    auto.idle += dt;
+  }
+  const active = auto.on && running && auto.idle >= AUTO_DELAY;
+  autoBadge.classList.toggle('show', active);
+  if (!active) return;
+  document.getElementById('hint').style.display = 'none';
+
+  auto.retarget -= dt;
+  if (!auto.task || auto.retarget <= 0) {
+    auto.retarget = 0.3;
+    if (!auto.task || !auto.task.keep()) {
+      auto.task = autoTasks()[0] || null;
+      auto.lastDist = Infinity;
+      auto.stuck = 0;
+    }
+  }
+  if (!auto.task) return;
+  const pos = player.group.position;
+  const dx = auto.task.at.x - pos.x;
+  const dz = auto.task.at.z - pos.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 0.25) return;
+  // If a wall or counter blocks the straight line, side-step for a moment
+  if (auto.nudge > 0) {
+    auto.nudge -= dt;
+    input.x = Math.cos(auto.nudgeDir);
+    input.z = Math.sin(auto.nudgeDir);
+    return;
+  }
+  auto.stuck = d > auto.lastDist - 0.02 ? auto.stuck + dt : 0;
+  auto.lastDist = Math.min(auto.lastDist, d);
+  if (auto.stuck > 0.6) {
+    auto.stuck = 0;
+    auto.lastDist = Infinity;
+    auto.nudge = 0.5;
+    auto.nudgeDir = Math.atan2(dz, dx) + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+  }
+  const k = Math.min(1, d / 0.6); // ease in on arrival
+  input.x = (dx / d) * k;
+  input.z = (dz / d) * k;
+}
+
+function setAuto(on) {
+  auto.on = on;
+  auto.task = null;
+  autoBtn.classList.toggle('on', on);
+  try {
+    localStorage.setItem('drquest-auto', on ? 'on' : 'off');
+  } catch {
+    // Storage blocked: the setting just won't persist
+  }
+  updateWakeLock();
+}
+
+// Keep the phone screen awake while AUTO is playing
+let wakeLock = null;
+async function updateWakeLock() {
+  const want = auto.on && running && !document.hidden;
+  try {
+    if (want && !wakeLock && navigator.wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!want && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch {
+    wakeLock = null; // Not supported or refused (e.g. low battery mode)
+  }
+}
+
+// ---------- idle earnings ----------
+// While the game is closed or in the background, hired staff keep the hospital running.
+const OFFLINE_RATE = 0.35; // share of the live income rate earned while away
+const OFFLINE_CAP = 6 * 3600; // seconds
+
+function idleIncome(seconds) {
+  const lines = Object.values(LINES).filter((l) => l.active);
+  const rooms = Object.values(ROOMS).filter((r) => r.active);
+  // Patients arrive at this rate and split across services like updatePatients does
+  const arrivals = 1 / (state.unlocked.has('ambulance') ? 1.7 : 3.2);
+  const weights = [...lines.map(() => 2), ...rooms.map(() => 1)];
+  const totalW = weights.reduce((a, b) => a + b, 0) || 1;
+  let perSecond = 0;
+  // A line runs on its own only with both a cashier and a carrier
+  lines.forEach((line) => {
+    if (!line.cashierNurse || !line.carrier) return;
+    const avgNeed = line.product === 'pill' ? 2 : 1.5;
+    const machineRate = 1 / (state.unlocked.has('speed') ? 0.55 : 1.0);
+    perSecond += Math.min(arrivals * (2 / totalW) * avgNeed, machineRate) * PRODUCTS[line.product].price;
+  });
+  rooms.forEach((room) => {
+    if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), 1 / room.time) * room.price;
+  });
+  const t = Math.min(seconds, OFFLINE_CAP);
+  return { amount: Math.floor(perSecond * t * OFFLINE_RATE), perHour: Math.round(perSecond * 3600 * OFFLINE_RATE), seconds: t };
+}
+
+function formatDuration(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (h) return `${h} ชม. ${m} นาที`;
+  if (m) return `${m} นาที`;
+  return `${Math.floor(sec)} วินาที`;
+}
+
+let pendingIdle = 0;
+function offerIdleEarnings(seconds) {
+  if (seconds < 60) return;
+  const { amount, perHour, seconds: counted } = idleIncome(seconds);
+  const box = document.getElementById('away');
+  const text = document.getElementById('awaytext');
+  if (amount > 0) {
+    pendingIdle = amount;
+    text.innerHTML = `คุณไม่อยู่ ${formatDuration(seconds)}<br>พนักงานช่วยกันดูแลคนไข้ได้<br><b>💵 ${amount.toLocaleString()}</b>`
+      + (seconds > counted ? '<br><small>(นับสูงสุด 6 ชั่วโมง)</small>' : '')
+      + `<br><small>รายได้ตอนไม่อยู่ประมาณ ${perHour.toLocaleString()}/ชม.</small>`;
+    document.getElementById('awayok').textContent = 'เก็บเงิน';
+  } else {
+    pendingIdle = 0;
+    if (state.step === 0) return;
+    text.innerHTML = `คุณไม่อยู่ ${formatDuration(seconds)}<br>แต่ยังไม่มีพนักงานทำงานแทน 😅<br><small>จ้างพยาบาลแคชเชียร์ + พยาบาลขนยา (หรือเจ้าหน้าที่ประจำห้อง) แล้วโรงพยาบาลจะหาเงินให้ตอนคุณไม่อยู่</small>`;
+    document.getElementById('awayok').textContent = 'เข้าใจแล้ว';
+  }
+  box.style.display = 'flex';
 }
 
 // ---------- guide arrow ----------
@@ -1482,12 +1668,13 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // ---------- save / load ----------
 const state = { money: 0, step: 0, paid: 0, unlocked: new Set() };
 
+let awayOnLoad = 0;
 let saveBlocked = false; // set while resetting or importing, so pagehide can't write the old game back
 let storageOK = true;
 
 function saveData() {
   return {
-    money: state.money, step: state.step, paid: state.paid,
+    money: state.money, step: state.step, paid: state.paid, savedAt: Date.now(),
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
@@ -1551,6 +1738,7 @@ function load() {
   const roomCash = data.roomCash || { xray: data.xrayCash || 0 };
   for (const [id, amount] of Object.entries(roomCash)) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
   shownMoney = state.money;
+  if (data.savedAt) awayOnLoad = (Date.now() - data.savedAt) / 1000;
 }
 
 // ---------- main loop ----------
@@ -1623,6 +1811,9 @@ function start() {
   initAudio();
   audio?.resume();
   if (!storageOK) showSaveStatus(false);
+  offerIdleEarnings(awayOnLoad);
+  awayOnLoad = 0;
+  updateWakeLock();
 }
 document.getElementById('soundbtn').addEventListener('click', () => {
   initAudio();
@@ -1706,10 +1897,34 @@ document.getElementById('loadcode').addEventListener('click', () => {
   location.reload();
 });
 window.addEventListener('pagehide', () => save());
+let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) save();
+  if (document.hidden) {
+    save();
+    hiddenAt = Date.now();
+  } else if (hiddenAt && running) {
+    // The page doesn't run in the background, so pay out what staff earned meanwhile
+    offerIdleEarnings((Date.now() - hiddenAt) / 1000);
+    hiddenAt = 0;
+  }
   last = performance.now();
+  updateWakeLock();
+});
+
+const autoBtn = document.getElementById('autobtn');
+const autoBadge = document.getElementById('autobadge');
+autoBtn.addEventListener('click', () => setAuto(!auto.on));
+setAuto(auto.on);
+document.getElementById('awayok').addEventListener('click', () => {
+  document.getElementById('away').style.display = 'none';
+  if (pendingIdle > 0) {
+    addMoney(pendingIdle);
+    floatText(player.group.position, `+${pendingIdle.toLocaleString()}`, '#8be08f');
+    sfxUnlock();
+    pendingIdle = 0;
+    save();
+  }
 });
 
 // Expose a little for automated tests
-window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients };
+window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome };
