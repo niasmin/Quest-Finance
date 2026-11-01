@@ -94,6 +94,21 @@
   #saved { font-size: 13px; opacity: 0; transition: opacity .3s; }
   #saved.show { opacity: 1; }
   #saved.bad { background: rgba(229, 72, 77, .9); }
+  #menu .box { max-height: 90dvh; overflow-y: auto; }
+  #cloudstatus { font-size: 14px; line-height: 1.6; background: #eef7ff; border-radius: 12px; padding: 10px; margin: 12px 0 0; }
+  #cloudstatus .code { font-size: 20px; letter-spacing: 2px; color: #3d8bfd; user-select: all; -webkit-user-select: all; }
+  details.more { margin-top: 10px; }
+  details.more summary { cursor: pointer; color: #6b7790; font-size: 14px; }
+  #board { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 12; }
+  #board .box { background: #fff; color: #1d2433; border-radius: 22px; padding: 18px; width: min(380px, 92vw); max-height: 86dvh; overflow-y: auto; }
+  #board h3 { margin: 0 0 10px; text-align: center; }
+  .boardrow { display: flex; align-items: center; gap: 10px; padding: 9px 6px; border-bottom: 1px solid #eef0f5; }
+  .boardrow.me { background: #fff6d6; border-radius: 10px; }
+  .boardrow .rk { width: 34px; text-align: center; font-size: 18px; }
+  .boardrow .nm { flex: 1; }
+  .boardrow .nm small { color: #6b7790; }
+  .boardrow .er { font-weight: 600; color: #2e9e4f; }
+  #boardclose { display: block; margin: 14px auto 0; }
   #savenote { font-size: 13px; line-height: 1.5; color: #4b5a70; margin: 12px 0 0; }
   #savenote.bad { color: #a3121b; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
@@ -121,6 +136,7 @@
 <div id="goal" class="pill"></div>
 <div id="hint" class="pill">ลากนิ้วบนจอเพื่อเดิน</div>
 <div id="autobadge" class="pill">🤖 AUTO เล่นให้อยู่ · แตะจอเพื่อเล่นเอง</div>
+<div id="board"><div class="box"><h3>🏆 อันดับผู้เล่น</h3><p style="text-align:center;color:#6b7790;font-size:13px;margin:0 0 6px">จัดอันดับจากรายได้สะสมทั้งหมด</p><div id="boardlist"></div><button id="boardclose" class="btn ghost">ปิด</button></div></div>
 <div id="missions"><div class="box"><h3>📋 ภารกิจวันนี้</h3><p class="sub">ภารกิจใหม่ทุกวัน</p><div id="mlist"></div><button id="mclose" class="btn ghost">ปิด</button></div></div>
 <div id="upgrades"><div class="box"><h3>⬆️ อัปเกรดโรงพยาบาล</h3><div id="uplist"></div><button id="upclose" class="btn ghost">ปิด</button></div></div>
 <div id="away"><div class="box"><div class="big">🏥</div><p id="awaytext"></p><button id="awayok" class="btn">เก็บเงิน</button></div></div>
@@ -138,9 +154,15 @@
     <h3>⚙️ เมนู</h3>
     <button id="resume" class="btn ghost">เล่นต่อ</button>
     <button id="savenow" class="btn ghost">💾 บันทึกตอนนี้</button>
-    <button id="copycode" class="btn ghost">📋 คัดลอกโค้ดเซฟ</button>
-    <button id="loadcode" class="btn ghost">📥 ใส่โค้ดเซฟ</button>
-    <p id="savenote"></p>
+    <button id="leaderbtn" class="btn ghost">🏆 อันดับผู้เล่น</button>
+    <p id="cloudstatus"></p>
+    <button id="claimcode" class="btn ghost">📲 ใส่รหัสย้ายเครื่อง</button>
+    <button id="namebtn" class="btn ghost">✏️ ตั้งชื่อ</button>
+    <details class="more"><summary>ตัวเลือกเพิ่มเติม</summary>
+      <button id="copycode" class="btn ghost">📋 คัดลอกโค้ดเซฟ (ออฟไลน์)</button>
+      <button id="loadcode" class="btn ghost">📥 ใส่โค้ดเซฟ (ออฟไลน์)</button>
+      <p id="savenote"></p>
+    </details>
     <button id="reset" class="btn danger">เริ่มใหม่ทั้งหมด</button>
   </div>
 </div>
