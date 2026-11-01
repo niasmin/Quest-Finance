@@ -36,7 +36,7 @@
   #bag.full { background: rgba(229, 72, 77, .85); }
   #right { display: flex; flex-direction: column; gap: 8px; }
   #autobtn.on { background: linear-gradient(180deg, #ffe08a, #f5a623); box-shadow: 0 0 10px rgba(255, 209, 102, .8); }
-  #autobadge { white-space: nowrap; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(66px + env(safe-area-inset-bottom)); font-size: 15px; display: none; pointer-events: none; }
+  #autobadge { white-space: nowrap; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(126px + env(safe-area-inset-bottom)); font-size: 15px; display: none; pointer-events: none; }
   #autobadge.show { display: block; }
   #away { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 11; }
   #away .box { background: #fff; color: #1d2433; border-radius: 22px; padding: 24px; width: min(330px, 88vw); text-align: center; line-height: 1.6; }
@@ -45,8 +45,7 @@
   #away small { color: #6b7790; }
   #away .btn { margin-top: 14px; }
   #rating { font-size: 16px; }
-  #upbtn, #missionbtn, #branchbtn { position: relative; }
-  #upbtn.ready::after, #missionbtn.ready::after, #branchbtn.ready::after { content: ''; position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: #ff5c5c; border: 2px solid #fff; }
+  .dockbtn.ready::after { content: ''; position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%; background: #ff5c5c; border: 2px solid #fff; }
   #missions { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 9; }
   #missions .box { background: #fff; color: #1d2433; border-radius: 22px; padding: 18px; width: min(380px, 92vw); max-height: 86dvh; overflow-y: auto; }
   #missions h3 { margin: 0 0 4px; text-align: center; }
@@ -73,12 +72,31 @@
   #branches .sub { text-align: center; color: #6b7790; font-size: 13px; margin: 0 0 6px; }
   #branches .branchcard { margin: 12px 0 0; }
   #bclose { display: block; margin: 14px auto 0; }
-  #menubtn, #soundbtn, #autobtn, #upbtn, #missionbtn, #branchbtn { pointer-events: auto; border: none; color: #fff; font: inherit; font-size: 18px; width: 40px; height: 40px; padding: 0; cursor: pointer; }
-  #goal { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 15px; display: none; white-space: nowrap; max-width: 94vw; overflow: hidden; text-overflow: ellipsis; }
+  /* Bottom dock */
+  #dock { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom)); display: none; gap: 8px; padding: 6px 8px; border-radius: 22px;
+    background: rgba(20, 28, 48, .55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 5; }
+  .dockbtn { position: relative; width: 60px; height: 58px; border: none; border-radius: 16px; background: rgba(255,255,255,.12); color: #fff; font: inherit; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0; pointer-events: auto; transition: transform .15s, opacity .2s; }
+  .dockbtn:active { transform: scale(.92); }
+  .dockbtn .di { font-size: 24px; line-height: 1; }
+  .dockbtn .dl { font-size: 11px; text-shadow: 0 1px 0 rgba(0,0,0,.4); }
+  .dockbtn.locked { display: none; }
+  .dockbtn.on { background: linear-gradient(180deg, #ffe08a, #f5a623); color: #3b2400; }
+  .dockbtn.on .dl { text-shadow: none; }
+  .dockbtn.fresh { animation: popin .5s ease-out; }
+  .dockbtn.fresh::before { content: 'ใหม่!'; position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: #ff5c5c; color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+  @keyframes popin { 0% { transform: scale(.2); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+  /* Tutorial card */
+  #tut { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(126px + env(safe-area-inset-bottom)); width: min(340px, 90vw); display: none; z-index: 4; pointer-events: none;
+    background: #fff; color: #1d2433; border-radius: 18px; padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.25); text-align: center; animation: float 1.8s ease-in-out infinite; }
+  #tutstep { font-size: 12px; color: #3d8bfd; font-weight: 600; }
+  #tuttext { font-size: 17px; line-height: 1.4; }
+  #goal { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(82px + env(safe-area-inset-bottom)); font-size: 15px; display: none; white-space: nowrap; max-width: 94vw; overflow: hidden; text-overflow: ellipsis; }
 
   #joy { position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.25); border: 3px solid rgba(255,255,255,.6); display: none; pointer-events: none; }
   #knob { position: absolute; left: 32px; top: 32px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 3px 8px rgba(0,0,0,.25); }
-  #hint { position: fixed; bottom: calc(66px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); font-size: 15px; display: none; pointer-events: none; animation: float 1.6s ease-in-out infinite; }
+  #hint { position: fixed; bottom: calc(126px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); font-size: 15px; display: none; pointer-events: none; animation: float 1.6s ease-in-out infinite; }
   @keyframes float { 50% { transform: translate(-50%, -6px); } }
 
   .float { position: fixed; pointer-events: none; font-weight: 700; font-size: 20px; text-shadow: 0 2px 0 rgba(0,0,0,.45), 0 0 6px rgba(0,0,0,.25); transform: translate(-50%, -50%); white-space: nowrap; }
@@ -131,15 +149,16 @@
     <div id="rating" class="pill">⭐ 3.0</div>
     <div id="saved" class="pill"></div>
   </div>
-  <div id="right">
-    <button id="menubtn" class="pill" aria-label="เมนู">⚙️</button>
-    <button id="soundbtn" class="pill" aria-label="เสียง">🔊</button>
-    <button id="autobtn" class="pill" aria-label="เล่นอัตโนมัติ">🤖</button>
-    <button id="upbtn" class="pill" aria-label="อัปเกรด">⬆️</button>
-    <button id="missionbtn" class="pill" aria-label="ภารกิจรายวัน">📋</button>
-    <button id="branchbtn" class="pill" aria-label="สาขา">🗺️</button>
-  </div>
 </div>
+<!-- Bottom dock: buttons appear as the features they open become useful -->
+<nav id="dock">
+  <button id="autobtn" class="dockbtn locked"><span class="di">🤖</span><span class="dl">AUTO</span></button>
+  <button id="upbtn" class="dockbtn locked"><span class="di">⬆️</span><span class="dl">อัปเกรด</span></button>
+  <button id="missionbtn" class="dockbtn locked"><span class="di">📋</span><span class="dl">ภารกิจ</span></button>
+  <button id="branchbtn" class="dockbtn locked"><span class="di">🗺️</span><span class="dl">สาขา</span></button>
+  <button id="menubtn" class="dockbtn"><span class="di">⚙️</span><span class="dl">เมนู</span></button>
+</nav>
+<div id="tut"><div id="tutstep"></div><div id="tuttext"></div></div>
 <div id="goal" class="pill"></div>
 <div id="hint" class="pill">ลากนิ้วบนจอเพื่อเดิน</div>
 <div id="autobadge" class="pill">🤖 AUTO เล่นให้อยู่ · แตะจอเพื่อเล่นเอง</div>
@@ -161,6 +180,7 @@
   <div class="box">
     <h3>⚙️ เมนู</h3>
     <button id="resume" class="btn ghost">เล่นต่อ</button>
+    <button id="soundbtn" class="btn ghost">🔊 เสียง: เปิด</button>
     <button id="savenow" class="btn ghost">💾 บันทึกตอนนี้</button>
     <button id="leaderbtn" class="btn ghost">🏆 อันดับผู้เล่น</button>
     <p id="cloudstatus"></p>

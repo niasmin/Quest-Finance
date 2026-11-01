@@ -955,6 +955,7 @@ function updateLine(line, dt) {
       front.got++;
       front.refreshBubble();
       if (front.got >= front.need) {
+        tut.served = true;
         const pay = front.payout(front.need * PRODUCTS[line.product].price);
         line.cash.add(pay);
         floatText(line.money, `+${pay}${front.tipped ? ' 💖' : ''}`, '#8be08f');
@@ -1777,6 +1778,7 @@ function playerActions(dt) {
     }
     // Drop matching items on the counter shelf
     if (flatDist(pos, line.drop) < ZONE_R + 0.2 && stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) {
+      tut.dropped = true;
       moveToStack(stack.take(line.product), line.shelf, 0.2);
       actTimer = 0.07;
       sfxPop();
@@ -1955,7 +1957,7 @@ function autopilot(dt) {
   } else {
     auto.idle += dt;
   }
-  const active = auto.on && running && auto.idle >= AUTO_DELAY;
+  const active = auto.on && running && tutorialDone() && auto.idle >= AUTO_DELAY;
   autoBadge.classList.toggle('show', active);
   if (!active) return;
   // With every department built, AUTO spends spare money on the cheapest upgrade
@@ -2110,6 +2112,10 @@ scene.add(guideHolder);
 
 // What should a new player do next? Point at it.
 function guideTarget() {
+  if (!tutorialDone()) {
+    const at = TUTORIAL[state.tutorial].at?.();
+    if (at) return at;
+  }
   const stack = player.stack;
   const pill = LINES.pill;
   const piles = [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.cash);
@@ -2394,6 +2400,77 @@ function openBranch() {
   replaceSave(data);
 }
 
+// ---------- tutorial ----------
+// Six short steps for a new player; each ends when the game sees it done
+const tut = { moved: 0, dropped: false, served: false, start: null };
+const TUTORIAL = [
+  { text: '👆 ลากนิ้วบนจอเพื่อเดิน', done: () => tut.moved > 2.5 },
+  { text: '💊 เดินเข้า<b>วงสีขาว</b>หน้าเครื่อง เพื่อเก็บยาขึ้นหลัง', at: () => LINES.pill.pickup, done: () => player.stack.total >= 3 },
+  { text: '📦 เอายาไปวางที่<b>วงสีเหลือง</b>หลังเคาน์เตอร์', at: () => LINES.pill.drop, done: () => tut.dropped },
+  { text: '💚 ยืนใน<b>วงสีเขียว</b>เพื่อจ่ายยาให้คนไข้', at: () => LINES.pill.cashier, done: () => tut.served },
+  { text: '💵 เดินไปเก็บ<b>กองเงิน</b>ข้างเคาน์เตอร์', at: () => LINES.pill.money, done: () => state.earned > 0 },
+  { text: '🎯 ยืนบน<b>ช่องราคา</b>เพื่อจ้างพยาบาลแคชเชียร์คนแรก (ทำต่อจนมีเงินพอ)', at: () => UNLOCKS[0].at, done: () => state.step >= 1 },
+];
+const tutorialDone = () => state.tutorial >= TUTORIAL.length;
+const tutEl = document.getElementById('tut');
+let tutShown = -1;
+
+function updateTutorial() {
+  if (tutorialDone()) {
+    if (tutShown !== -2) {
+      tutEl.style.display = 'none';
+      tutShown = -2;
+    }
+    return;
+  }
+  // Count real walking for step 1
+  if (!tut.start) tut.start = player.group.position.clone();
+  tut.moved = Math.max(tut.moved, flatDist(player.group.position, tut.start));
+  const step = TUTORIAL[state.tutorial];
+  if (step.done()) {
+    state.tutorial++;
+    sfxCoin();
+    if (tutorialDone()) {
+      floatText(player.group.position, '🎉 เก่งมาก! ปลดล็อกปุ่มใหม่แล้ว', '#ffd166');
+      goalEl.style.display = 'block';
+      save();
+    }
+    return;
+  }
+  if (tutShown !== state.tutorial) {
+    tutShown = state.tutorial;
+    document.getElementById('tutstep').textContent = `บทสอน ${state.tutorial + 1}/${TUTORIAL.length}`;
+    document.getElementById('tuttext').innerHTML = step.text;
+    tutEl.style.display = 'block';
+    goalEl.style.display = 'none';
+    document.getElementById('hint').style.display = 'none';
+  }
+}
+
+// ---------- dock ----------
+// Buttons show up once the thing they open is useful; a "ใหม่!" tag marks fresh ones
+const DOCK = {
+  autobtn: () => tutorialDone(),
+  upbtn: () => tutorialDone(),
+  missionbtn: () => tutorialDone(),
+  branchbtn: () => canOpenBranch() || state.branches.length > 1,
+};
+function updateDock(initial = false) {
+  for (const [id, visible] of Object.entries(DOCK)) {
+    const el = document.getElementById(id);
+    const show = visible();
+    if (show && el.classList.contains('locked')) {
+      el.classList.remove('locked');
+      if (!initial) el.classList.add('fresh');
+    } else if (!show && !el.classList.contains('locked')) {
+      el.classList.add('locked');
+    }
+  }
+}
+for (const id of Object.keys(DOCK)) {
+  document.getElementById(id).addEventListener('click', (e) => e.currentTarget.classList.remove('fresh'));
+}
+
 // ---------- sound: WebAudio blips and a looping chiptune ----------
 let audio = null;
 let master = null;
@@ -2466,7 +2543,7 @@ function startMusic() {
 function setSound(on) {
   soundOn = on;
   if (master) master.gain.value = on ? 1 : 0;
-  document.getElementById('soundbtn').textContent = on ? '🔊' : '🔇';
+  document.getElementById('soundbtn').textContent = on ? '🔊 เสียง: เปิด' : '🔇 เสียง: ปิด';
   try {
     localStorage.setItem('drquest-sound', on ? 'on' : 'off');
   } catch {
@@ -2487,7 +2564,7 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // ---------- save / load ----------
 // state.branch is the open branch's index; state.branches holds a snapshot of every
 // branch (null = opened but never played). Money, earnings and missions are shared.
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0 };
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0 };
 
 let awayOnLoad = 0;
 let localSavedAt = 0;
@@ -2508,7 +2585,7 @@ function branchSnapshot() {
 function saveData() {
   state.branches[state.branch] = branchSnapshot();
   return {
-    v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(),
+    v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(), tutorial: state.tutorial,
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
     branch: state.branches.length - 1, step: state.step,
@@ -2571,6 +2648,8 @@ function load() {
   state.money = data.money || 0;
   state.daily = data.daily || null;
   state.earned = data.earned || 0;
+  // Players from before the tutorial existed (or anyone who has earned money) skip it
+  state.tutorial = data.tutorial ?? (state.earned > 0 || state.branches.some((b) => b?.step) ? TUTORIAL.length : 0);
   state.branches = Array.isArray(data.branches) && data.branches.length ? data.branches : [null];
   state.branch = Math.min(Math.max(data.current || 0, 0), state.branches.length - 1);
   const br = state.branches[state.branch] || {};
@@ -2645,6 +2724,10 @@ function frame(now) {
   updateBag();
   updateUpgradeDot();
   updateMissionDot();
+  if (running) {
+    updateTutorial();
+    updateDock();
+  }
   tickMoneyDisplay(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -2669,8 +2752,12 @@ function start() {
   running = true;
   document.getElementById('start').style.display = 'none';
   document.getElementById('hud').style.display = 'flex';
-  goalEl.style.display = 'block';
-  document.getElementById('hint').style.display = 'block';
+  document.getElementById('dock').style.display = 'flex';
+  updateDock(true);
+  if (tutorialDone()) {
+    goalEl.style.display = 'block';
+    document.getElementById('hint').style.display = 'block';
+  }
   initAudio();
   audio?.resume();
   if (!storageOK) showSaveStatus(false);
