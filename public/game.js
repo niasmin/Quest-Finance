@@ -2712,9 +2712,12 @@ document.getElementById('claimcode').addEventListener('click', async () => {
   const code = prompt('ใส่รหัสย้ายเครื่อง 8 ตัวจากเครื่องเดิม');
   if (!code) return;
   try {
+    // Look first, link only after the player confirms
+    const [info] = await rpc('cloud_peek', { p_code: code });
+    if (!info) throw new Error('not found');
+    if (!confirm(`พบเซฟของ "${info.nickname}" (ปลดล็อก ${info.step} ขั้น${info.branch ? ` · สาขา ${info.branch + 1}` : ''}) โหลดมาเล่นที่เครื่องนี้ไหม?\nความคืบหน้าในเครื่องนี้จะถูกแทนที่`)) return;
     const [row] = await rpc('cloud_claim', { p_code: code, p_secret: deviceSecret() });
     if (!row) throw new Error('not found');
-    if (!confirm(`พบเซฟของ "${row.nickname}" (ปลดล็อก ${row.data?.step ?? 0} ขั้น) โหลดมาเล่นที่เครื่องนี้ไหม?`)) return;
     replaceSave(row.data, false);
   } catch {
     alert('ไม่พบรหัสนี้ หรือยังเชื่อมต่ออินเทอร์เน็ตไม่ได้');
