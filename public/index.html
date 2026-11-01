@@ -135,6 +135,38 @@
   #boardclose { display: block; margin: 14px auto 0; }
   #savenote { font-size: 13px; line-height: 1.5; color: #4b5a70; margin: 12px 0 0; }
   #savenote.bad { color: #a3121b; }
+  /* Events: rush button, event chips and toasts */
+  #right { align-items: flex-end; }
+  .evbtn { display: none; align-items: center; gap: 4px; border: none; border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 15px; font-weight: 600; color: #fff; pointer-events: auto; cursor: pointer;
+    background: rgba(20, 28, 48, .55); text-shadow: 0 1px 0 rgba(0,0,0,.4); }
+  .evbtn.ready { background: linear-gradient(180deg, #ff6b6b, #d62839); box-shadow: 0 0 12px rgba(255, 90, 90, .8); animation: pulse 1.4s ease-in-out infinite; }
+  .evbtn:disabled { opacity: .8; }
+  .evbtn .ei { font-size: 18px; }
+  @keyframes pulse { 50% { transform: scale(1.07); } }
+  #evchips { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .chip { border-radius: 999px; padding: 5px 12px; font-size: 14px; font-weight: 600; white-space: nowrap; text-shadow: 0 1px 0 rgba(0,0,0,.4); }
+  .chip.rush { background: rgba(214, 40, 57, .88); }
+  .chip.boss { background: rgba(78, 154, 47, .9); }
+  .chip.special { background: rgba(123, 63, 190, .9); }
+  #toast { position: fixed; left: 50%; top: calc(34% + env(safe-area-inset-top)); transform: translate(-50%, -50%) scale(.6); opacity: 0; pointer-events: none; z-index: 6;
+    background: rgba(20, 28, 48, .85); border: 3px solid #ffd166; border-radius: 18px; padding: 10px 18px; text-align: center; font-size: 17px; line-height: 1.45; width: max-content; max-width: 88vw;
+    transition: opacity .25s, transform .25s; }
+  #toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #toast b { color: #ffd166; }
+  #toast small { color: #cfd8e8; }
+  /* Decorations & outfits */
+  #style { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 9; }
+  #style .box { background: #fff; color: #1d2433; border-radius: 22px; padding: 18px; width: min(380px, 92vw); max-height: 86dvh; overflow-y: auto; }
+  #style h3 { margin: 0 0 4px; text-align: center; }
+  #style h4 { margin: 14px 0 0; }
+  #style .sub { text-align: center; color: #2e9e4f; font-size: 13px; margin: 0 0 8px; }
+  #styletabs { display: flex; gap: 6px; }
+  #styletabs button { flex: 1; border: none; border-radius: 12px; padding: 8px; font: inherit; font-size: 15px; background: #eef0f5; color: #4b5a70; cursor: pointer; }
+  #styletabs button.on { background: #ffd166; color: #3b2400; font-weight: 600; }
+  .uprow.owned .upico { filter: drop-shadow(0 0 6px rgba(255, 209, 102, .9)); }
+  #styleclose { display: block; margin: 14px auto 0; }
+  /* Six dock buttons must fit a 360px-wide phone */
+  .dockbtn { width: min(60px, calc((100vw - 76px) / 6)); }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
 </style>
 </head>
@@ -149,13 +181,19 @@
     <div id="rating" class="pill">⭐ 3.0</div>
     <div id="saved" class="pill"></div>
   </div>
+  <div id="right">
+    <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
+    <div id="evchips"></div>
+  </div>
 </div>
+<div id="toast"></div>
 <!-- Bottom dock: buttons appear as the features they open become useful -->
 <nav id="dock">
   <button id="autobtn" class="dockbtn locked"><span class="di">🤖</span><span class="dl">AUTO</span></button>
   <button id="upbtn" class="dockbtn locked"><span class="di">⬆️</span><span class="dl">อัปเกรด</span></button>
   <button id="missionbtn" class="dockbtn locked"><span class="di">📋</span><span class="dl">ภารกิจ</span></button>
   <button id="branchbtn" class="dockbtn locked"><span class="di">🗺️</span><span class="dl">สาขา</span></button>
+  <button id="stylebtn" class="dockbtn locked"><span class="di">🎨</span><span class="dl">ตกแต่ง</span></button>
   <button id="menubtn" class="dockbtn"><span class="di">⚙️</span><span class="dl">เมนู</span></button>
 </nav>
 <div id="tut"><div id="tutstep"></div><div id="tuttext"></div></div>
@@ -166,6 +204,9 @@
 <div id="branches"><div class="box"><h3>🗺️ เครือโรงพยาบาล</h3><p class="sub">ใช้เงินกระเป๋าเดียวกันทุกสาขา สาขาที่มีพนักงานหาเงินให้ตลอด</p><div id="blist"></div><button id="bclose" class="btn ghost">ปิด</button></div></div>
 <div id="missions"><div class="box"><h3>📋 ภารกิจวันนี้</h3><p class="sub">ภารกิจใหม่ทุกวัน</p><div id="mlist"></div><button id="mclose" class="btn ghost">ปิด</button></div></div>
 <div id="upgrades"><div class="box"><h3>⬆️ อัปเกรดโรงพยาบาล</h3><div id="uplist"></div><button id="upclose" class="btn ghost">ปิด</button></div></div>
+<div id="style"><div class="box"><h3>🎨 ตกแต่งโรงพยาบาล</h3><p id="comfort" class="sub"></p>
+  <div id="styletabs"><button data-tab="decor">🪴 ของตกแต่ง</button><button data-tab="outfit">👕 ชุดหมอ</button></div>
+  <div id="stylelist"></div><button id="styleclose" class="btn ghost">ปิด</button></div></div>
 <div id="away"><div class="box"><div class="big">🏥</div><p id="awaytext"></p><button id="awayok" class="btn">เก็บเงิน</button></div></div>
 <div id="joy"><div id="knob"></div></div>
 

@@ -85,7 +85,7 @@ const machineMult = () => 1 + 0.1 * upLevel('machine');
 const branchMult = () => 1 + 0.5 * (state.branch || 0);
 const priceMult = () => (1 + 0.1 * upLevel('price')) * branchMult();
 // Reputation (0-5 stars) and advertising both bring patients in faster
-const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating);
+const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating) * (1 + 0.02 * comfort());
 
 // Patient types: [weight, unlocked from step]
 const PATIENT_TYPES = {
@@ -93,9 +93,11 @@ const PATIENT_TYPES = {
   emergency: { weight: 12, from: 2, patience: 28, pay: 3, speed: 4.6, badge: '🚨', shirt: 0xe5484d },
   vip: { weight: 8, from: 4, patience: 45, pay: 5, speed: 3.0, badge: '👑', shirt: 0xffc300 },
   child: { weight: 10, from: 1, patience: 50, pay: 1.5, speed: 3.0, badge: '👶', scale: 0.68 },
+  // Special cases are sent in by the event system, never rolled
+  special: { weight: 0, patience: 80, pay: 1.2, speed: 3.6, badge: '⭐', shirt: 0x9b5de5 },
 };
 function rollType() {
-  const options = Object.entries(PATIENT_TYPES).filter(([, t]) => !t.from || state.step >= t.from);
+  const options = Object.entries(PATIENT_TYPES).filter(([, t]) => t.weight > 0 && (!t.from || state.step >= t.from));
   let r = Math.random() * options.reduce((a, [, t]) => a + t.weight, 0);
   for (const [id, t] of options) {
     r -= t.weight;
@@ -360,6 +362,7 @@ function buildPartitions() {
   runner.position.set((HALL_X + FLOOR.x1) / 2, 0.125, (FLOOR.z0 + FLOOR.z1) / 2);
   runner.receiveShadow = true;
   scene.add(runner);
+  styleRefs.runner = runner;
 
   // Entrance arch with the hospital name
   const arch = new THREE.Group();
@@ -396,12 +399,15 @@ function signTex(text, bg) {
   });
 }
 
+const deptRugs = {};
+const styleRefs = {};
 const SIGN_COLORS = { pill: '#e5484d', vaccine: '#3d8bfd', xray: '#4b5a70', dental: '#2a9d8f', surgery: '#2e9e4f' };
 // Coloured floor and a sign on the far wall once a department is open
 function decorateDept(id, animate) {
   const d = DEPTS.find((x) => x.id === id);
   const w = HALL_X - FLOOR.x0;
-  const rug = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.2, d.z1 - d.z0 - 0.3), new THREE.MeshLambertMaterial({ color: d.floor }));
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.2, d.z1 - d.z0 - 0.3), new THREE.MeshLambertMaterial({ color: themeColor(id) }));
+  deptRugs[id] = rug;
   rug.rotation.x = -Math.PI / 2;
   rug.position.set((FLOOR.x0 + HALL_X) / 2, 0.123, (d.z0 + d.z1) / 2);
   rug.receiveShadow = true;
@@ -601,9 +607,10 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
   torso.position.y = 0.95;
   torso.castShadow = true;
   body.add(torso);
+  let front = null;
   if (coat) {
     // Shirt showing through an open coat
-    const front = box(0.16, 0.42, 0.06, shirt);
+    front = box(0.16, 0.42, 0.06, shirt);
     front.position.set(0, 1.0, 0.26);
     body.add(front);
   }
@@ -631,7 +638,7 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
     cross.position.set(0, 1.8, 0.15);
     body.add(c, cross);
   }
-  return { group, body, legs, arms, phase: Math.random() * 6 };
+  return { group, body, legs, arms, phase: Math.random() * 6, parts: { torso, front } };
 }
 
 function animatePerson(p, moving, dt, carrying = false) {
@@ -980,8 +987,8 @@ function updateLine(line, dt) {
         line.cash.add(pay);
         floatText(line.money, `+${pay}${front.tipped ? ' 💖' : ''}`, '#8be08f');
         sfxCoin();
-        front.leave();
         line.queue.splice(line.queue.indexOf(front), 1);
+        front.done();
       }
     });
   }
@@ -1126,8 +1133,8 @@ function updateRoom(room, dt) {
       room.cash.add(pay);
       floatText(room.money, `+${pay}${front.tipped ? ' 💖' : ''}`, '#8be08f');
       sfxCoin();
-      front.leave();
       room.queue.shift();
+      front.done();
     }
   }
   room.effect(working, room.scan);
@@ -1143,6 +1150,8 @@ function queueSlot(kind, i) {
   const f = LINES[kind].front;
   return v(f.x + i * 1.05, f.z);
 }
+
+const needFor = (kind) => (ROOMS[kind] ? 1 : kind === 'pill' ? 1 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 2));
 
 class Patient {
   constructor(kind, type = 'normal') {
@@ -1165,7 +1174,7 @@ class Patient {
       this.parent.group.position.copy(SPAWN).add(v(0.6, 0.4));
       scene.add(this.parent.group);
     }
-    this.need = ROOMS[kind] ? 1 : kind === 'pill' ? 1 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 2);
+    this.need = needFor(kind);
     this.got = 0;
     this.pending = 0;
     this.arrived = false;
@@ -1177,8 +1186,12 @@ class Patient {
     this.person.group.add(this.bubble);
     this.refreshBubble();
   }
+  // Decorations make waiting comfier
+  patienceMax() {
+    return this.t.patience * (1 + 0.04 * comfort());
+  }
   patienceLeft() {
-    return Math.max(0, 1 - this.waited / this.t.patience);
+    return Math.max(0, 1 - this.waited / this.patienceMax());
   }
   refreshBubble() {
     const draw = this.bubble.userData.draw;
@@ -1192,8 +1205,12 @@ class Patient {
   }
   // Final bill: patient type bonus, price upgrade and a tip for quick service
   payout(base) {
-    this.tipped = this.waited < this.t.patience * 0.4;
-    const amount = Math.round(base * this.t.pay * priceMult() * (this.tipped ? 1.2 : 1));
+    this.tipped = this.waited < this.patienceMax() * 0.4;
+    const amount = Math.round(base * this.t.pay * priceMult() * eventPayMult() * (this.tipped ? 1.2 : 1));
+    if (ev.rush) {
+      ev.rush.served++;
+      ev.rush.earned += amount;
+    }
     changeRating(this.tipped ? 0.05 : 0.02);
     missionProgress('serve', 1);
     missionProgress('earn', amount);
@@ -1201,6 +1218,27 @@ class Patient {
     if (this.type === 'emergency') missionProgress('emergency', 1);
     if (this.type === 'vip') missionProgress('vip', 1);
     return amount;
+  }
+  // Served: a special case moves on to the next service on its list, everyone else goes home
+  done() {
+    if (this.chain && this.stage < this.chain.length - 1) {
+      this.via = v(WALK_X, this.rowZ()); // back out to the hallway lane before heading to the next row
+      this.stage++;
+      this.kind = this.chain[this.stage];
+      this.need = needFor(this.kind);
+      this.got = 0;
+      this.pending = 0;
+      this.inside = false;
+      this.arrived = false;
+      this.waited = 0;
+      this.barKey = -1;
+      joinQueue(this);
+      this.refreshBubble();
+      floatText(this.person.group.position, `⭐ ต่อไป ${serviceIcon(this.kind)}`, '#e0b3ff');
+      return;
+    }
+    if (this.chain) specialDone(this);
+    this.leave();
   }
   leave() {
     this.leaving = true;
@@ -1232,7 +1270,7 @@ class Patient {
     } else if (this.seat) {
       target = pos.z > FLOOR.z1 - 0.3 ? entry : this.seat.at;
     } else if (!this.inside) {
-      target = pos.z > FLOOR.z1 - 0.3 ? entry : lane;
+      target = this.via || (pos.z > FLOOR.z1 - 0.3 ? entry : lane);
     } else {
       const queue = (ROOMS[this.kind] || LINES[this.kind]).queue;
       target = queueSlot(this.kind, queue.indexOf(this));
@@ -1258,7 +1296,7 @@ class Patient {
       // Waiting in a chair is comfier: patience drains at 40%
       if (arrived) {
         this.waited += dt * 0.4;
-        if (this.waited >= this.t.patience) {
+        if (this.waited >= this.patienceMax()) {
           this.seat.taken = null;
           this.seat = null;
           this.standUp();
@@ -1276,7 +1314,8 @@ class Patient {
         }
       }
     } else if (!this.inside) {
-      if (arrived && target === lane) {
+      if (arrived && this.via && target === this.via) this.via = null;
+      else if (arrived && target === lane) {
         this.inside = true;
         this.refreshBubble();
       }
@@ -1285,8 +1324,8 @@ class Patient {
       // Face the counter (west) while waiting
       if (arrived) faceToward(this.person.group, -1, 0, dt);
       if (!this.beingServed()) {
-        this.waited += dt;
-        if (this.waited >= this.t.patience) {
+        this.waited += dt * (ev.boss ? 1.5 : 1);
+        if (this.waited >= this.patienceMax()) {
           this.storm();
           return true;
         }
@@ -1334,14 +1373,14 @@ const serviceQueue = (kind) => (ROOMS[kind] || LINES[kind]).queue;
 function joinQueue(p) {
   const queue = serviceQueue(p.kind);
   // Emergencies jump the queue (behind whoever is already being served)
-  if (p.type === 'emergency') queue.splice(Math.min(1, queue.length), 0, p);
+  if (p.type === 'emergency' || p.type === 'special') queue.splice(Math.min(1, queue.length), 0, p);
   else queue.push(p);
 }
 
 function updatePatients(dt) {
   spawnTimer -= dt;
   if (spawnTimer <= 0) {
-    spawnTimer = ((state.unlocked.has('ambulance') ? 1.7 : 3.2) / arrivalMult()) * rand(0.7, 1.3);
+    spawnTimer = ((state.unlocked.has('ambulance') ? 1.7 : 3.2) / arrivalMult() / (ev.rush ? 2.6 : 1)) * rand(0.7, 1.3);
     const services = [
       ...Object.values(LINES).filter((l) => l.active).flatMap((l) => [l.id, l.id]),
       ...Object.values(ROOMS).filter((r) => r.active).map((r) => r.id),
@@ -2474,6 +2513,703 @@ function updateFloor2(dt) {
   updateBasket(dt);
 }
 
+// ---------- events: rush hour, giant germ boss, special cases ----------
+// All three work with AUTO: the autopilot plays through them like any other job.
+const ev = { rush: null, boss: null, special: null, bossTimer: rand(70, 110), specialTimer: rand(40, 70) };
+const RUSH_TIME = 75; // seconds
+const RUSH_COOLDOWN = 240;
+const BOSS_TIME = 45;
+const serviceIcon = (kind) => (ROOMS[kind] ? ROOMS[kind].icon : PRODUCTS[kind].icon);
+const activeServices = () => [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.id);
+const eventPayMult = () => (ev.rush ? 1.5 : 1) * (state.style.outfit === 'crown' ? 1.1 : 1);
+const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.floor(sec % 60))).padStart(2, '0')}`;
+
+const toastEl = document.getElementById('toast');
+function toast(html, ms = 3200) {
+  toastEl.innerHTML = html;
+  toastEl.classList.remove('show');
+  void toastEl.offsetWidth; // restart the pop-in animation
+  toastEl.classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => toastEl.classList.remove('show'), ms);
+}
+
+// --- rush hour: press the button, patients pour in for 75 s and pay 1.5x ---
+const rushReady = () => state.step >= 3 && !ev.rush && Date.now() >= (state.style.rushAt || 0);
+function startRush() {
+  if (!rushReady()) return;
+  ev.rush = { t: RUSH_TIME, served: 0, earned: 0, target: Math.round(10 + state.step * 1.6) };
+  spawnTimer = 0.2;
+  sfxUnlock();
+  toast('🚨 <b>ชั่วโมงเร่งด่วน!</b><br>คนไข้แห่มาเพียบ · รายได้ ×1.5');
+}
+function updateRush(dt) {
+  const r = ev.rush;
+  if (!r) return;
+  r.t -= dt;
+  if (r.t > 0) return;
+  ev.rush = null;
+  state.style.rushAt = Date.now() + RUSH_COOLDOWN * 1000;
+  const stars = r.served >= r.target * 1.5 ? 3 : r.served >= r.target ? 2 : r.served >= r.target * 0.5 ? 1 : 0;
+  const bonus = stars ? Math.round((r.earned * [0, 0.5, 1, 1.5][stars] + 100 * branchMult()) / 10) * 10 : 0;
+  if (bonus) {
+    addMoney(bonus);
+    missionProgress('rush', 1);
+    sfxUnlock();
+    burst(player.group.position);
+  }
+  toast(`🚨 จบชั่วโมงเร่งด่วน ${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)}<br>รักษา ${r.served} คน${bonus ? ` · โบนัส <b>+${bonus.toLocaleString()}</b>` : ' · ยังไม่ได้โบนัส ลองใหม่นะ'}`, 5000);
+  save();
+}
+
+// --- giant germ boss: shows up in a department; stand close and the doctor zaps it ---
+const BOSS_SPOTS = { pill: v(0.8, -10.0), vaccine: v(-4.6, 1.3), xray: v(-4.8, 4.4), dental: v(-4.8, 8.1), surgery: v(-4.8, 11.6) };
+const BOSS_RANGE = 3.4;
+// Where the player (and AUTO) stands to fight: just east of the germ
+const bossStand = (b) => v(b.at.x + 1.8, b.at.z);
+
+function germModel(color = 0x7bd34f, spikeColor = 0x4e9a2f) {
+  const g = new THREE.Group();
+  const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color, flatShading: true }));
+  ball.castShadow = true;
+  g.add(ball);
+  const spikeGeo = new THREE.ConeGeometry(0.16, 0.5, 6);
+  const pos = new THREE.IcosahedronGeometry(1, 0).attributes.position;
+  const seen = new Set();
+  for (let i = 0; i < pos.count; i++) {
+    const d = new THREE.Vector3().fromBufferAttribute(pos, i).normalize();
+    const key = d.toArray().map((n) => n.toFixed(2)).join();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const spike = new THREE.Mesh(spikeGeo, mat(spikeColor));
+    spike.position.copy(d).multiplyScalar(1.05);
+    spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    g.add(spike);
+  }
+  // Angry face toward the camera (+z)
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), mat(0xffffff));
+    eye.position.set(side * 0.32, 0.18, 0.86);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), mat(0x111111));
+    pupil.position.set(side * 0.3, 0.16, 1.04);
+    const brow = box(0.34, 0.07, 0.06, 0x1d2433, { shadow: false });
+    brow.position.set(side * 0.3, 0.42, 0.95);
+    brow.rotation.z = side * -0.45;
+    g.add(eye, pupil, brow);
+  }
+  const mouth = box(0.42, 0.08, 0.06, 0x1d2433, { shadow: false });
+  mouth.position.set(0, -0.25, 0.97);
+  g.add(mouth);
+  return g;
+}
+
+function bossBar(b) {
+  const g = b.barCanvas.getContext('2d');
+  g.clearRect(0, 0, 160, 28);
+  g.fillStyle = 'rgba(0,0,0,.6)';
+  roundRect(g, 0, 0, 160, 28, 14);
+  g.fill();
+  g.fillStyle = '#e5484d';
+  roundRect(g, 4, 4, Math.max(8, 152 * (b.hp / b.max)), 20, 10);
+  g.fill();
+  b.bar.material.map.needsUpdate = true;
+}
+
+function spawnBoss() {
+  const ids = activeServices().filter((id) => BOSS_SPOTS[id]);
+  if (!ids.length) return;
+  const id = pick(ids);
+  const at = BOSS_SPOTS[id].clone();
+  const hp = Math.round(24 + 1.5 * state.step);
+  const mesh = germModel();
+  mesh.position.set(at.x, 1.4, at.z);
+  scene.add(mesh);
+  popIn(mesh);
+  const barCanvas = document.createElement('canvas');
+  barCanvas.width = 160;
+  barCanvas.height = 28;
+  const tex = new THREE.CanvasTexture(barCanvas);
+  const bar = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+  bar.scale.set(1.8, 0.32, 1);
+  bar.position.set(at.x, 3.2, at.z);
+  bar.renderOrder = 11;
+  scene.add(bar);
+  ev.boss = { id, at, hp, max: hp, t: BOSS_TIME, mesh, bar, barCanvas, fire: 0, flash: 0 };
+  bossBar(ev.boss);
+  tone(196, 0.3, 'sawtooth', 0.05);
+  const dept = DEPTS.find((d) => d.id === id);
+  toast(`🦠 <b>เชื้อโรคยักษ์บุก${dept.name}!</b><br>รีบไปยืนใกล้ ๆ หมอจะยิงยาใส่เอง`, 4000);
+}
+
+function removeBoss() {
+  const b = ev.boss;
+  scene.remove(b.mesh, b.bar);
+  ev.boss = null;
+  ev.bossTimer = rand(150, 210);
+}
+
+const dartGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.34, 6);
+function shootDart(b) {
+  const dart = new THREE.Mesh(dartGeo, mat(0x8fd3ff));
+  dart.rotation.x = Math.PI / 2;
+  const from = player.group.position.clone().setY(1.2);
+  fly(dart, from, () => b.mesh.position.clone(), (m) => {
+    scene.remove(m);
+    if (ev.boss !== b) return;
+    b.hp -= state.style.outfit === 'hero' ? 2 : 1;
+    b.flash = 0.12;
+    bossBar(b);
+    sfxPop();
+    if (b.hp <= 0) defeatBoss(b);
+  }, 0.18, 0.5);
+}
+
+function defeatBoss(b) {
+  const reward = Math.round(((80 + 25 * state.step) * branchMult()) / 10) * 10;
+  burst(b.mesh.position);
+  removeBoss();
+  addMoney(reward);
+  state.style.bossKills = (state.style.bossKills || 0) + 1;
+  missionProgress('boss', 1);
+  sfxUnlock();
+  floatText(player.group.position, `🦠 +${reward.toLocaleString()}`, '#8be08f');
+  // Rare drop: guaranteed the first time, then a 40% chance until the set is complete
+  const missing = RARE_ORDER.filter((id) => !ownsStyle(id));
+  if (missing.length && (state.style.bossKills === 1 || Math.random() < 0.4)) {
+    const id = missing[0];
+    grantStyle(id);
+    const it = styleItem(id);
+    toast(`💎 <b>ได้ของหายาก!</b><br>${it.icon} ${it.name}<br><small>ไปใช้ได้ที่ 🎨 ตกแต่ง</small>`, 5500);
+    styleBtn.classList.add('ready');
+  } else {
+    toast(`🎉 กำจัดเชื้อโรคยักษ์สำเร็จ! <b>+${reward.toLocaleString()}</b>`);
+  }
+  save();
+}
+
+function updateBoss(dt) {
+  const b = ev.boss;
+  if (!b) {
+    if (state.step >= 5 && tutorialDone()) {
+      ev.bossTimer -= dt;
+      if (ev.bossTimer <= 0) spawnBoss();
+    }
+    return;
+  }
+  b.t -= dt;
+  const now = performance.now() / 1000;
+  b.mesh.position.y = 1.4 + Math.sin(now * 2.2) * 0.18;
+  b.mesh.rotation.y = Math.sin(now * 0.9) * 0.5;
+  b.flash = Math.max(0, b.flash - dt);
+  b.mesh.scale.setScalar(b.flash > 0 ? 0.88 : 1);
+  // Only floor-1 things show while upstairs
+  b.mesh.visible = b.bar.visible = !F2.group.visible;
+  if (player.floor === 0 && !lift.riding && flatDist(player.group.position, b.at) < BOSS_RANGE) {
+    b.fire -= dt;
+    if (b.fire <= 0) {
+      b.fire = 0.25;
+      shootDart(b);
+    }
+  }
+  if (b.t <= 0) {
+    removeBoss();
+    changeRating(-0.3);
+    tone(150, 0.4, 'sawtooth', 0.05);
+    toast('😵 เชื้อโรคหนีไปได้ คนไข้ไม่พอใจ ⭐ ลดลง');
+  }
+}
+
+// --- special case: one patient who needs several services in a row, against the clock ---
+function spawnSpecial() {
+  const services = activeServices();
+  if (services.length < 2) return false;
+  const len = services.length >= 3 && Math.random() < 0.5 ? 3 : 2;
+  const chain = [];
+  while (chain.length < len) {
+    const k = pick(services);
+    if (!chain.includes(k)) chain.push(k);
+  }
+  const p = new Patient(chain[0], 'special');
+  p.chain = chain;
+  p.stage = 0;
+  joinQueue(p);
+  patients.push(p);
+  const bonus = Math.round(((60 + 20 * state.step) * len * branchMult()) / 10) * 10;
+  ev.special = { p, chain, t: 45 + 35 * len, bonus };
+  tone(660, 0.15, 'triangle', 0.06);
+  toast(`⭐ <b>เคสพิเศษ!</b> ${chain.map(serviceIcon).join(' → ')}<br>รักษาให้ครบทันเวลา รับทิป 💵${bonus.toLocaleString()}`, 4000);
+  return true;
+}
+function specialDone(p) {
+  const s = ev.special;
+  if (!s || s.p !== p) return;
+  ev.special = null;
+  ev.specialTimer = rand(100, 160);
+  addMoney(s.bonus);
+  missionProgress('special', 1);
+  burst(p.person.group.position);
+  sfxUnlock();
+  floatText(p.person.group.position, `⭐ +${s.bonus.toLocaleString()}`, '#e0b3ff');
+  toast(`⭐ เคสพิเศษสำเร็จ! ทิป <b>+${s.bonus.toLocaleString()}</b>`);
+}
+function updateSpecial(dt) {
+  const s = ev.special;
+  if (!s) {
+    if (state.step >= 3 && tutorialDone()) {
+      ev.specialTimer -= dt;
+      if (ev.specialTimer <= 0 && !spawnSpecial()) ev.specialTimer = 30;
+    }
+    return;
+  }
+  s.t -= dt;
+  if (s.t <= 0 || s.p.leaving) {
+    // Out of time (or they stormed out): they finish what they're doing and go home, no tip
+    s.p.chain = null;
+    ev.special = null;
+    ev.specialTimer = rand(100, 160);
+    toast('⌛ เคสพิเศษไม่ทันเวลา ไม่ได้ทิป');
+  }
+}
+
+// --- HUD: rush button and event chips, top right ---
+const rushBtn = document.getElementById('rushbtn');
+const evChips = document.getElementById('evchips');
+let evHtml = '';
+function updateEventHud() {
+  const cooling = Math.max(0, ((state.style.rushAt || 0) - Date.now()) / 1000);
+  rushBtn.style.display = running && tutorialDone() && state.step >= 3 && !ev.rush ? 'flex' : 'none';
+  rushBtn.disabled = cooling > 0;
+  const label = cooling > 0 ? `⏳ ${fmtClock(cooling)}` : 'เร่งด่วน';
+  if (rushBtn.lastChild.textContent !== label) rushBtn.lastChild.textContent = label;
+  rushBtn.classList.toggle('ready', cooling <= 0);
+  let html = '';
+  if (ev.rush) html += `<div class="chip rush">🚨 ${fmtClock(ev.rush.t)} · ${ev.rush.served}/${ev.rush.target} คน</div>`;
+  if (ev.boss) html += `<div class="chip boss">🦠 ${Math.max(0, ev.boss.hp)}/${ev.boss.max} · ${fmtClock(ev.boss.t)}</div>`;
+  if (ev.special) {
+    const s = ev.special;
+    const route = s.chain.map((k, i) => (i < s.p.stage ? '✅' : serviceIcon(k))).join('→');
+    html += `<div class="chip special">⭐ ${route} · ${fmtClock(s.t)}</div>`;
+  }
+  if (html !== evHtml) {
+    evHtml = html;
+    evChips.innerHTML = html;
+  }
+}
+rushBtn.addEventListener('click', startRush);
+
+function updateEvents(dt) {
+  updateRush(dt);
+  updateBoss(dt);
+  updateSpecial(dt);
+}
+
+// ---------- decorations, floor themes and outfits ----------
+// Bought with the shared wallet and kept across every branch. Decorations add "comfort":
+// patients wait longer and come more often. Rare items only drop from the giant germ.
+const DECOR = [
+  { id: 'plants', icon: '🪴', name: 'ต้นไม้ในกระถาง', price: 600, comfort: 1 },
+  { id: 'paintings', icon: '🖼️', name: 'ภาพวาดติดตึก', price: 1200, comfort: 1 },
+  { id: 'flowers', icon: '🌸', name: 'แปลงดอกไม้หน้า รพ.', price: 1800, comfort: 1 },
+  { id: 'vending', icon: '🥤', name: 'ตู้กดน้ำ', price: 2500, comfort: 2 },
+  { id: 'fishtank', icon: '🐠', name: 'ตู้ปลา', price: 3500, comfort: 2 },
+  { id: 'fountain', icon: '⛲', name: 'น้ำพุในล็อบบี้', price: 6000, comfort: 3 },
+  { id: 'statue', icon: '🏆', name: 'รูปปั้นเชื้อโรคทองคำ', rare: true, comfort: 3 },
+  { id: 'rainbow', icon: '🌈', name: 'พรมทางเดินสายรุ้ง', rare: true, comfort: 3 },
+];
+const THEMES = [
+  { id: 'default', icon: '🎨', name: 'พาสเทล (เดิม)', price: 0, colors: DEPTS.map((d) => d.floor) },
+  { id: 'mint', icon: '🌿', name: 'มิ้นต์สดชื่น', price: 1500, colors: [0xd8f3dc, 0xb7e4c7, 0xc7f9cc, 0xd8f3dc, 0xb7e4c7] },
+  { id: 'sunset', icon: '🌅', name: 'พระอาทิตย์ตก', price: 1500, colors: [0xffd6a5, 0xffc2c2, 0xfdffb6, 0xffd6ff, 0xffe0b5] },
+  { id: 'ocean', icon: '🌊', name: 'ทะเลสีคราม', price: 1500, colors: [0xbde0fe, 0xa2d2ff, 0xcde7ff, 0xb8e1ff, 0xa9def9] },
+];
+const OUTFITS = [
+  { id: 'classic', icon: '🥼', name: 'เสื้อกาวน์คลาสสิก', price: 0, coat: 0xffffff, shirt: 0x3d8bfd, pants: 0x2c3e66 },
+  { id: 'green', icon: '💚', name: 'ชุดสครับเขียว', price: 800, coat: 0x3fae7a, shirt: 0x2e8b62, pants: 0x3fae7a, hat: 'scrub', hatColor: 0x2e8b62 },
+  { id: 'pink', icon: '💗', name: 'ชุดสครับชมพู', price: 800, coat: 0xf28fb3, shirt: 0xe46a98, pants: 0xf28fb3, hat: 'nurse' },
+  { id: 'surgeon', icon: '😷', name: 'ชุดหมอผ่าตัด', price: 1500, coat: 0x4f8fd8, shirt: 0x3a74b8, pants: 0x4f8fd8, hat: 'scrub', hatColor: 0x3a74b8, mask: true },
+  { id: 'fancy', icon: '🎩', name: 'หมอสุดเท่', price: 3000, coat: 0x2b2d42, shirt: 0xffffff, pants: 0x2b2d42, hat: 'top' },
+  { id: 'hero', icon: '🦸', name: 'ชุดฮีโร่นักล่าเชื้อโรค', rare: true, perk: 'ยิงเชื้อโรคแรง ×2', coat: 0xe5484d, shirt: 0xffd166, pants: 0x1d3a8a, hat: 'band', cape: 0xe5484d },
+  { id: 'crown', icon: '👑', name: 'หมอมงกุฎทองคำ', rare: true, perk: 'รายได้ +10%', coat: 0xfff3c4, shirt: 0x9b5de5, pants: 0x6c4ab6, hat: 'crown' },
+];
+const RARE_ORDER = ['hero', 'statue', 'rainbow', 'crown'];
+const defaultStyle = () => ({ decor: [], themes: ['default'], theme: 'default', outfits: ['classic'], outfit: 'classic', rushAt: 0, bossKills: 0 });
+const styleItem = (id) => DECOR.find((d) => d.id === id) || OUTFITS.find((o) => o.id === id) || THEMES.find((t) => t.id === id);
+const ownsStyle = (id) => state.style.decor.includes(id) || state.style.outfits.includes(id) || state.style.themes.includes(id);
+const comfort = () => (state.style?.decor || []).reduce((a, id) => a + (DECOR.find((d) => d.id === id)?.comfort || 0), 0);
+const themeColor = (deptId) => {
+  const theme = THEMES.find((t) => t.id === state.style?.theme) || THEMES[0];
+  return theme.colors[DEPTS.findIndex((d) => d.id === deptId)];
+};
+
+function grantStyle(id, animate = true) {
+  if (ownsStyle(id)) return;
+  if (DECOR.some((d) => d.id === id)) {
+    state.style.decor.push(id);
+    buildDecor(id, animate);
+  } else if (OUTFITS.some((o) => o.id === id)) {
+    state.style.outfits.push(id);
+  } else {
+    state.style.themes.push(id);
+  }
+}
+
+// --- decoration models, placed where nobody walks ---
+const decorAnims = [];
+function pottedPlant() {
+  const g = new THREE.Group();
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.22, 0.42, 12), mat(0xc0703c));
+  pot.position.y = 0.21;
+  pot.castShadow = true;
+  g.add(pot);
+  const leafGeo = new THREE.IcosahedronGeometry(0.3, 0);
+  for (let i = 0; i < 4; i++) {
+    const leaf = new THREE.Mesh(leafGeo, new THREE.MeshLambertMaterial({ color: pick([0x4caf50, 0x5bbd3a, 0x3f9e44]), flatShading: true }));
+    leaf.position.set(rand(-0.12, 0.12), 0.65 + i * 0.16, rand(-0.12, 0.12));
+    leaf.scale.setScalar(1 - i * 0.18);
+    leaf.castShadow = true;
+    g.add(leaf);
+  }
+  return g;
+}
+function paintingTex(i) {
+  return canvasTexture(128, 96, (g) => {
+    const skies = ['#8ecae6', '#ffd6a5', '#cdb4db', '#bde0fe', '#caffbf'];
+    g.fillStyle = skies[i % skies.length];
+    g.fillRect(0, 0, 128, 96);
+    if (i % 5 === 0) { // hills and a sun
+      g.fillStyle = '#ffd166'; g.beginPath(); g.arc(96, 28, 14, 0, 7); g.fill();
+      g.fillStyle = '#52b788'; g.beginPath(); g.ellipse(40, 96, 70, 40, 0, 0, 7); g.fill();
+      g.fillStyle = '#2d6a4f'; g.beginPath(); g.ellipse(110, 100, 60, 34, 0, 0, 7); g.fill();
+    } else if (i % 5 === 1) { // big heart
+      g.fillStyle = '#e5484d'; g.font = '64px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('❤️', 64, 52);
+    } else if (i % 5 === 2) { // flower
+      g.fillStyle = '#2d6a4f'; g.fillRect(61, 48, 6, 44);
+      g.fillStyle = '#ff8fab'; for (let a = 0; a < 6; a++) { g.beginPath(); g.arc(64 + Math.cos(a) * 16, 40 + Math.sin(a) * 16, 11, 0, 7); g.fill(); }
+      g.fillStyle = '#ffd166'; g.beginPath(); g.arc(64, 40, 9, 0, 7); g.fill();
+    } else if (i % 5 === 3) { // waves
+      g.strokeStyle = '#3d8bfd'; g.lineWidth = 7;
+      for (let y = 30; y < 96; y += 20) { g.beginPath(); for (let x = 0; x <= 128; x += 8) g.lineTo(x, y + Math.sin(x / 10) * 5); g.stroke(); }
+    } else { // friendly doctor face
+      g.fillStyle = '#ffdbac'; g.beginPath(); g.arc(64, 50, 30, 0, 7); g.fill();
+      g.fillStyle = '#1d2433'; g.beginPath(); g.arc(53, 45, 4, 0, 7); g.arc(75, 45, 4, 0, 7); g.fill();
+      g.strokeStyle = '#1d2433'; g.lineWidth = 3; g.beginPath(); g.arc(64, 54, 12, 0.2, Math.PI - 0.2); g.stroke();
+    }
+    g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.strokeRect(3, 3, 122, 90);
+  });
+}
+function rainbowTex() {
+  return canvasTexture(64, 256, (g) => {
+    const cols = ['#ff595e', '#ff924c', '#ffca3a', '#8ac926', '#1982c4', '#6a4c93'];
+    cols.forEach((c, i) => {
+      g.fillStyle = c;
+      g.fillRect(0, (i * 256) / cols.length, 64, 256 / cols.length + 1);
+    });
+  });
+}
+
+const DECOR_BUILD = {
+  plants() {
+    const g = new THREE.Group();
+    for (const [x, z] of [[-8.45, -10.45], [-8.45, -3.5], [-8.45, 2.85], [-8.45, 10.3], [4.15, 14.15], [9.6, 14.15]]) {
+      const p = pottedPlant();
+      p.position.set(x, 0.12, z);
+      g.add(p);
+    }
+    return g;
+  },
+  paintings() {
+    const g = new THREE.Group();
+    [-6.8, -3.4, 0, 3.4, 6.8].forEach((x, i) => {
+      const frame = box(1.42, 1.12, 0.08, 0x8a5a30, { shadow: false });
+      frame.position.set(x, 2.4, -11.86);
+      const pic = new THREE.Mesh(new THREE.PlaneGeometry(1.26, 0.96), new THREE.MeshBasicMaterial({ map: paintingTex(i) }));
+      pic.position.set(x, 2.4, -11.81);
+      g.add(frame, pic);
+    });
+    return g;
+  },
+  flowers() {
+    const g = new THREE.Group();
+    const petals = [0xff8fab, 0xffd166, 0xffffff, 0xc77dff, 0xff595e];
+    for (const x of [-7.5, -5, -2.5]) {
+      const bed = box(2.0, 0.22, 0.6, 0x6b4226);
+      bed.position.set(x, 0.11, 14.15);
+      g.add(bed);
+      for (let i = 0; i < 9; i++) {
+        const f = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 6), mat(pick(petals)));
+        f.position.set(x - 0.85 + i * 0.21, 0.36, 14.15 + rand(-0.15, 0.15));
+        const stem = box(0.03, 0.16, 0.03, 0x3f9e44, { shadow: false });
+        stem.position.set(f.position.x, 0.27, f.position.z);
+        g.add(stem, f);
+      }
+    }
+    return g;
+  },
+  vending() {
+    const g = new THREE.Group();
+    const body = box(0.6, 1.8, 0.9, 0xe5484d);
+    body.position.y = 0.9;
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 1.0), new THREE.MeshBasicMaterial({
+      map: canvasTexture(64, 96, (c) => {
+        c.fillStyle = '#d6f0ff'; c.fillRect(0, 0, 64, 96);
+        const cans = ['#3d8bfd', '#ffd166', '#3fbf5f', '#ff8fab'];
+        for (let r = 0; r < 4; r++) for (let k = 0; k < 3; k++) { c.fillStyle = cans[(r + k) % 4]; c.fillRect(6 + k * 20, 6 + r * 23, 13, 17); }
+      }),
+    }));
+    glass.rotation.y = Math.PI / 2;
+    glass.position.set(0.31, 1.15, 0);
+    const label = box(0.04, 0.22, 0.7, 0xffffff, { shadow: false });
+    label.position.set(0.31, 1.75, 0);
+    g.add(body, glass, label);
+    g.position.set(-8.5, 0.12, 7.0);
+    return g;
+  },
+  fishtank() {
+    const g = new THREE.Group();
+    const stand = box(1.6, 0.6, 0.7, 0x5c4033);
+    stand.position.y = 0.3;
+    const water = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.8, 0.6), new THREE.MeshLambertMaterial({ color: 0x5ec8f2, transparent: true, opacity: 0.6 }));
+    water.position.y = 1.0;
+    const sand = box(1.48, 0.08, 0.58, 0xf3d9a4, { shadow: false });
+    sand.position.y = 0.64;
+    const lid = box(1.6, 0.06, 0.7, 0x2b2d42, { shadow: false });
+    lid.position.y = 1.43;
+    g.add(stand, sand, water, lid);
+    for (let i = 0; i < 4; i++) {
+      const fish = box(0.18, 0.1, 0.05, pick([0xff924c, 0xffd166, 0xff595e, 0xffffff]), { shadow: false });
+      fish.position.set(rand(-0.5, 0.5), rand(0.8, 1.2), rand(-0.15, 0.15));
+      g.add(fish);
+      const phase = Math.random() * 6;
+      decorAnims.push((t) => {
+        fish.position.x = Math.sin(t * 0.7 + phase) * 0.55;
+        fish.rotation.y = Math.cos(t * 0.7 + phase) > 0 ? 0 : Math.PI;
+      });
+    }
+    g.position.set(-7.6, 0.12, 4.4);
+    return g;
+  },
+  fountain() {
+    const g = new THREE.Group();
+    const basin = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.05, 0.4, 20), mat(0xdfe6ee));
+    basin.position.y = 0.2;
+    basin.castShadow = true;
+    const water = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.05, 20), new THREE.MeshLambertMaterial({ color: 0x5ec8f2 }));
+    water.position.y = 0.38;
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.9, 10), mat(0xdfe6ee));
+    column.position.y = 0.75;
+    const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.2, 0.15, 14), mat(0xdfe6ee));
+    bowl.position.y = 1.2;
+    const spout = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshLambertMaterial({ color: 0x9fe3ff, transparent: true, opacity: 0.85 }));
+    g.add(basin, water, column, bowl, spout);
+    decorAnims.push((t) => {
+      spout.position.y = 1.4 + Math.abs(Math.sin(t * 3)) * 0.25;
+      spout.scale.setScalar(0.8 + Math.abs(Math.sin(t * 3)) * 0.4);
+    });
+    g.position.set(-7.0, 0.12, 11.6);
+    return g;
+  },
+  statue() {
+    const g = new THREE.Group();
+    const base = box(0.9, 0.6, 0.9, 0xf4f4f0);
+    base.position.y = 0.3;
+    const germ = germModel(0xffd166, 0xe0a100);
+    germ.scale.setScalar(0.42);
+    germ.position.y = 1.05;
+    g.add(base, germ);
+    decorAnims.push((t) => { germ.rotation.y = t * 0.6; });
+    g.position.set(-7.4, 0.12, 8.9);
+    return g;
+  },
+  rainbow() {
+    const tex = rainbowTex();
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, 4);
+    styleRefs.runner.material = new THREE.MeshLambertMaterial({ map: tex });
+    return null;
+  },
+};
+function buildDecor(id, animate) {
+  const obj = DECOR_BUILD[id]?.();
+  if (!obj) return;
+  scene.add(obj);
+  if (animate) {
+    popIn(obj);
+    burst(obj.position.lengthSq() ? obj.position : player.group.position);
+  }
+}
+function updateDecor() {
+  const t = performance.now() / 1000;
+  for (const f of decorAnims) f(t);
+}
+function applyTheme() {
+  for (const [id, rug] of Object.entries(deptRugs)) rug.material.color.set(themeColor(id));
+}
+
+// --- outfits: recolour the player and swap the hat ---
+function makeHat(o) {
+  const g = new THREE.Group();
+  if (o.hat === 'scrub') {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.29, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2.2), mat(o.hatColor));
+    cap.position.y = 1.55;
+    g.add(cap);
+  } else if (o.hat === 'nurse') {
+    const c = box(0.36, 0.13, 0.22, 0xffffff);
+    c.position.set(0, 1.8, 0.04);
+    const cross = box(0.08, 0.08, 0.02, 0xe5484d, { shadow: false });
+    cross.position.set(0, 1.8, 0.16);
+    g.add(c, cross);
+  } else if (o.hat === 'top') {
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.04, 16), mat(0x111111));
+    brim.position.y = 1.74;
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.4, 16), mat(0x111111));
+    crown.position.y = 1.95;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.225, 0.225, 0.07, 16), mat(0xe5484d));
+    band.position.y = 1.8;
+    g.add(brim, crown, band);
+  } else if (o.hat === 'band') {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.08, 16, 1, true), mat(0xe5484d));
+    band.position.y = 1.62;
+    const eyes = box(0.4, 0.09, 0.04, 0x111111, { shadow: false });
+    eyes.position.set(0, 1.52, 0.245);
+    g.add(band, eyes);
+  } else if (o.hat === 'crown') {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.14, 12, 1, true), new THREE.MeshLambertMaterial({ color: 0xffd166, side: THREE.DoubleSide }));
+    ring.position.y = 1.82;
+    g.add(ring);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 4), mat(0xffd166));
+      tip.position.set(Math.sin(a) * 0.22, 1.96, Math.cos(a) * 0.22);
+      g.add(tip);
+    }
+    const gem = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), mat(0xe5484d));
+    gem.position.set(0, 1.83, 0.25);
+    g.add(gem);
+  }
+  if (o.mask) {
+    const m = box(0.3, 0.15, 0.04, 0xbfe3ff, { shadow: false });
+    m.position.set(0, 1.42, 0.245);
+    g.add(m);
+  }
+  if (o.cape) {
+    const cape = box(0.56, 0.95, 0.04, o.cape);
+    cape.position.set(0, 0.82, -0.27);
+    cape.rotation.x = 0.08;
+    g.add(cape);
+  }
+  return g;
+}
+function applyOutfit() {
+  const o = OUTFITS.find((x) => x.id === state.style.outfit) || OUTFITS[0];
+  const { torso, front } = player.parts;
+  torso.material = mat(o.coat);
+  if (front) front.material = mat(o.shirt);
+  for (const s of player.arms) s.children[0].material = mat(o.coat);
+  for (const h of player.legs) h.children[0].material = mat(o.pants);
+  if (player.hat) player.body.remove(player.hat);
+  player.hat = makeHat(o);
+  player.body.add(player.hat);
+}
+
+// --- the 🎨 panel ---
+const stylePanel = document.getElementById('style');
+const styleList = document.getElementById('stylelist');
+const styleBtn = document.getElementById('stylebtn');
+let styleTab = 'decor';
+function styleRow({ icon, name, sub, label, disabled, onClick, owned }) {
+  const row = document.createElement('div');
+  row.className = 'uprow' + (owned ? ' owned' : '');
+  row.innerHTML = `<div class="upico">${icon}</div><div class="upinfo"><b>${name}</b><br><small>${sub}</small></div>`;
+  const btn = document.createElement('button');
+  btn.className = 'btn upbuy';
+  btn.textContent = label;
+  btn.disabled = disabled;
+  btn.addEventListener('click', onClick);
+  row.append(btn);
+  styleList.append(row);
+}
+function buyStyle(item) {
+  if (item.rare || ownsStyle(item.id) || state.money < item.price) return;
+  state.money -= item.price;
+  updateMoney();
+  grantStyle(item.id);
+  sfxUnlock();
+  save();
+}
+function renderStyle() {
+  for (const t of document.querySelectorAll('#styletabs button')) t.classList.toggle('on', t.dataset.tab === styleTab);
+  const c = comfort();
+  document.getElementById('comfort').innerHTML = `😊 ความสบาย ${c} · คนไข้รอได้นานขึ้น +${c * 4}% · มาเพิ่ม +${c * 2}%`;
+  styleList.innerHTML = '';
+  if (styleTab === 'decor') {
+    for (const d of DECOR) {
+      const owned = ownsStyle(d.id);
+      styleRow({
+        icon: d.icon, name: d.name, owned,
+        sub: `ความสบาย +${d.comfort}${d.rare ? ' · 💎 ของหายาก' : ''}`,
+        label: owned ? 'มีแล้ว ✓' : d.rare ? '🦠 ได้จากบอส' : `💵${d.price.toLocaleString()}`,
+        disabled: owned || d.rare || state.money < d.price,
+        onClick: () => { buyStyle(d); renderStyle(); },
+      });
+    }
+    const h = document.createElement('h4');
+    h.textContent = '🎨 สีพื้นห้อง';
+    styleList.append(h);
+    for (const t of THEMES) {
+      const owned = ownsStyle(t.id);
+      const using = state.style.theme === t.id;
+      styleRow({
+        icon: t.icon, name: t.name, owned,
+        sub: owned ? 'กดเพื่อเปลี่ยนสีพื้นทุกห้อง' : 'เปลี่ยนสีพื้นทุกห้อง',
+        label: using ? 'ใช้อยู่' : owned ? 'ใช้' : `💵${t.price.toLocaleString()}`,
+        disabled: using || (!owned && state.money < t.price),
+        onClick: () => {
+          if (!owned) buyStyle(t);
+          if (!ownsStyle(t.id)) return;
+          state.style.theme = t.id;
+          applyTheme();
+          save();
+          renderStyle();
+        },
+      });
+    }
+  } else {
+    for (const o of OUTFITS) {
+      const owned = ownsStyle(o.id);
+      const using = state.style.outfit === o.id;
+      styleRow({
+        icon: o.icon, name: o.name, owned,
+        sub: o.perk ? `💎 ${o.perk}` : 'ชุดสวย ๆ ไว้อวดเพื่อน',
+        label: using ? 'ใส่อยู่' : owned ? 'ใส่' : o.rare ? '🦠 ได้จากบอส' : `💵${o.price.toLocaleString()}`,
+        disabled: using || (!owned && (o.rare || state.money < o.price)),
+        onClick: () => {
+          if (!owned) buyStyle(o);
+          if (!ownsStyle(o.id)) return;
+          state.style.outfit = o.id;
+          applyOutfit();
+          burst(player.group.position);
+          save();
+          renderStyle();
+        },
+      });
+    }
+  }
+}
+for (const t of document.querySelectorAll('#styletabs button')) {
+  t.addEventListener('click', () => {
+    styleTab = t.dataset.tab;
+    renderStyle();
+  });
+}
+styleBtn.addEventListener('click', () => {
+  styleBtn.classList.remove('ready');
+  renderStyle();
+  stylePanel.style.display = 'flex';
+});
+document.getElementById('styleclose').addEventListener('click', () => {
+  stylePanel.style.display = 'none';
+});
+
 // ---------- player actions ----------
 let actTimer = 0;
 function playerActions(dt) {
@@ -2641,6 +3377,12 @@ try {
 const AUTO_DELAY = 2; // seconds without input before the autopilot takes over
 
 function autoTasks() {
+  // A giant germ beats everything else: go and zap it
+  if (ev.boss) {
+    if (player.floor === 1) return [{ at: ELEVATOR, keep: () => player.floor === 1 }];
+    const b = ev.boss;
+    return [{ at: bossStand(b), keep: () => ev.boss === b }];
+  }
   if (player.floor === 1) return floor2Tasks();
   const stack = player.stack;
   const cap = bagCapacity();
@@ -2862,6 +3604,7 @@ function guideTarget() {
     const at = TUTORIAL[state.tutorial].at?.();
     if (at) return at;
   }
+  if (ev.boss) return player.floor === 1 ? ELEVATOR : bossStand(ev.boss);
   if (player.floor === 1) return floor2Tasks()[0]?.at || null;
   const stack = player.stack;
   const pill = LINES.pill;
@@ -2986,6 +3729,9 @@ const MISSIONS = [
   { type: 'emergency', icon: '🚨', text: (n) => `ช่วยคนไข้ฉุกเฉิน ${n} คน`, targets: [3, 5, 8], from: 2 },
   { type: 'vip', icon: '👑', text: (n) => `ดูแลคนไข้ VIP ${n} คน`, targets: [2, 3, 5], from: 4 },
   { type: 'upgrade', icon: '⬆️', text: (n) => `อัปเกรด ${n} ครั้ง`, targets: [1, 2, 3], from: 1 },
+  { type: 'special', icon: '⭐', text: (n) => `รักษาเคสพิเศษสำเร็จ ${n} เคส`, targets: [1, 2, 3], from: 3 },
+  { type: 'rush', icon: '🚨', text: (n) => `ได้โบนัสชั่วโมงเร่งด่วน ${n} ครั้ง`, targets: [1, 2, 2], from: 3 },
+  { type: 'boss', icon: '🦠', text: (n) => `กำจัดเชื้อโรคยักษ์ ${n} ตัว`, targets: [1, 2, 3], from: 5 },
 ];
 const todayKey = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
 
@@ -3202,6 +3948,7 @@ const DOCK = {
   upbtn: () => tutorialDone(),
   missionbtn: () => tutorialDone(),
   branchbtn: () => canOpenBranch() || state.branches.length > 1,
+  stylebtn: () => tutorialDone() && state.step >= 2,
 };
 function updateDock(initial = false) {
   for (const [id, visible] of Object.entries(DOCK)) {
@@ -3312,7 +4059,7 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // ---------- save / load ----------
 // state.branch is the open branch's index; state.branches holds a snapshot of every
 // branch (null = opened but never played). Money, earnings and missions are shared.
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0 };
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0, style: defaultStyle() };
 
 let awayOnLoad = 0;
 let localSavedAt = 0;
@@ -3334,7 +4081,7 @@ function branchSnapshot() {
 function saveData() {
   state.branches[state.branch] = branchSnapshot();
   return {
-    v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(), tutorial: state.tutorial,
+    v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(), tutorial: state.tutorial, style: state.style,
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
     branch: state.branches.length - 1, step: state.step,
@@ -3397,6 +4144,7 @@ function load() {
   state.money = data.money || 0;
   state.daily = data.daily || null;
   state.earned = data.earned || 0;
+  state.style = { ...defaultStyle(), ...(data.style || {}) };
   // Players from before the tutorial existed (or anyone who has earned money) skip it
   state.tutorial = data.tutorial ?? (state.earned > 0 || state.branches.some((b) => b?.step) ? TUTORIAL.length : 0);
   state.branches = Array.isArray(data.branches) && data.branches.length ? data.branches : [null];
@@ -3419,6 +4167,7 @@ function load() {
   }
   for (const [id, amount] of Object.entries(br.roomCash || {})) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
   restoreFloor2(br.f2);
+  for (const id of state.style.decor) buildDecor(id, false);
   shownMoney = state.money;
   if (data.savedAt) awayOnLoad = (Date.now() - data.savedAt) / 1000;
   localSavedAt = data.savedAt || 0;
@@ -3458,6 +4207,7 @@ function frame(now) {
     staff.forEach((s) => s.update(dt));
     updateAmbulance(dt);
     updateTile(dt);
+    updateEvents(dt);
     updateGuide();
     saveTimer += dt;
     if (saveTimer > 5) {
@@ -3472,6 +4222,7 @@ function frame(now) {
   updateFlyers(dt);
   updatePops(dt);
   updateConfetti(dt);
+  updateDecor();
   updateFloats(dt);
   updateCamera(dt);
   updateBag();
@@ -3481,6 +4232,7 @@ function frame(now) {
     updateTutorial();
     updateDock();
   }
+  updateEventHud();
   tickMoneyDisplay(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -3492,6 +4244,8 @@ buildPartitions();
 buildTrash();
 decorateDept('pill', false);
 load();
+applyTheme();
+applyOutfit();
 spawnCrew();
 showNextTile();
 updateBag();
@@ -3811,4 +4565,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
