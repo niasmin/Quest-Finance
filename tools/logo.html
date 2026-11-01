@@ -11,8 +11,8 @@
 </style>
 </head>
 <body>
-<script src="../public/shared.js"></script>
-<script src="../public/sprites.js"></script>
+<script src="shared.js"></script>
+<script src="sprites.js"></script>
 <script>
 const SPR = Sprites.build(window.GAME_DATA);
 
@@ -124,7 +124,7 @@ function titleArt() {
 }
 
 function subtitleArt() {
-  return pixelText('ล่าเชื้อป่วน', '600 15px Mitr', {
+  return pixelText('โรงพยาบาลป่วน', '600 15px Mitr', {
     bands: ['#ffffff', '#ffffff', '#fff1f5', '#ffe0ea'],
     outline: '#4a0f25',
     shadow: '#4a0f25',
@@ -248,7 +248,7 @@ function makeOG() {
   g.lineWidth = 6;
   g.strokeStyle = '#000';
   g.fillStyle = '#ffffff';
-  const line = 'เกม RPG ทีมหมอปราบเชื้อโรค · เล่นฟรีบนเว็บและมือถือ';
+  const line = 'เกมไทคูนโรงพยาบาล 3D · เล่นฟรีบนเว็บและมือถือ';
   g.strokeText(line, W / 2, H - 50);
   g.fillText(line, W / 2, H - 50);
   return c;
