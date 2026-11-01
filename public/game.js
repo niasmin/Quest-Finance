@@ -51,7 +51,11 @@ const UNLOCKS = [
   { id: 'dentist', label: 'จ้างทันตแพทย์', icon: '🧑‍⚕️', price: 1700, at: v(-1.4, 8.2) },
   { id: 'surgery', label: 'ห้องผ่าตัด', icon: '🫀', price: 2500, at: v(2.2, 11.4) },
   { id: 'surgeon', label: 'จ้างศัลยแพทย์', icon: '🧑‍⚕️', price: 2800, at: v(-1.4, 11.4) },
+  { id: 'waiting', label: 'ห้องรอพร้อมเก้าอี้', icon: '🪑', price: 3200, at: v(7.0, -9.7) },
 ];
+
+// Waiting room: two rows of chairs at the quiet north end of the hallway, facing south
+const SEATS = Array.from({ length: 8 }, (_, i) => ({ at: v(5.75 + (i % 4) * 0.85, -10.3 + Math.floor(i / 4) * 1.1), taken: null }));
 
 // Upgrades can be bought again and again; each level costs more
 const UPGRADES = [
@@ -67,7 +71,8 @@ const upCost = (u) => Math.round((u.base * u.growth ** upLevel(u.id)) / 10) * 10
 const speedMult = () => 1 + 0.08 * upLevel('speed');
 const staffMult = () => 1 + 0.1 * upLevel('staff');
 const machineMult = () => 1 + 0.1 * upLevel('machine');
-const priceMult = () => 1 + 0.1 * upLevel('price');
+const branchMult = () => 1 + 0.5 * (state.branch || 0);
+const priceMult = () => (1 + 0.1 * upLevel('price')) * branchMult();
 // Reputation (0-5 stars) and advertising both bring patients in faster
 const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating);
 
@@ -238,8 +243,10 @@ function buildWorld() {
   building.position.set(0, 3.5, -13.4);
   scene.add(building);
   const roof = box(22.6, 0.6, 3.4, 0xe5484d);
+  roof.material = new THREE.MeshLambertMaterial({ color: 0xe5484d }); // own material: recoloured per branch
   roof.position.set(0, 7.2, -13.4);
   scene.add(roof);
+  branchLook.roof = roof;
   for (let i = 0; i < 6; i++) {
     for (let r = 0; r < 2; r++) {
       const win = box(1.6, 1.3, 0.1, 0x7fc8f8, { shadow: false });
@@ -305,6 +312,17 @@ function buildWorld() {
   }
 }
 
+const branchLook = {};
+const BRANCH_COLORS = ['#e5484d', '#3d8bfd', '#2e9e4f', '#9b5de5', '#f5a623', '#14b8a6'];
+// Each new branch gets its own roof and sign colour
+function applyBranchLook() {
+  const color = BRANCH_COLORS[(state.branch || 0) % BRANCH_COLORS.length];
+  branchLook.roof.material.color.set(color);
+  const side = new THREE.MeshLambertMaterial({ color });
+  const label = state.branch ? `🏥 โรงพยาบาลป่วน สาขา ${state.branch + 1}` : '🏥 โรงพยาบาลป่วน';
+  branchLook.arch.material = [side, side, side, side, new THREE.MeshBasicMaterial({ map: signTex(label, color) }), side];
+}
+
 // Partition walls between departments, each with a door, leaving the hallway open
 function buildPartitions() {
   const wallMat = [0xf4f4f0, 0xf4f4f0, 0x7fd1c1, 0xf4f4f0, 0xf4f4f0, 0xf4f4f0];
@@ -344,6 +362,7 @@ function buildPartitions() {
   ]);
   board.position.set(6.8, 3.2, FLOOR.z1 + 0.2);
   board.castShadow = true;
+  branchLook.arch = board;
   arch.add(board);
   scene.add(arch);
 }
@@ -1120,7 +1139,7 @@ class Patient {
     const draw = this.bubble.userData.draw;
     if (this.leaving) draw(this.angry ? '😡' : '😊', '');
     else {
-      const bar = this.inside ? this.patienceLeft() : null;
+      const bar = this.inside || this.seatedBar ? this.patienceLeft() : null;
       const icon = ROOMS[this.kind] ? ROOMS[this.kind].icon : PRODUCTS[this.kind].icon;
       const text = ROOMS[this.kind] ? '' : String(this.need - this.got);
       draw(icon, text, '#1d2433', bar, this.t.badge || '');
@@ -1131,6 +1150,11 @@ class Patient {
     this.tipped = this.waited < this.t.patience * 0.4;
     const amount = Math.round(base * this.t.pay * priceMult() * (this.tipped ? 1.2 : 1));
     changeRating(this.tipped ? 0.05 : 0.02);
+    missionProgress('serve', 1);
+    missionProgress('earn', amount);
+    if (this.tipped) missionProgress('tips', 1);
+    if (this.type === 'emergency') missionProgress('emergency', 1);
+    if (this.type === 'vip') missionProgress('vip', 1);
     return amount;
   }
   leave() {
@@ -1148,6 +1172,7 @@ class Patient {
     return ROOMS[this.kind] ? ROOMS[this.kind].bed.z : LINES[this.kind].front.z;
   }
   remove() {
+    if (this.seat) this.seat.taken = null;
     scene.remove(this.person.group);
     if (this.parent) scene.remove(this.parent.group);
   }
@@ -1159,6 +1184,8 @@ class Patient {
     if (this.leaving) {
       if (this.exitStep === undefined) this.exitStep = 0;
       target = [lane, entry, SPAWN][this.exitStep];
+    } else if (this.seat) {
+      target = pos.z > FLOOR.z1 - 0.3 ? entry : this.seat.at;
     } else if (!this.inside) {
       target = pos.z > FLOOR.z1 - 0.3 ? entry : lane;
     } else {
@@ -1166,7 +1193,11 @@ class Patient {
       target = queueSlot(this.kind, queue.indexOf(this));
     }
     const arrived = walkTo(this.person, target, this.t.speed, dt);
-    animatePerson(this.person, !arrived, dt);
+    if (this.seat && arrived) {
+      this.sit(dt);
+    } else {
+      animatePerson(this.person, !arrived, dt);
+    }
     if (this.parent) {
       const spot = pos.clone().add(v(0.55, 0.5));
       const there = walkTo(this.parent, spot, this.t.speed + 0.6, dt);
@@ -1177,6 +1208,27 @@ class Patient {
       if (arrived && ++this.exitStep > 2) {
         this.remove();
         return false;
+      }
+    } else if (this.seat) {
+      // Waiting in a chair is comfier: patience drains at 40%
+      if (arrived) {
+        this.waited += dt * 0.4;
+        if (this.waited >= this.t.patience) {
+          this.seat.taken = null;
+          this.seat = null;
+          this.standUp();
+          this.angry = true;
+          this.leave();
+          changeRating(-0.15);
+          floatText(this.person.group.position, '😡 รอนานเกินไป!', '#ff8a8a');
+          return true;
+        }
+        const key = Math.ceil(this.patienceLeft() * 20);
+        if (key !== this.barKey) {
+          this.barKey = key;
+          this.seatedBar = true;
+          this.refreshBubble();
+        }
       }
     } else if (!this.inside) {
       if (arrived && target === lane) {
@@ -1202,6 +1254,18 @@ class Patient {
     }
     return true;
   }
+  // Sitting pose on a waiting-room chair, facing the hallway
+  sit(dt) {
+    const p = this.person;
+    p.body.position.y = -0.22;
+    p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
+    p.arms[0].rotation.x = p.arms[1].rotation.x = -0.3;
+    faceToward(p.group, 0, 1, dt);
+  }
+  standUp() {
+    this.person.body.position.y = 0;
+    this.seatedBar = false;
+  }
   // Waited too long: walk out angry without paying
   storm() {
     const queue = (ROOMS[this.kind] || LINES[this.kind]).queue;
@@ -1219,24 +1283,94 @@ function changeRating(delta) {
 }
 
 let spawnTimer = 1;
+const QUEUE_MAX = 5;
+const serviceQueue = (kind) => (ROOMS[kind] || LINES[kind]).queue;
+
+function joinQueue(p) {
+  const queue = serviceQueue(p.kind);
+  // Emergencies jump the queue (behind whoever is already being served)
+  if (p.type === 'emergency') queue.splice(Math.min(1, queue.length), 0, p);
+  else queue.push(p);
+}
+
 function updatePatients(dt) {
   spawnTimer -= dt;
   if (spawnTimer <= 0) {
     spawnTimer = ((state.unlocked.has('ambulance') ? 1.7 : 3.2) / arrivalMult()) * rand(0.7, 1.3);
-    const options = [];
-    for (const line of Object.values(LINES)) if (line.active && line.queue.length < 5) options.push(line.id, line.id);
-    for (const room of Object.values(ROOMS)) if (room.active && room.queue.length < 5) options.push(room.id);
-    if (options.length) {
-      const kind = pick(options);
-      const p = new Patient(kind, rollType());
-      const queue = (ROOMS[kind] || LINES[kind]).queue;
-      // Emergencies jump the queue (behind whoever is already being served)
-      if (p.type === 'emergency') queue.splice(Math.min(1, queue.length), 0, p);
-      else queue.push(p);
+    const services = [
+      ...Object.values(LINES).filter((l) => l.active).flatMap((l) => [l.id, l.id]),
+      ...Object.values(ROOMS).filter((r) => r.active).map((r) => r.id),
+    ];
+    const open = services.filter((k) => serviceQueue(k).length < QUEUE_MAX);
+    const seat = state.unlocked.has('waiting') ? SEATS.find((st) => !st.taken) : null;
+    if (open.length) {
+      const p = new Patient(pick(open), rollType());
+      joinQueue(p);
+      patients.push(p);
+    } else if (seat && services.length) {
+      // Every queue is full: take a seat in the waiting room instead of going home
+      const p = new Patient(pick(services), rollType());
+      p.seat = seat;
+      seat.taken = p;
       patients.push(p);
     }
   }
+  // Seated patients move up as soon as their queue has room
+  for (const st of SEATS) {
+    const p = st.taken;
+    if (p && !p.leaving && serviceQueue(p.kind).length < QUEUE_MAX) {
+      st.taken = null;
+      p.seat = null;
+      p.standUp();
+      joinQueue(p);
+    }
+  }
   for (let i = patients.length - 1; i >= 0; i--) if (!patients[i].update(dt)) patients.splice(i, 1);
+}
+
+function buildWaitingRoom(animate) {
+  const root = new THREE.Group();
+  for (const st of SEATS) {
+    const chair = new THREE.Group();
+    const seat = box(0.55, 0.12, 0.55, 0x3d8bfd);
+    seat.position.y = 0.48;
+    const back = box(0.55, 0.55, 0.1, 0x3d8bfd);
+    back.position.set(0, 0.78, -0.24);
+    const legs = box(0.45, 0.42, 0.45, 0x8d99ae);
+    legs.position.y = 0.21;
+    chair.add(seat, back, legs);
+    chair.position.set(st.at.x, 0, st.at.z);
+    root.add(chair);
+  }
+  // Plants, a water cooler and a sign
+  const plant = (x, z) => {
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.2, 0.45, 10), mat(0xc0763a));
+    pot.position.set(x, 0.23, z);
+    const leaves = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 0), new THREE.MeshLambertMaterial({ color: 0x4caf50, flatShading: true }));
+    leaves.position.set(x, 0.85, z);
+    leaves.castShadow = true;
+    root.add(pot, leaves);
+  };
+  plant(5.55, -8.5);
+  plant(8.85, -10.75);
+  const cooler = box(0.45, 1.0, 0.45, 0xffffff);
+  cooler.position.set(8.85, 0.5, -8.6);
+  const bottle = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.45, 12), new THREE.MeshLambertMaterial({ color: 0x7fc8f8, transparent: true, opacity: 0.85 }));
+  bottle.position.set(8.85, 1.22, -8.6);
+  root.add(cooler, bottle);
+  const sign = new THREE.Group();
+  for (const x of [-1.1, 1.1]) {
+    const post = box(0.1, 2.0, 0.1, 0xdfe6ee);
+    post.position.set(x, 1.0, 0);
+    sign.add(post);
+  }
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.62), new THREE.MeshBasicMaterial({ map: signTex('🪑 ห้องรอ', '#f5a623'), side: THREE.DoubleSide }));
+  board.position.y = 2.0;
+  sign.add(board);
+  sign.position.set(7.05, 0, -10.8);
+  root.add(sign);
+  scene.add(root);
+  if (animate) popIn(root);
 }
 
 // ---------- staff ----------
@@ -1581,6 +1715,7 @@ function applyUnlock(id, animate) {
     case 'dentist': hireRoomStaff(ROOMS.dental, animate); break;
     case 'surgery': buildRoom(ROOMS.surgery, animate); decorateDept('surgery', animate); break;
     case 'surgeon': hireRoomStaff(ROOMS.surgery, animate); break;
+    case 'waiting': buildWaitingRoom(animate); break;
     case 'ambulance': buildAmbulance(animate); break;
     default: break; // bag1, bag2, speed: read from state.unlocked where needed
   }
@@ -1974,13 +2109,13 @@ function updateBag() {
 }
 function updateGoal() {
   const u = UNLOCKS[state.step];
-  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label} · 💵${u.price}` : '🏆 โรงพยาบาลครบทุกแผนกแล้ว!';
+  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label} · 💵${u.price}` : '🏆 ครบทุกแผนก! กด ⬆️ เพื่อเปิดสาขาใหม่';
 }
 
 // ---------- rating & upgrades UI ----------
 const ratingEl = document.getElementById('rating');
 function updateRating() {
-  ratingEl.textContent = `⭐ ${state.rating.toFixed(1)}`;
+  ratingEl.textContent = `⭐ ${state.rating.toFixed(1)}${state.branch ? ` · สาขา ${state.branch + 1}` : ''}`;
 }
 
 const upPanel = document.getElementById('upgrades');
@@ -1988,6 +2123,18 @@ const upList = document.getElementById('uplist');
 const upBtn = document.getElementById('upbtn');
 function renderUpgrades() {
   upList.innerHTML = '';
+  if (state.step >= UNLOCKS.length) {
+    const next = (state.branch || 0) + 2;
+    const card = document.createElement('div');
+    card.className = 'branchcard';
+    card.innerHTML = `<b>🏥 พร้อมเปิดสาขา ${next}!</b><br><small>เริ่มใหม่ แต่รายได้ถาวร ×${(1 + 0.5 * (next - 1)).toFixed(1)}</small>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = 'เปิดสาขาใหม่';
+    btn.addEventListener('click', openBranch);
+    card.append(btn);
+    upList.append(card);
+  }
   for (const u of UPGRADES) {
     const lvl = upLevel(u.id);
     const maxed = lvl >= u.max;
@@ -2010,6 +2157,7 @@ function buyUpgrade(u) {
   if (upLevel(u.id) >= u.max || state.money < cost) return false;
   state.money -= cost;
   state.upgrades[u.id] = upLevel(u.id) + 1;
+  missionProgress('upgrade', 1);
   updateMoney();
   updateBag();
   sfxUnlock();
@@ -2024,7 +2172,101 @@ function cheapestUpgrade() {
 // Red dot on the ⬆️ button when something is affordable
 function updateUpgradeDot() {
   const c = cheapestUpgrade();
-  upBtn.classList.toggle('ready', Boolean(c && state.money >= upCost(c)));
+  upBtn.classList.toggle('ready', Boolean((c && state.money >= upCost(c)) || state.step >= UNLOCKS.length));
+}
+
+// ---------- daily missions ----------
+// Three missions a day, picked from the date so they're the same all day
+const MISSIONS = [
+  { type: 'serve', icon: '🧑‍⚕️', text: (n) => `รักษาคนไข้ ${n} คน`, targets: [20, 35, 50] },
+  { type: 'earn', icon: '💵', text: (n) => `หาเงินจากคนไข้ ${n.toLocaleString()}`, targets: [400, 800, 1500], scale: true },
+  { type: 'tips', icon: '💖', text: (n) => `ได้ทิป ${n} ครั้ง`, targets: [8, 15, 25] },
+  { type: 'emergency', icon: '🚨', text: (n) => `ช่วยคนไข้ฉุกเฉิน ${n} คน`, targets: [3, 5, 8], from: 2 },
+  { type: 'vip', icon: '👑', text: (n) => `ดูแลคนไข้ VIP ${n} คน`, targets: [2, 3, 5], from: 4 },
+  { type: 'upgrade', icon: '⬆️', text: (n) => `อัปเกรด ${n} ครั้ง`, targets: [1, 2, 3], from: 1 },
+];
+const todayKey = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+
+function rollDaily() {
+  const key = todayKey();
+  const rnd = (() => {
+    let h = 0;
+    for (const ch of key) h = (Math.imul(h, 31) + ch.charCodeAt(0)) | 0;
+    return () => ((h = (Math.imul(h, 1664525) + 1013904223) | 0) >>> 0) / 4294967296;
+  })();
+  const pool = MISSIONS.filter((m) => !m.from || state.step >= m.from);
+  const picked = [];
+  while (picked.length < 3 && pool.length) picked.push(pool.splice(Math.floor(rnd() * pool.length), 1)[0]);
+  const growth = 1 + state.step * 0.25 + (state.branch || 0) * 0.5;
+  state.daily = {
+    date: key,
+    missions: picked.map((m, i) => {
+      const target = Math.round(m.targets[i % 3] * (m.scale ? growth : 1));
+      return { type: m.type, target, progress: 0, reward: Math.round((120 * growth * (1 + i * 0.5)) / 10) * 10, claimed: false };
+    }),
+  };
+}
+function ensureDaily() {
+  if (!state.daily || state.daily.date !== todayKey()) {
+    rollDaily();
+    if (missionPanel.style.display === 'flex') renderMissions();
+  }
+}
+function missionProgress(type, n) {
+  if (!state.daily) return;
+  for (const m of state.daily.missions) if (m.type === type && !m.claimed) m.progress = Math.min(m.target, m.progress + n);
+}
+
+const missionPanel = document.getElementById('missions');
+const missionList = document.getElementById('mlist');
+const missionBtn = document.getElementById('missionbtn');
+function renderMissions() {
+  missionList.innerHTML = '';
+  for (const m of state.daily.missions) {
+    const def = MISSIONS.find((d) => d.type === m.type);
+    const done = m.progress >= m.target;
+    const row = document.createElement('div');
+    row.className = 'uprow';
+    row.innerHTML = `<div class="upico">${def.icon}</div>
+      <div class="upinfo"><b>${def.text(m.target)}</b><br>
+      <div class="mbar"><div style="width:${(m.progress / m.target) * 100}%"></div></div>
+      <small>${Math.floor(m.progress).toLocaleString()} / ${m.target.toLocaleString()} · รางวัล 💵${m.reward.toLocaleString()}</small></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn upbuy';
+    btn.textContent = m.claimed ? 'รับแล้ว ✓' : 'รับรางวัล';
+    btn.disabled = m.claimed || !done;
+    btn.addEventListener('click', () => {
+      if (m.claimed || m.progress < m.target) return;
+      m.claimed = true;
+      addMoney(m.reward);
+      sfxUnlock();
+      floatText(player.group.position, `+${m.reward.toLocaleString()} 📋`, '#8be08f');
+      save();
+      renderMissions();
+    });
+    row.append(btn);
+    missionList.append(row);
+  }
+}
+function updateMissionDot() {
+  const ready = state.daily?.missions.some((m) => !m.claimed && m.progress >= m.target);
+  missionBtn.classList.toggle('ready', Boolean(ready));
+}
+
+// ---------- new branch (prestige) ----------
+function openBranch() {
+  const next = (state.branch || 0) + 2;
+  if (!confirm(`เปิดโรงพยาบาลสาขา ${next}?\n\nเริ่มสร้างใหม่ตั้งแต่ต้น (เงิน แผนก และอัปเกรดรีเซ็ต) แต่รายได้ทุกอย่างถาวร ×${(1 + 0.5 * (next - 1)).toFixed(1)}`)) return;
+  saveBlocked = true;
+  const data = { money: 0, step: 0, paid: 0, savedAt: Date.now(), upgrades: {}, rating: 3, branch: next - 1, daily: state.daily, piles: {} };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch {
+    saveBlocked = false;
+    alert('บันทึกไม่ได้ในเบราว์เซอร์นี้');
+    return;
+  }
+  location.reload();
 }
 
 // ---------- sound: WebAudio blips and a looping chiptune ----------
@@ -2118,7 +2360,7 @@ function sfxCoin() { tone(880, 0.08, 'square', 0.03); setTimeout(() => tone(1320
 function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'triangle', 0.06), i * 90)); }
 
 // ---------- save / load ----------
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3 };
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, daily: null };
 
 let awayOnLoad = 0;
 let saveBlocked = false; // set while resetting or importing, so pagehide can't write the old game back
@@ -2127,7 +2369,7 @@ let storageOK = true;
 function saveData() {
   return {
     money: state.money, step: state.step, paid: state.paid, savedAt: Date.now(),
-    upgrades: state.upgrades, rating: state.rating,
+    upgrades: state.upgrades, rating: state.rating, branch: state.branch, daily: state.daily,
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
@@ -2178,6 +2420,8 @@ function load() {
   state.paid = data.paid || 0;
   state.upgrades = data.upgrades || {};
   state.rating = typeof data.rating === 'number' ? data.rating : 3;
+  state.branch = data.branch || 0;
+  state.daily = data.daily || null;
   for (let i = 0; i < state.step; i++) {
     state.unlocked.add(UNLOCKS[i].id);
     applyUnlock(UNLOCKS[i].id, false);
@@ -2243,6 +2487,7 @@ function frame(now) {
   updateCamera(dt);
   updateBag();
   updateUpgradeDot();
+  updateMissionDot();
   tickMoneyDisplay(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -2382,6 +2627,17 @@ document.getElementById('upclose').addEventListener('click', () => {
   upPanel.style.display = 'none';
 });
 updateRating();
+applyBranchLook();
+ensureDaily();
+setInterval(ensureDaily, 60000);
+missionBtn.addEventListener('click', () => {
+  ensureDaily();
+  renderMissions();
+  missionPanel.style.display = 'flex';
+});
+document.getElementById('mclose').addEventListener('click', () => {
+  missionPanel.style.display = 'none';
+});
 setAuto(auto.on);
 document.getElementById('awayok').addEventListener('click', () => {
   document.getElementById('away').style.display = 'none';
@@ -2395,4 +2651,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES };
+window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
