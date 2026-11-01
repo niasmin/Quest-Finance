@@ -53,6 +53,41 @@ const UNLOCKS = [
   { id: 'surgeon', label: 'จ้างศัลยแพทย์', icon: '🧑‍⚕️', price: 2800, at: v(-1.4, 11.4) },
 ];
 
+// Upgrades can be bought again and again; each level costs more
+const UPGRADES = [
+  { id: 'speed', icon: '👟', name: 'รองเท้าวิ่ง', desc: (l) => `เดินเร็ว +${l * 8}%`, max: 10, base: 150, growth: 1.6 },
+  { id: 'bag', icon: '🎒', name: 'กระเป๋าใบใหญ่', desc: (l) => `ถือของ +${l * 4} ชิ้น`, max: 10, base: 200, growth: 1.6 },
+  { id: 'staff', icon: '👩‍⚕️', name: 'อบรมพนักงาน', desc: (l) => `พนักงานไว +${l * 10}%`, max: 10, base: 300, growth: 1.65 },
+  { id: 'machine', icon: '⚙️', name: 'เครื่องผลิตยา', desc: (l) => `ผลิตเร็ว +${l * 10}%`, max: 10, base: 250, growth: 1.6 },
+  { id: 'price', icon: '💰', name: 'ค่ารักษา', desc: (l) => `รายได้ +${l * 10}%`, max: 20, base: 400, growth: 1.55 },
+  { id: 'ads', icon: '📣', name: 'ประชาสัมพันธ์', desc: (l) => `คนไข้มาเพิ่ม +${l * 8}%`, max: 10, base: 350, growth: 1.6 },
+];
+const upLevel = (id) => state.upgrades[id] || 0;
+const upCost = (u) => Math.round((u.base * u.growth ** upLevel(u.id)) / 10) * 10;
+const speedMult = () => 1 + 0.08 * upLevel('speed');
+const staffMult = () => 1 + 0.1 * upLevel('staff');
+const machineMult = () => 1 + 0.1 * upLevel('machine');
+const priceMult = () => 1 + 0.1 * upLevel('price');
+// Reputation (0-5 stars) and advertising both bring patients in faster
+const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating);
+
+// Patient types: [weight, unlocked from step]
+const PATIENT_TYPES = {
+  normal: { weight: 70, patience: 60, pay: 1, speed: 3.2 },
+  emergency: { weight: 12, from: 2, patience: 28, pay: 3, speed: 4.6, badge: '🚨', shirt: 0xe5484d },
+  vip: { weight: 8, from: 4, patience: 45, pay: 5, speed: 3.0, badge: '👑', shirt: 0xffc300 },
+  child: { weight: 10, from: 1, patience: 50, pay: 1.5, speed: 3.0, badge: '👶', scale: 0.68 },
+};
+function rollType() {
+  const options = Object.entries(PATIENT_TYPES).filter(([, t]) => !t.from || state.step >= t.from);
+  let r = Math.random() * options.reduce((a, [, t]) => a + t.weight, 0);
+  for (const [id, t] of options) {
+    r -= t.weight;
+    if (r <= 0) return id;
+  }
+  return 'normal';
+}
+
 // Departments are bands across the floor, split by partition walls with a door in
 // the middle. The east side (x > HALL_X) is an open hallway patients walk along.
 const HALL_X = 5.2;
@@ -575,15 +610,16 @@ function faceToward(obj, dx, dz, dt) {
 function makeBubble() {
   const c = document.createElement('canvas');
   c.width = 160;
-  c.height = 128;
+  c.height = 150;
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-  sprite.scale.set(1.05, 0.84, 1);
+  sprite.scale.set(1.05, 0.98, 1);
   sprite.renderOrder = 10;
-  sprite.userData.draw = (icon, text, color = '#1d2433') => {
+  // patience: 0..1 bar under the bubble (null hides it); badge: small emoji in the corner
+  sprite.userData.draw = (icon, text, color = '#1d2433', patience = null, badge = '') => {
     const g = c.getContext('2d');
-    g.clearRect(0, 0, 160, 128);
+    g.clearRect(0, 0, 160, 150);
     g.fillStyle = '#ffffff';
     roundRect(g, 6, 6, 148, 92, 30);
     g.fill();
@@ -598,6 +634,18 @@ function makeBubble() {
       g.font = '700 40px Mitr, sans-serif';
       g.fillStyle = color;
       g.fillText(text, 112, 56);
+    }
+    if (badge) {
+      g.font = '34px sans-serif';
+      g.fillText(badge, 22, 20);
+    }
+    if (patience !== null) {
+      g.fillStyle = 'rgba(0,0,0,.55)';
+      roundRect(g, 28, 126, 104, 18, 9);
+      g.fill();
+      g.fillStyle = patience > 0.5 ? '#3fbf5f' : patience > 0.25 ? '#ffc300' : '#e5484d';
+      roundRect(g, 31, 129, Math.max(6, 98 * patience), 12, 6);
+      g.fill();
     }
     tex.needsUpdate = true;
   };
@@ -690,7 +738,7 @@ player.stack = new Stack(player.body, columnLayout(0.75, -0.42));
 const playerVel = new THREE.Vector3();
 
 function bagCapacity() {
-  return 10 + (state.unlocked.has('bag1') ? 8 : 0) + (state.unlocked.has('bag2') ? 12 : 0);
+  return 10 + (state.unlocked.has('bag1') ? 8 : 0) + (state.unlocked.has('bag2') ? 12 : 0) + upLevel('bag') * 4;
 }
 
 // ---------- money piles ----------
@@ -830,7 +878,7 @@ function buildLine(line, animate) {
 
 function updateLine(line, dt) {
   // Machine: make an item, slide it along the belt, drop it on the pile
-  const interval = state.unlocked.has('speed') ? 0.55 : 1.0;
+  const interval = (state.unlocked.has('speed') ? 0.55 : 1.0) / machineMult();
   line.machineTimer -= dt;
   if (line.machineTimer <= 0 && line.pile.total + line.conveyor.length < PILE_MAX) {
     line.machineTimer = interval;
@@ -855,7 +903,7 @@ function updateLine(line, dt) {
   const staffed = line.cashierNurse || flatDist(player.group.position, line.cashier) < ZONE_R;
   line.serveTimer -= dt;
   if (front && front.arrived && staffed && line.shelf.count > 0 && front.got + front.pending < front.need && line.serveTimer <= 0) {
-    line.serveTimer = 0.22;
+    line.serveTimer = 0.22 / staffMult();
     const item = line.shelf.take();
     front.pending++;
     fly(item, item.position.clone(), () => front.person.group.position.clone().setY(1.1), (m) => {
@@ -864,12 +912,12 @@ function updateLine(line, dt) {
       front.got++;
       front.refreshBubble();
       if (front.got >= front.need) {
-        const pay = front.need * PRODUCTS[line.product].price;
+        const pay = front.payout(front.need * PRODUCTS[line.product].price);
         line.cash.add(pay);
-        floatText(line.money, `+${pay}`, '#8be08f');
+        floatText(line.money, `+${pay}${front.tipped ? ' 💖' : ''}`, '#8be08f');
         sfxCoin();
         front.leave();
-        line.queue.shift();
+        line.queue.splice(line.queue.indexOf(front), 1);
       }
     });
   }
@@ -1007,11 +1055,12 @@ function updateRoom(room, dt) {
   const staffed = room.staffHired || flatDist(player.group.position, room.operator) < ZONE_R;
   const working = Boolean(front && front.arrived && staffed);
   if (working) {
-    room.scan += dt;
+    room.scan += dt * (room.staffHired ? staffMult() : 1);
     if (room.scan >= room.time) {
       room.scan = 0;
-      room.cash.add(room.price);
-      floatText(room.money, `+${room.price}`, '#8be08f');
+      const pay = front.payout(room.price);
+      room.cash.add(pay);
+      floatText(room.money, `+${pay}${front.tipped ? ' 💖' : ''}`, '#8be08f');
       sfxCoin();
       front.leave();
       room.queue.shift();
@@ -1032,34 +1081,75 @@ function queueSlot(kind, i) {
 }
 
 class Patient {
-  constructor(kind) {
+  constructor(kind, type = 'normal') {
     this.kind = kind;
-    this.person = makePerson({ shirt: pick(SHIRTS) });
+    this.type = type;
+    const t = PATIENT_TYPES[type];
+    this.t = t;
+    this.person = makePerson({ shirt: t.shirt ?? pick(SHIRTS) });
     this.person.group.position.copy(SPAWN);
+    if (t.scale) this.person.group.scale.setScalar(t.scale);
+    if (type === 'vip') {
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.16, 6), mat(0xffd166));
+      crown.position.y = 1.86;
+      this.person.body.add(crown);
+    }
     scene.add(this.person.group);
+    // Kids come with a grown-up who tags along
+    if (type === 'child') {
+      this.parent = makePerson({ shirt: pick(SHIRTS) });
+      this.parent.group.position.copy(SPAWN).add(v(0.6, 0.4));
+      scene.add(this.parent.group);
+    }
     this.need = ROOMS[kind] ? 1 : kind === 'pill' ? 1 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 2);
     this.got = 0;
     this.pending = 0;
     this.arrived = false;
     this.leaving = false;
+    this.waited = 0;
+    this.barKey = -1;
     this.bubble = makeBubble();
-    this.bubble.position.y = 2.35;
+    this.bubble.position.y = 2.35 / (t.scale || 1) * (t.scale ? 0.85 : 1);
     this.person.group.add(this.bubble);
     this.refreshBubble();
   }
+  patienceLeft() {
+    return Math.max(0, 1 - this.waited / this.t.patience);
+  }
   refreshBubble() {
-    if (this.leaving) this.bubble.userData.draw('😊', '');
-    else if (ROOMS[this.kind]) this.bubble.userData.draw(ROOMS[this.kind].icon, '');
-    else this.bubble.userData.draw(PRODUCTS[this.kind].icon, String(this.need - this.got));
+    const draw = this.bubble.userData.draw;
+    if (this.leaving) draw(this.angry ? '😡' : '😊', '');
+    else {
+      const bar = this.inside ? this.patienceLeft() : null;
+      const icon = ROOMS[this.kind] ? ROOMS[this.kind].icon : PRODUCTS[this.kind].icon;
+      const text = ROOMS[this.kind] ? '' : String(this.need - this.got);
+      draw(icon, text, '#1d2433', bar, this.t.badge || '');
+    }
+  }
+  // Final bill: patient type bonus, price upgrade and a tip for quick service
+  payout(base) {
+    this.tipped = this.waited < this.t.patience * 0.4;
+    const amount = Math.round(base * this.t.pay * priceMult() * (this.tipped ? 1.2 : 1));
+    changeRating(this.tipped ? 0.05 : 0.02);
+    return amount;
   }
   leave() {
     this.leaving = true;
     this.arrived = false;
     this.refreshBubble();
   }
+  // Has someone started serving this patient? Then the patience bar stops.
+  beingServed() {
+    if (ROOMS[this.kind]) return ROOMS[this.kind].queue[0] === this && ROOMS[this.kind].scan > 0;
+    return this.got + this.pending > 0;
+  }
   // Waypoints: entrance -> hallway lane at the department's row -> queue slot, and back out
   rowZ() {
     return ROOMS[this.kind] ? ROOMS[this.kind].bed.z : LINES[this.kind].front.z;
+  }
+  remove() {
+    scene.remove(this.person.group);
+    if (this.parent) scene.remove(this.parent.group);
   }
   update(dt) {
     const pos = this.person.group.position;
@@ -1075,36 +1165,74 @@ class Patient {
       const queue = (ROOMS[this.kind] || LINES[this.kind]).queue;
       target = queueSlot(this.kind, queue.indexOf(this));
     }
-    const arrived = walkTo(this.person, target, 3.2, dt);
+    const arrived = walkTo(this.person, target, this.t.speed, dt);
     animatePerson(this.person, !arrived, dt);
+    if (this.parent) {
+      const spot = pos.clone().add(v(0.55, 0.5));
+      const there = walkTo(this.parent, spot, this.t.speed + 0.6, dt);
+      animatePerson(this.parent, !there, dt);
+      if (there) faceToward(this.parent.group, pos.x - this.parent.group.position.x, pos.z - this.parent.group.position.z, dt);
+    }
     if (this.leaving) {
       if (arrived && ++this.exitStep > 2) {
-        scene.remove(this.person.group);
+        this.remove();
         return false;
       }
     } else if (!this.inside) {
-      if (arrived && target === lane) this.inside = true;
+      if (arrived && target === lane) {
+        this.inside = true;
+        this.refreshBubble();
+      }
     } else {
       this.arrived = arrived;
       // Face the counter (west) while waiting
       if (arrived) faceToward(this.person.group, -1, 0, dt);
+      if (!this.beingServed()) {
+        this.waited += dt;
+        if (this.waited >= this.t.patience) {
+          this.storm();
+          return true;
+        }
+      }
+      const key = Math.ceil(this.patienceLeft() * 20);
+      if (key !== this.barKey) {
+        this.barKey = key;
+        this.refreshBubble();
+      }
     }
     return true;
   }
+  // Waited too long: walk out angry without paying
+  storm() {
+    const queue = (ROOMS[this.kind] || LINES[this.kind]).queue;
+    queue.splice(queue.indexOf(this), 1);
+    this.angry = true;
+    this.leave();
+    changeRating(-0.15);
+    floatText(this.person.group.position, '😡 รอนานเกินไป!', '#ff8a8a');
+  }
+}
+
+function changeRating(delta) {
+  state.rating = Math.max(0, Math.min(5, state.rating + delta));
+  updateRating();
 }
 
 let spawnTimer = 1;
 function updatePatients(dt) {
   spawnTimer -= dt;
   if (spawnTimer <= 0) {
-    spawnTimer = (state.unlocked.has('ambulance') ? 1.7 : 3.2) * rand(0.7, 1.3);
+    spawnTimer = ((state.unlocked.has('ambulance') ? 1.7 : 3.2) / arrivalMult()) * rand(0.7, 1.3);
     const options = [];
     for (const line of Object.values(LINES)) if (line.active && line.queue.length < 5) options.push(line.id, line.id);
     for (const room of Object.values(ROOMS)) if (room.active && room.queue.length < 5) options.push(room.id);
     if (options.length) {
       const kind = pick(options);
-      const p = new Patient(kind);
-      (ROOMS[kind] || LINES[kind]).queue.push(p);
+      const p = new Patient(kind, rollType());
+      const queue = (ROOMS[kind] || LINES[kind]).queue;
+      // Emergencies jump the queue (behind whoever is already being served)
+      if (p.type === 'emergency') queue.splice(Math.min(1, queue.length), 0, p);
+      else queue.push(p);
       patients.push(p);
     }
   }
@@ -1134,13 +1262,13 @@ function hireCarrier(line, animate) {
   worker.update = (dt) => {
     worker.timer -= dt;
     if (worker.mode === 'pick') {
-      const there = walkTo(nurse, line.pickup, 3.6, dt);
+      const there = walkTo(nurse, line.pickup, 3.6 * staffMult(), dt);
       animatePerson(nurse, !there, dt, stack.total > 0);
       if (!there) return;
       if (line.pile.count > 0 && stack.total < 8) {
         worker.idle = 0;
         if (worker.timer <= 0) {
-          worker.timer = 0.12;
+          worker.timer = 0.12 / staffMult();
           moveToStack(line.pile.take(), stack, 0.22);
         }
       } else {
@@ -1148,12 +1276,12 @@ function hireCarrier(line, animate) {
       }
       if (stack.total >= 8 || (stack.count > 0 && worker.idle > 1.2)) worker.mode = 'drop';
     } else {
-      const there = walkTo(nurse, line.drop, 3.6, dt);
+      const there = walkTo(nurse, line.drop, 3.6 * staffMult(), dt);
       animatePerson(nurse, !there, dt, true);
       if (!there) return;
       if (stack.count > 0 && line.shelf.total < SHELF_MAX) {
         if (worker.timer <= 0) {
-          worker.timer = 0.12;
+          worker.timer = 0.12 / staffMult();
           moveToStack(stack.take(), line.shelf, 0.22);
         }
       } else if (stack.total === 0) {
@@ -1573,7 +1701,7 @@ function collide(pos, r = 0.35) {
 function updatePlayer(dt) {
   readInput();
   autopilot(dt);
-  const speed = 6.2;
+  const speed = 6.2 * speedMult();
   const moving = Math.hypot(input.x, input.z) > 0.08;
   playerVel.set(input.x * speed, 0, input.z * speed);
   const pos = player.group.position;
@@ -1648,6 +1776,11 @@ function autopilot(dt) {
   const active = auto.on && running && auto.idle >= AUTO_DELAY;
   autoBadge.classList.toggle('show', active);
   if (!active) return;
+  // With every department built, AUTO spends spare money on the cheapest upgrade
+  if (!tile) {
+    const c = cheapestUpgrade();
+    if (c && state.money >= upCost(c)) buyUpgrade(c);
+  }
   document.getElementById('hint').style.display = 'none';
 
   auto.retarget -= dt;
@@ -1728,7 +1861,7 @@ function idleIncome(seconds) {
   const lines = Object.values(LINES).filter((l) => l.active);
   const rooms = Object.values(ROOMS).filter((r) => r.active);
   // Patients arrive at this rate and split across services like updatePatients does
-  const arrivals = 1 / (state.unlocked.has('ambulance') ? 1.7 : 3.2);
+  const arrivals = arrivalMult() / (state.unlocked.has('ambulance') ? 1.7 : 3.2);
   const weights = [...lines.map(() => 2), ...rooms.map(() => 1)];
   const totalW = weights.reduce((a, b) => a + b, 0) || 1;
   let perSecond = 0;
@@ -1736,11 +1869,11 @@ function idleIncome(seconds) {
   lines.forEach((line) => {
     if (!line.cashierNurse || !line.carrier) return;
     const avgNeed = line.product === 'pill' ? 2 : 1.5;
-    const machineRate = 1 / (state.unlocked.has('speed') ? 0.55 : 1.0);
-    perSecond += Math.min(arrivals * (2 / totalW) * avgNeed, machineRate) * PRODUCTS[line.product].price;
+    const machineRate = machineMult() / (state.unlocked.has('speed') ? 0.55 : 1.0);
+    perSecond += Math.min(arrivals * (2 / totalW) * avgNeed, machineRate) * PRODUCTS[line.product].price * priceMult();
   });
   rooms.forEach((room) => {
-    if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), 1 / room.time) * room.price;
+    if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), staffMult() / room.time) * room.price * priceMult();
   });
   const t = Math.min(seconds, OFFLINE_CAP);
   return { amount: Math.floor(perSecond * t * OFFLINE_RATE), perHour: Math.round(perSecond * 3600 * OFFLINE_RATE), seconds: t };
@@ -1844,6 +1977,56 @@ function updateGoal() {
   goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label} · 💵${u.price}` : '🏆 โรงพยาบาลครบทุกแผนกแล้ว!';
 }
 
+// ---------- rating & upgrades UI ----------
+const ratingEl = document.getElementById('rating');
+function updateRating() {
+  ratingEl.textContent = `⭐ ${state.rating.toFixed(1)}`;
+}
+
+const upPanel = document.getElementById('upgrades');
+const upList = document.getElementById('uplist');
+const upBtn = document.getElementById('upbtn');
+function renderUpgrades() {
+  upList.innerHTML = '';
+  for (const u of UPGRADES) {
+    const lvl = upLevel(u.id);
+    const maxed = lvl >= u.max;
+    const cost = upCost(u);
+    const row = document.createElement('div');
+    row.className = 'uprow';
+    row.innerHTML = `<div class="upico">${u.icon}</div>
+      <div class="upinfo"><b>${u.name}</b> <span class="lv">Lv.${lvl}/${u.max}</span><br><small>${u.desc(lvl)}${maxed ? '' : ` → ${u.desc(lvl + 1).replace(/^.*?([+−-].*)$/, '$1')}`}</small></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn upbuy';
+    btn.textContent = maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`;
+    btn.disabled = maxed || state.money < cost;
+    btn.addEventListener('click', () => buyUpgrade(u));
+    row.append(btn);
+    upList.append(row);
+  }
+}
+function buyUpgrade(u) {
+  const cost = upCost(u);
+  if (upLevel(u.id) >= u.max || state.money < cost) return false;
+  state.money -= cost;
+  state.upgrades[u.id] = upLevel(u.id) + 1;
+  updateMoney();
+  updateBag();
+  sfxUnlock();
+  floatText(player.group.position, `${u.icon} Lv.${upLevel(u.id)}`, '#ffd166');
+  save();
+  if (upPanel.style.display === 'flex') renderUpgrades();
+  return true;
+}
+function cheapestUpgrade() {
+  return UPGRADES.filter((u) => upLevel(u.id) < u.max).sort((a, b) => upCost(a) - upCost(b))[0];
+}
+// Red dot on the ⬆️ button when something is affordable
+function updateUpgradeDot() {
+  const c = cheapestUpgrade();
+  upBtn.classList.toggle('ready', Boolean(c && state.money >= upCost(c)));
+}
+
 // ---------- sound: WebAudio blips and a looping chiptune ----------
 let audio = null;
 let master = null;
@@ -1935,7 +2118,7 @@ function sfxCoin() { tone(880, 0.08, 'square', 0.03); setTimeout(() => tone(1320
 function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'triangle', 0.06), i * 90)); }
 
 // ---------- save / load ----------
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set() };
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3 };
 
 let awayOnLoad = 0;
 let saveBlocked = false; // set while resetting or importing, so pagehide can't write the old game back
@@ -1944,6 +2127,7 @@ let storageOK = true;
 function saveData() {
   return {
     money: state.money, step: state.step, paid: state.paid, savedAt: Date.now(),
+    upgrades: state.upgrades, rating: state.rating,
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
@@ -1992,6 +2176,8 @@ function load() {
   state.money = data.money || 0;
   state.step = Math.min(data.step || 0, UNLOCKS.length);
   state.paid = data.paid || 0;
+  state.upgrades = data.upgrades || {};
+  state.rating = typeof data.rating === 'number' ? data.rating : 3;
   for (let i = 0; i < state.step; i++) {
     state.unlocked.add(UNLOCKS[i].id);
     applyUnlock(UNLOCKS[i].id, false);
@@ -2056,6 +2242,7 @@ function frame(now) {
   updateFloats(dt);
   updateCamera(dt);
   updateBag();
+  updateUpgradeDot();
   tickMoneyDisplay(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -2187,6 +2374,14 @@ document.addEventListener('visibilitychange', () => {
 const autoBtn = document.getElementById('autobtn');
 const autoBadge = document.getElementById('autobadge');
 autoBtn.addEventListener('click', () => setAuto(!auto.on));
+upBtn.addEventListener('click', () => {
+  renderUpgrades();
+  upPanel.style.display = 'flex';
+});
+document.getElementById('upclose').addEventListener('click', () => {
+  upPanel.style.display = 'none';
+});
+updateRating();
 setAuto(auto.on);
 document.getElementById('awayok').addEventListener('click', () => {
   document.getElementById('away').style.display = 'none';
@@ -2200,4 +2395,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome };
+window.__game = { state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES };
