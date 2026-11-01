@@ -26,13 +26,13 @@ function makeRoom(id, z, { price, time, icon, money }) {
   return { id, bed: v(2.2, z), operator: v(0.4, z), money, price, time, icon, active: false, queue: [], scan: 0, staffHired: false };
 }
 const ROOMS = {
-  xray: makeRoom('xray', 4.6, { price: 25, time: 2.2, icon: '🩻', money: v(0.3, 6.6) }),
-  dental: makeRoom('dental', 8.2, { price: 40, time: 2.6, icon: '🦷', money: v(0.3, 10.1) }),
-  surgery: makeRoom('surgery', 11.4, { price: 90, time: 4.0, icon: '🫀', money: v(-1.6, 12.4) }),
+  xray: makeRoom('xray', 4.6, { price: 25, time: 2.2, icon: '🩻', money: v(-3.4, 4.6) }),
+  dental: makeRoom('dental', 8.2, { price: 40, time: 2.6, icon: '🦷', money: v(-3.4, 8.2) }),
+  surgery: makeRoom('surgery', 11.4, { price: 90, time: 4.0, icon: '🫀', money: v(-3.4, 11.4) }),
 };
 const ROAD_Z = 17;
 const SPAWN = v(7.2, ROAD_Z);
-const PLAYER_START = v(-1, -4);
+const PLAYER_START = v(-1, -5);
 
 // Unlocks are bought one at a time, in this order
 const UNLOCKS = [
@@ -40,9 +40,9 @@ const UNLOCKS = [
   { id: 'bag1', label: 'กระเป๋าใหญ่ขึ้น', icon: '🎒', price: 120, at: v(-2.2, -9.4) },
   { id: 'vaccine', label: 'ห้องฉีดวัคซีน', icon: '💉', price: 200, at: v(-6, -1) },
   { id: 'cashier2', label: 'จ้างแคชเชียร์วัคซีน', icon: '👩‍⚕️', price: 260, at: v(-1.4, 0.8) },
-  { id: 'carrier1', label: 'จ้างพยาบาลขนยา', icon: '🧑‍⚕️', price: 350, at: v(-1.4, -3.4) },
-  { id: 'speed', label: 'เครื่องผลิตเร็วขึ้น', icon: '⚡', price: 450, at: v(-7.8, -4) },
-  { id: 'carrier2', label: 'จ้างพยาบาลขนวัคซีน', icon: '🧑‍⚕️', price: 550, at: v(-1.4, 2.6) },
+  { id: 'carrier1', label: 'จ้างพยาบาลขนยา', icon: '🧑‍⚕️', price: 350, at: v(-1.4, -8.4) },
+  { id: 'speed', label: 'เครื่องผลิตเร็วขึ้น', icon: '⚡', price: 450, at: v(-7.8, -5.2) },
+  { id: 'carrier2', label: 'จ้างพยาบาลขนวัคซีน', icon: '🧑‍⚕️', price: 550, at: v(-1.4, -2.6) },
   { id: 'xray', label: 'ห้องเอกซเรย์', icon: '🩻', price: 800, at: v(2.2, 4.6) },
   { id: 'radtech', label: 'จ้างนักรังสีเทคนิค', icon: '🧑‍🔬', price: 900, at: v(-1.4, 4.6) },
   { id: 'bag2', label: 'กระเป๋าใหญ่สุด', icon: '🎒', price: 1000, at: v(-2.2, -9.4) },
@@ -50,8 +50,25 @@ const UNLOCKS = [
   { id: 'dental', label: 'ห้องทันตกรรม', icon: '🦷', price: 1500, at: v(2.2, 8.2) },
   { id: 'dentist', label: 'จ้างทันตแพทย์', icon: '🧑‍⚕️', price: 1700, at: v(-1.4, 8.2) },
   { id: 'surgery', label: 'ห้องผ่าตัด', icon: '🫀', price: 2500, at: v(2.2, 11.4) },
-  { id: 'surgeon', label: 'จ้างศัลยแพทย์', icon: '🧑‍⚕️', price: 2800, at: v(-3.4, 11) },
+  { id: 'surgeon', label: 'จ้างศัลยแพทย์', icon: '🧑‍⚕️', price: 2800, at: v(-1.4, 11.4) },
 ];
+
+// Departments are bands across the floor, split by partition walls with a door in
+// the middle. The east side (x > HALL_X) is an open hallway patients walk along.
+const HALL_X = 5.2;
+const WALK_X = 8.4; // patients' lane in the hallway
+const DOOR_X = -1.6;
+const DOOR_W = 2.0;
+const DEPTS = [
+  { id: 'pill', name: 'ห้องจ่ายยา', icon: '💊', z0: -11, z1: -4, floor: 0xfde2e4 },
+  { id: 'vaccine', name: 'ห้องฉีดวัคซีน', icon: '💉', z0: -4, z1: 2.3, floor: 0xdbeafe },
+  { id: 'xray', name: 'ห้องเอกซเรย์', icon: '🩻', z0: 2.3, z1: 6.4, floor: 0xe2e8f0 },
+  { id: 'dental', name: 'ห้องทันตกรรม', icon: '🦷', z0: 6.4, z1: 9.8, floor: 0xd1fae5 },
+  { id: 'surgery', name: 'ห้องผ่าตัด', icon: '🫀', z0: 9.8, z1: 13.5, floor: 0xccf2d8 },
+];
+const BOUNDS = DEPTS.slice(1).map((d) => d.z0);
+const bandOf = (z) => BOUNDS.filter((b) => z > b).length;
+const GATE = v(6.8, 12.8); // just inside the entrance
 
 const PILE_MAX = 27; // 3 layers of 3x3 at the machine
 const SHELF_MAX = 16;
@@ -251,6 +268,108 @@ function buildWorld() {
     tree.scale.setScalar(rand(0.9, 1.5));
     scene.add(tree);
   }
+}
+
+// Partition walls between departments, each with a door, leaving the hallway open
+function buildPartitions() {
+  const wallMat = [0xf4f4f0, 0xf4f4f0, 0x7fd1c1, 0xf4f4f0, 0xf4f4f0, 0xf4f4f0];
+  for (const b of BOUNDS) {
+    const segs = [[FLOOR.x0, DOOR_X - DOOR_W / 2], [DOOR_X + DOOR_W / 2, HALL_X]];
+    for (const [x0, x1] of segs) {
+      const w = x1 - x0;
+      const wall = box(w, 0.9, 0.2, wallMat);
+      wall.position.set((x0 + x1) / 2, 0.45, b);
+      scene.add(wall);
+      addCollider((x0 + x1) / 2, b, w, 0.2);
+    }
+    // Door frame posts
+    for (const x of [DOOR_X - DOOR_W / 2, DOOR_X + DOOR_W / 2, HALL_X]) {
+      const post = box(0.26, 1.15, 0.3, 0x5fb8a8);
+      post.position.set(x, 0.58, b);
+      scene.add(post);
+    }
+  }
+  // Hallway runner
+  const runner = new THREE.Mesh(new THREE.PlaneGeometry(FLOOR.x1 - HALL_X - 0.3, FLOOR.z1 - FLOOR.z0 - 0.3), new THREE.MeshLambertMaterial({ color: 0xc9d6df }));
+  runner.rotation.x = -Math.PI / 2;
+  runner.position.set((HALL_X + FLOOR.x1) / 2, 0.125, (FLOOR.z0 + FLOOR.z1) / 2);
+  runner.receiveShadow = true;
+  scene.add(runner);
+
+  // Entrance arch with the hospital name
+  const arch = new THREE.Group();
+  for (const x of [4.7, 8.9]) {
+    const pillar = box(0.4, 3, 0.4, 0xffffff);
+    pillar.position.set(x, 1.5, FLOOR.z1 + 0.2);
+    arch.add(pillar);
+  }
+  const board = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.9, 0.2), [
+    mat(0xe5484d), mat(0xe5484d), mat(0xe5484d), mat(0xe5484d),
+    new THREE.MeshBasicMaterial({ map: signTex('🏥 โรงพยาบาลป่วน', '#e5484d') }), mat(0xe5484d),
+  ]);
+  board.position.set(6.8, 3.2, FLOOR.z1 + 0.2);
+  board.castShadow = true;
+  arch.add(board);
+  scene.add(arch);
+}
+
+function signTex(text, bg) {
+  return canvasTexture(512, 112, (g) => {
+    g.fillStyle = bg;
+    roundRect(g, 0, 0, 512, 112, 24);
+    g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.85)';
+    g.lineWidth = 6;
+    roundRect(g, 8, 8, 496, 96, 18);
+    g.stroke();
+    g.fillStyle = '#ffffff';
+    g.font = '600 52px Mitr, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, 256, 60);
+  });
+}
+
+const SIGN_COLORS = { pill: '#e5484d', vaccine: '#3d8bfd', xray: '#4b5a70', dental: '#2a9d8f', surgery: '#2e9e4f' };
+// Coloured floor and a sign on the far wall once a department is open
+function decorateDept(id, animate) {
+  const d = DEPTS.find((x) => x.id === id);
+  const w = HALL_X - FLOOR.x0;
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.2, d.z1 - d.z0 - 0.3), new THREE.MeshLambertMaterial({ color: d.floor }));
+  rug.rotation.x = -Math.PI / 2;
+  rug.position.set((FLOOR.x0 + HALL_X) / 2, 0.123, (d.z0 + d.z1) / 2);
+  rug.receiveShadow = true;
+  scene.add(rug);
+  const sign = new THREE.Group();
+  for (const x of [-1.5, 1.5]) {
+    const post = box(0.12, 2.1, 0.12, 0xdfe6ee);
+    post.position.set(x, 1.05, 0);
+    sign.add(post);
+  }
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 0.8), new THREE.MeshBasicMaterial({ map: signTex(`${d.icon} ${d.name}`, SIGN_COLORS[id]), side: THREE.DoubleSide }));
+  board.position.y = 2.1;
+  sign.add(board);
+  sign.position.set(3.4, 0, d.z0 + 0.35);
+  scene.add(sign);
+  if (animate) popIn(sign);
+}
+
+// Next point to walk toward on the way to `to`: through a door or along the hallway,
+// so walkers never cut through partition walls
+function route(from, to) {
+  const outside = (p) => p.z > FLOOR.z1;
+  if (outside(to) !== outside(from)) {
+    return flatDist(from, GATE) > 0.4 ? (outside(from) ? GATE : route(from, GATE)) : to;
+  }
+  if (outside(from)) return to;
+  const bf = bandOf(from.z);
+  const bt = bandOf(to.z);
+  if (bf === bt) return to;
+  if (from.x > HALL_X) return v(Math.max(from.x, HALL_X + 1), to.z); // hallway runs the full length
+  const sgn = bt > bf ? 1 : -1;
+  const b = BOUNDS[sgn > 0 ? bf : bf - 1];
+  const inDoor = Math.abs(from.x - DOOR_X) < 0.5 && Math.abs(from.z - b) < 0.8;
+  return inDoor ? v(DOOR_X, b + sgn * 0.9) : v(DOOR_X, b - sgn * 0.7);
 }
 
 // Flat ring marking a zone on the floor
@@ -831,7 +950,7 @@ function dentalModel(root, room) {
 }
 
 function surgeryModel(root, room) {
-  const mat2 = box(2.6, 0.03, 3.2, 0x2a9d8f, { shadow: false });
+  const mat2 = box(2.6, 0.03, 2.8, 0x2a9d8f, { shadow: false });
   mat2.position.y = 0.14;
   const table = box(0.9, 0.7, 2.2, 0x7fb7be);
   table.position.y = 0.35;
@@ -938,20 +1057,33 @@ class Patient {
     this.arrived = false;
     this.refreshBubble();
   }
+  // Waypoints: entrance -> hallway lane at the department's row -> queue slot, and back out
+  rowZ() {
+    return ROOMS[this.kind] ? ROOMS[this.kind].bed.z : LINES[this.kind].front.z;
+  }
   update(dt) {
+    const pos = this.person.group.position;
+    const lane = v(WALK_X, this.rowZ());
+    const entry = v(WALK_X, FLOOR.z1 - 0.6);
     let target;
-    if (this.leaving) target = SPAWN;
-    else {
+    if (this.leaving) {
+      if (this.exitStep === undefined) this.exitStep = 0;
+      target = [lane, entry, SPAWN][this.exitStep];
+    } else if (!this.inside) {
+      target = pos.z > FLOOR.z1 - 0.3 ? entry : lane;
+    } else {
       const queue = (ROOMS[this.kind] || LINES[this.kind]).queue;
       target = queueSlot(this.kind, queue.indexOf(this));
     }
     const arrived = walkTo(this.person, target, 3.2, dt);
     animatePerson(this.person, !arrived, dt);
     if (this.leaving) {
-      if (arrived) {
+      if (arrived && ++this.exitStep > 2) {
         scene.remove(this.person.group);
         return false;
       }
+    } else if (!this.inside) {
+      if (arrived && target === lane) this.inside = true;
     } else {
       this.arrived = arrived;
       // Face the counter (west) while waiting
@@ -967,7 +1099,7 @@ function updatePatients(dt) {
   if (spawnTimer <= 0) {
     spawnTimer = (state.unlocked.has('ambulance') ? 1.7 : 3.2) * rand(0.7, 1.3);
     const options = [];
-    for (const line of Object.values(LINES)) if (line.active && line.queue.length < 6) options.push(line.id, line.id);
+    for (const line of Object.values(LINES)) if (line.active && line.queue.length < 5) options.push(line.id, line.id);
     for (const room of Object.values(ROOMS)) if (room.active && room.queue.length < 5) options.push(room.id);
     if (options.length) {
       const kind = pick(options);
@@ -1047,6 +1179,138 @@ function hireRoomStaff(room, animate) {
   room.staffHired = true;
   staff.push({ person, update: (dt) => animatePerson(person, false, dt) });
   if (animate) popIn(person.group);
+}
+
+// ---------- hospital crew: wandering doctors and nurses, a guard, a housekeeper ----------
+function deptActive(id) {
+  return id === 'pill' || Boolean(LINES[id]?.active || ROOMS[id]?.active);
+}
+
+// Open spots worth walking to: the hallway plus a few places in each open department
+function wanderSpots() {
+  const spots = [];
+  for (let z = -9.5; z <= 12.5; z += 2.75) spots.push(v(6.4, z));
+  for (const d of DEPTS) {
+    if (!deptActive(d.id)) continue;
+    spots.push(v(DOOR_X, (d.z0 + d.z1) / 2), v(-2.8, d.z1 - 0.7), v(4.4, d.z0 + 0.7));
+  }
+  return spots;
+}
+
+function makeWalker(opts, speed = 2.2) {
+  const person = makePerson(opts);
+  person.group.position.copy(pick(wanderSpots()));
+  scene.add(person.group);
+  const w = { person, target: null, wait: rand(0, 2) };
+  w.update = (dt) => {
+    if (!w.target) {
+      w.wait -= dt;
+      animatePerson(person, false, dt);
+      if (w.wait <= 0) w.target = pick(wanderSpots());
+      return;
+    }
+    const way = route(person.group.position, w.target);
+    const arrived = walkTo(person, way, speed, dt);
+    animatePerson(person, true, dt);
+    if (arrived && way === w.target) {
+      w.target = null;
+      w.wait = rand(1.5, 4);
+    }
+  };
+  staff.push(w);
+  return w;
+}
+
+const spills = [];
+const spillMat = new THREE.MeshBasicMaterial({ color: 0x8fd3ff, transparent: true, opacity: 0.75 });
+let spillTimer = 12;
+function updateSpills(dt) {
+  spillTimer -= dt;
+  if (spillTimer <= 0 && spills.length < 3) {
+    spillTimer = rand(18, 30);
+    const at = pick(wanderSpots()).clone().add(v(rand(-0.6, 0.6), rand(-0.6, 0.6)));
+    const mesh = new THREE.Mesh(new THREE.CircleGeometry(0.5, 18), spillMat.clone());
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.scale.set(rand(0.8, 1.3), rand(0.7, 1.1), 1);
+    mesh.position.set(at.x, 0.135, at.z);
+    scene.add(mesh);
+    spills.push({ at, mesh, claimed: false });
+  }
+}
+
+function makeHousekeeper() {
+  const person = makePerson({ shirt: 0x9b5de5, pants: 0x6d3fb0, apron: 0xffffff, hair: 0x2b1b10 });
+  // Mop held in the right hand
+  const mop = new THREE.Group();
+  const stick = box(0.05, 1.4, 0.05, 0xc8a26b);
+  stick.position.y = -0.2;
+  const head = box(0.45, 0.08, 0.16, 0x4ea8de);
+  head.position.y = -0.92;
+  mop.add(stick, head);
+  mop.position.set(0, -0.45, 0.15);
+  mop.rotation.x = 0.35;
+  person.arms[1].add(mop);
+  person.group.position.copy(v(6.4, 0));
+  scene.add(person.group);
+  const hk = { person, spill: null, target: null, wait: 1, clean: 0 };
+  hk.update = (dt) => {
+    if (!hk.spill) {
+      const free = spills.filter((sp) => !sp.claimed);
+      if (free.length) {
+        const pos = person.group.position;
+        hk.spill = free.sort((a, b) => flatDist(pos, a.at) - flatDist(pos, b.at))[0];
+        hk.spill.claimed = true;
+        hk.clean = 0;
+      }
+    }
+    if (hk.spill) {
+      const way = route(person.group.position, hk.spill.at);
+      const arrived = walkTo(person, way, 2.6, dt) && way === hk.spill.at;
+      if (!arrived) {
+        animatePerson(person, true, dt);
+        return;
+      }
+      // Mop back and forth until the floor is dry
+      hk.clean += dt;
+      person.arms[0].rotation.x = person.arms[1].rotation.x = -0.6 + Math.sin(hk.clean * 10) * 0.35;
+      person.group.rotation.y += Math.sin(hk.clean * 5) * dt * 1.5;
+      hk.spill.mesh.material.opacity = 0.75 * (1 - hk.clean / 2.4);
+      if (hk.clean >= 2.4) {
+        scene.remove(hk.spill.mesh);
+        spills.splice(spills.indexOf(hk.spill), 1);
+        floatText(hk.spill.at, '✨ สะอาด!', '#bfe9ff');
+        hk.spill = null;
+        hk.target = null;
+      }
+      return;
+    }
+    // Nothing to clean: stroll around
+    if (!hk.target) {
+      hk.wait -= dt;
+      animatePerson(person, false, dt);
+      if (hk.wait <= 0) hk.target = pick(wanderSpots());
+      return;
+    }
+    const way = route(person.group.position, hk.target);
+    if (walkTo(person, way, 2.0, dt) && way === hk.target) {
+      hk.target = null;
+      hk.wait = rand(2, 5);
+    }
+    animatePerson(person, true, dt);
+  };
+  staff.push(hk);
+}
+
+function spawnCrew() {
+  makeWalker({ shirt: 0x3d8bfd, coat: 0xffffff, hair: 0x7a4a24 }, 2.0); // doctor
+  makeWalker({ shirt: 0x90be6d, coat: 0xffffff, hair: 0x1f1f1f }, 2.3); // doctor
+  makeWalker({ shirt: 0xf78fb3, pants: 0xf78fb3, cap: true }, 2.5); // nurse
+  makeHousekeeper();
+  // Security guard at the entrance
+  const guard = makePerson({ shirt: 0x34495e, pants: 0x1f2a36, hair: 0x1f2a36 });
+  guard.group.position.set(5.4, 0, FLOOR.z1 - 0.7);
+  scene.add(guard.group);
+  staff.push({ person: guard, update: (dt) => animatePerson(guard, false, dt) });
 }
 
 // Decorative ambulance driving along the road
@@ -1179,15 +1443,15 @@ function updateTile(dt) {
 function applyUnlock(id, animate) {
   switch (id) {
     case 'cashier1': hireCashier(LINES.pill, animate); break;
-    case 'vaccine': buildLine(LINES.vaccine, animate); break;
+    case 'vaccine': buildLine(LINES.vaccine, animate); decorateDept('vaccine', animate); break;
     case 'cashier2': hireCashier(LINES.vaccine, animate); break;
     case 'carrier1': hireCarrier(LINES.pill, animate); break;
     case 'carrier2': hireCarrier(LINES.vaccine, animate); break;
-    case 'xray': buildRoom(ROOMS.xray, animate); break;
+    case 'xray': buildRoom(ROOMS.xray, animate); decorateDept('xray', animate); break;
     case 'radtech': hireRoomStaff(ROOMS.xray, animate); break;
-    case 'dental': buildRoom(ROOMS.dental, animate); break;
+    case 'dental': buildRoom(ROOMS.dental, animate); decorateDept('dental', animate); break;
     case 'dentist': hireRoomStaff(ROOMS.dental, animate); break;
-    case 'surgery': buildRoom(ROOMS.surgery, animate); break;
+    case 'surgery': buildRoom(ROOMS.surgery, animate); decorateDept('surgery', animate); break;
     case 'surgeon': hireRoomStaff(ROOMS.surgery, animate); break;
     case 'ambulance': buildAmbulance(animate); break;
     default: break; // bag1, bag2, speed: read from state.unlocked where needed
@@ -1397,8 +1661,9 @@ function autopilot(dt) {
   }
   if (!auto.task) return;
   const pos = player.group.position;
-  const dx = auto.task.at.x - pos.x;
-  const dz = auto.task.at.z - pos.z;
+  const way = route(pos, auto.task.at);
+  const dx = way.x - pos.x;
+  const dz = way.z - pos.z;
   const d = Math.hypot(dx, dz);
   if (d < 0.25) return;
   // If a wall or counter blocks the straight line, side-step for a moment
@@ -1408,6 +1673,10 @@ function autopilot(dt) {
     input.z = Math.sin(auto.nudgeDir);
     return;
   }
+  if (!auto.lastWay || flatDist(auto.lastWay, way) > 0.01) {
+    auto.lastWay = way.clone();
+    auto.lastDist = Infinity;
+  }
   auto.stuck = d > auto.lastDist - 0.02 ? auto.stuck + dt : 0;
   auto.lastDist = Math.min(auto.lastDist, d);
   if (auto.stuck > 0.6) {
@@ -1416,7 +1685,7 @@ function autopilot(dt) {
     auto.nudge = 0.5;
     auto.nudgeDir = Math.atan2(dz, dx) + (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
   }
-  const k = Math.min(1, d / 0.6); // ease in on arrival
+  const k = way === auto.task.at ? Math.min(1, d / 0.6) : 1; // ease in only at the final stop
   input.x = (dx / d) * k;
   input.z = (dz / d) * k;
 }
@@ -1769,6 +2038,7 @@ function frame(now) {
     for (const line of Object.values(LINES)) if (line.active) updateLine(line, dt);
     for (const room of Object.values(ROOMS)) if (room.active) updateRoom(room, dt);
     updatePatients(dt);
+    updateSpills(dt);
     staff.forEach((s) => s.update(dt));
     updateAmbulance(dt);
     updateTile(dt);
@@ -1793,7 +2063,10 @@ function frame(now) {
 
 // ---------- start ----------
 buildWorld();
+buildPartitions();
+decorateDept('pill', false);
 load();
+spawnCrew();
 showNextTile();
 updateBag();
 updateCamera(0, true);
