@@ -59,6 +59,11 @@
   #menu button { display: block; width: 100%; margin-top: 10px; }
   .btn.ghost { background: #e9eef7; color: var(--ink); box-shadow: 0 4px 0 #b9c3d6; font-size: 18px; }
   .btn.danger { background: #ffd9d9; color: #a3121b; box-shadow: 0 4px 0 #e0a0a0; font-size: 16px; }
+  #saved { font-size: 13px; opacity: 0; transition: opacity .3s; }
+  #saved.show { opacity: 1; }
+  #saved.bad { background: rgba(229, 72, 77, .9); }
+  #savenote { font-size: 13px; line-height: 1.5; color: #4b5a70; margin: 12px 0 0; }
+  #savenote.bad { color: #a3121b; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
 </style>
 </head>
@@ -70,6 +75,7 @@
   <div id="left">
     <div id="money" class="pill"><span class="ico">💵</span><span id="moneyval">0</span></div>
     <div id="bag" class="pill">🎒 0/10</div>
+    <div id="saved" class="pill"></div>
   </div>
   <div id="right">
     <button id="menubtn" class="pill" aria-label="เมนู">⚙️</button>
@@ -91,6 +97,10 @@
   <div class="box">
     <h3>⚙️ เมนู</h3>
     <button id="resume" class="btn ghost">เล่นต่อ</button>
+    <button id="savenow" class="btn ghost">💾 บันทึกตอนนี้</button>
+    <button id="copycode" class="btn ghost">📋 คัดลอกโค้ดเซฟ</button>
+    <button id="loadcode" class="btn ghost">📥 ใส่โค้ดเซฟ</button>
+    <p id="savenote"></p>
     <button id="reset" class="btn danger">เริ่มใหม่ทั้งหมด</button>
   </div>
 </div>

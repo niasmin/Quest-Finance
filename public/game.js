@@ -1482,16 +1482,43 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // ---------- save / load ----------
 const state = { money: 0, step: 0, paid: 0, unlocked: new Set() };
 
-function save() {
-  const data = {
+let saveBlocked = false; // set while resetting or importing, so pagehide can't write the old game back
+let storageOK = true;
+
+function saveData() {
+  return {
     money: state.money, step: state.step, paid: state.paid,
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
   };
+}
+
+// Returns true when the save was written and reads back
+function save() {
+  if (saveBlocked) return false;
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    const json = JSON.stringify(saveData());
+    localStorage.setItem(SAVE_KEY, json);
+    storageOK = localStorage.getItem(SAVE_KEY) === json;
   } catch {
-    // Storage blocked: progress just won't persist
+    storageOK = false;
+  }
+  return storageOK;
+}
+
+// Save codes let players move progress between browsers and devices
+const CODE_PREFIX = 'DRQ1-';
+function exportCode() {
+  return CODE_PREFIX + btoa(JSON.stringify(saveData()));
+}
+function parseCode(code) {
+  const clean = code.trim().replace(/\s+/g, '');
+  if (!clean.startsWith(CODE_PREFIX)) return null;
+  try {
+    const data = JSON.parse(atob(clean.slice(CODE_PREFIX.length)));
+    return typeof data.step === 'number' && typeof data.money === 'number' ? data : null;
+  } catch {
+    return null;
   }
 }
 
@@ -1502,6 +1529,8 @@ function load() {
   } catch {
     data = null;
   }
+  // Ask the browser not to evict our save under storage pressure
+  navigator.storage?.persist?.().catch(() => {});
   buildLine(LINES.pill, false);
   if (!data) return;
   state.money = data.money || 0;
@@ -1557,9 +1586,9 @@ function frame(now) {
     updateTile(dt);
     updateGuide();
     saveTimer += dt;
-    if (saveTimer > 3) {
+    if (saveTimer > 5) {
       saveTimer = 0;
-      save();
+      showSaveStatus(save());
     }
   }
   for (const belt of belts) belt.material.map.offset.x -= dt * 0.9;
@@ -1582,6 +1611,8 @@ updateBag();
 updateCamera(0, true);
 document.getElementById('loading').style.display = 'none';
 requestAnimationFrame(frame);
+// Probe storage up front so a browser that can't keep saves is flagged right away
+save();
 
 function start() {
   running = true;
@@ -1591,6 +1622,7 @@ function start() {
   document.getElementById('hint').style.display = 'block';
   initAudio();
   audio?.resume();
+  if (!storageOK) showSaveStatus(false);
 }
 document.getElementById('soundbtn').addEventListener('click', () => {
   initAudio();
@@ -1604,6 +1636,7 @@ const menu = document.getElementById('menu');
 document.getElementById('menubtn').addEventListener('click', () => {
   menu.style.display = 'flex';
   running = false;
+  showSaveStatus(save());
 });
 document.getElementById('resume').addEventListener('click', () => {
   menu.style.display = 'none';
@@ -1612,6 +1645,7 @@ document.getElementById('resume').addEventListener('click', () => {
 });
 document.getElementById('reset').addEventListener('click', () => {
   if (!confirm('ลบความคืบหน้าทั้งหมดแล้วเริ่มใหม่?')) return;
+  saveBlocked = true;
   try {
     localStorage.removeItem(SAVE_KEY);
   } catch {
@@ -1619,7 +1653,59 @@ document.getElementById('reset').addEventListener('click', () => {
   }
   location.reload();
 });
-window.addEventListener('pagehide', save);
+
+// ---------- save status & save codes ----------
+const savedEl = document.getElementById('saved');
+const saveNote = document.getElementById('savenote');
+function showSaveStatus(ok) {
+  savedEl.textContent = ok ? '💾 บันทึกแล้ว' : '⚠️ เบราว์เซอร์นี้บันทึกไม่ได้';
+  savedEl.classList.toggle('bad', !ok);
+  savedEl.classList.add('show');
+  clearTimeout(showSaveStatus.t);
+  showSaveStatus.t = setTimeout(() => savedEl.classList.remove('show'), ok ? 1200 : 4000);
+  refreshSaveNote();
+}
+function refreshSaveNote() {
+  saveNote.textContent = storageOK
+    ? 'เกมบันทึกอัตโนมัติทุก 5 วินาทีในเบราว์เซอร์นี้ ถ้าจะย้ายเครื่องหรือกลัวข้อมูลหาย ให้คัดลอกโค้ดเซฟเก็บไว้'
+    : '⚠️ เบราว์เซอร์นี้ไม่เก็บข้อมูล (อาจเป็นเบราว์เซอร์ในแอปหรือโหมดส่วนตัว) เปิดเกมใน Safari/Chrome หรือคัดลอกโค้ดเซฟเก็บไว้ก่อนปิด';
+  saveNote.classList.toggle('bad', !storageOK);
+}
+
+document.getElementById('savenow').addEventListener('click', () => showSaveStatus(save()));
+
+document.getElementById('copycode').addEventListener('click', async () => {
+  save();
+  const code = exportCode();
+  try {
+    await navigator.clipboard.writeText(code);
+    alert('คัดลอกโค้ดเซฟแล้ว! เก็บไว้ในโน้ตหรือแชท แล้วนำไปใส่ที่ "ใส่โค้ดเซฟ" ได้ทุกเครื่อง');
+  } catch {
+    // Clipboard blocked (some in-app browsers): show it so it can be copied by hand
+    prompt('คัดลอกโค้ดนี้เก็บไว้:', code);
+  }
+});
+
+document.getElementById('loadcode').addEventListener('click', () => {
+  const code = prompt('วางโค้ดเซฟที่นี่ (ขึ้นต้นด้วย DRQ1-)');
+  if (!code) return;
+  const data = parseCode(code);
+  if (!data) {
+    alert('โค้ดเซฟไม่ถูกต้อง');
+    return;
+  }
+  if (!confirm(`โหลดเซฟนี้? (เงิน ${data.money.toLocaleString()} · ปลดล็อก ${data.step} ขั้น) ความคืบหน้าปัจจุบันจะถูกแทนที่`)) return;
+  saveBlocked = true;
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch {
+    alert('เบราว์เซอร์นี้บันทึกไม่ได้ ลองเปิดเกมใน Safari หรือ Chrome');
+    saveBlocked = false;
+    return;
+  }
+  location.reload();
+});
+window.addEventListener('pagehide', () => save());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) save();
   last = performance.now();
