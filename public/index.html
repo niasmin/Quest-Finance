@@ -167,6 +167,8 @@
   #styleclose { display: block; margin: 14px auto 0; }
   /* Six dock buttons must fit a 360px-wide phone */
   .dockbtn { width: min(60px, calc((100vw - 76px) / 6)); }
+  #liftpick { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(170px + env(safe-area-inset-bottom)); display: none; gap: 8px; z-index: 6; }
+  #liftpick .btn { font-size: 17px; padding: 10px 16px; white-space: nowrap; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
 </style>
 </head>
@@ -187,6 +189,7 @@
   </div>
 </div>
 <div id="toast"></div>
+<div id="liftpick"></div>
 <!-- Bottom dock: buttons appear as the features they open become useful -->
 <nav id="dock">
   <button id="autobtn" class="dockbtn locked"><span class="di">🤖</span><span class="dl">AUTO</span></button>
