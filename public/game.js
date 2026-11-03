@@ -368,7 +368,8 @@ const themeOf = (i) => BRANCH_THEMES[(i || 0) % BRANCH_THEMES.length];
 // Nothing grows on the hospital, the road, the east wing or the outdoor area
 function sceneryBlocked(x, z) {
   return (x > -10.5 && x < 10.5 && z > -15.5 && z < 14.7) || (z > ROAD_Z - 2.4 && z < ROAD_Z + 2.4)
-    || (x > 8.8 && x < 19.5 && z > -12.5 && z < 2.5) || (x > -12 && x < 20 && z > 18.5 && z < 28.5);
+    || (x > 8.8 && x < 19.5 && z > -12.5 && z < 2.5) || (x > -12 && x < 20 && z > 18.5 && z < 28.5)
+    || (x > -27.5 && x < -10.5 && z > -13 && z < 15.5); // the city district west of the hospital
 }
 const leafGeo = new THREE.IcosahedronGeometry(1, 0);
 const flatMat = (color) => new THREE.MeshLambertMaterial({ color, flatShading: true });
@@ -688,6 +689,7 @@ let trashLid = null;
 const inWing = (p) => p.x > WING.x0 - 0.1 && p.z > WING.z0 && p.z < WING.z1;
 const wingRow = (z) => (z < WING_BOUNDS[0] ? WING_ROWS.eye : z < WING_BOUNDS[1] ? WING_ROWS.physio : WING_ROWS.lab);
 function route(from, to) {
+  if (inDistrict(from) && !inDistrict(to)) return Math.abs(from.x - DIST_ROAD_X) > 0.6 ? v(DIST_ROAD_X, from.z) : v(DIST_ROAD_X, 14.6);
   const outside = (p) => p.z > FLOOR.z1;
   // Going in or out: pass through the gate in two steps so nobody walks into the south wall
   if (outside(to) !== outside(from)) {
@@ -4489,6 +4491,7 @@ function buildPlot(i, type) {
   if ((p && p.lvl >= PLACE_MAX) || !empireSpend(plotCost())) return;
   e.buys++;
   e.plots[i] = p ? { ...p, lvl: p.lvl + 1 } : { type, lvl: 1 };
+  syncDistrict(true);
   save();
   renderEmpire();
 }
@@ -4583,6 +4586,9 @@ function renderCity() {
     grid.append(cell);
   }
   emPage.append(grid);
+  const go = emButton('🚶 ไปดูเมืองจริง', false, visitDistrict);
+  go.classList.add('emgo');
+  emPage.append(go);
   if (empireSel === null) {
     emPage.append(emEl('p', 'emhint', 'แตะที่ว่างเพื่อสร้าง แตะสิ่งก่อสร้างเพื่ออัปเลเวล · ราคาเพิ่มขึ้นทุกครั้งที่สร้าง'));
     return;
@@ -4631,6 +4637,9 @@ function renderTierMap(t) {
     map.append(el);
   });
   emPage.append(map);
+  const look = emButton('🔭 ดูแผนที่ 3 มิติ', false, () => openMapView(t));
+  look.classList.add('emgo');
+  emPage.append(look);
   if (!empireSel) {
     emPage.append(emEl('p', 'emhint', `แตะที่บนแผนที่เพื่อพัฒนา แต่ละที่จ่ายภาษีให้ทุกวินาที`));
     return;
@@ -4655,6 +4664,622 @@ function renderAdvance() {
   }
   emPage.append(card);
 }
+
+// ---------- the empire made real: a 3D city district beside the hospital, and 3D maps ----------
+// The 8 city plots from the 🌏 panel stand west of the hospital along their own road.
+const DIST_ROAD_X = -19.5;
+const DISTRICT_PLOTS = [
+  v(-15.5, -9), v(-15.5, -3), v(-15.5, 3), v(-15.5, 9),
+  v(-23.5, -9), v(-23.5, -3), v(-23.5, 3), v(-23.5, 9),
+];
+// Where to stand to manage a plot: on the plot's road side
+const plotZone = (p) => v(p.x + (p.x > DIST_ROAD_X ? -2.3 : 2.3), p.z);
+const inDistrict = (p) => p.x < FLOOR.x0 - 1.2 && p.z < ROAD_Z - 1.8;
+const district = { built: false, plots: [], residents: [], standing: -1, stand: 0, opened: -1 };
+
+function buildDistrict() {
+  const g = new THREE.Group();
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 28), mat(0x55606e));
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(DIST_ROAD_X, 0.021, 1.5);
+  road.receiveShadow = true;
+  g.add(road);
+  for (let z = -11; z < 15; z += 3) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 1.3), mat(0xffffff));
+    dash.rotation.x = -Math.PI / 2;
+    dash.position.set(DIST_ROAD_X, 0.03, z);
+    g.add(dash);
+  }
+  // A sidewalk joining the district to the hospital's front path
+  const walk = new THREE.Mesh(new THREE.PlaneGeometry(DIST_ROAD_X * -1 + 5, 1.3), mat(0xe8dcc8));
+  walk.rotation.x = -Math.PI / 2;
+  walk.position.set((DIST_ROAD_X + 5) / 2, 0.022, 14.5);
+  g.add(walk);
+  const gate = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 0.8), new THREE.MeshBasicMaterial({ map: signTex('🏙️ เมืองหมอ', '#3d8bfd'), side: THREE.DoubleSide }));
+  gate.position.set(DIST_ROAD_X, 3.0, 13.6);
+  g.add(gate);
+  for (const dx of [-1.7, 1.7]) {
+    const post = box(0.2, 3.2, 0.2, 0xffffff);
+    post.position.set(DIST_ROAD_X + dx, 1.6, 13.6);
+    g.add(post);
+  }
+  scene.add(g);
+  DISTRICT_PLOTS.forEach((at, i) => {
+    const lot = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 5.2), mat(0xc8b48a));
+    lot.rotation.x = -Math.PI / 2;
+    lot.position.set(at.x, 0.015, at.z);
+    lot.receiveShadow = true;
+    scene.add(lot);
+    const ring = zoneRing(plotZone(at), 0x3d8bfd);
+    scene.add(ring);
+    district.plots[i] = { at, lot, group: null, sign: null, key: '', collider: null };
+  });
+  district.built = true;
+  syncDistrict();
+}
+
+// 3D models for each building type; level adds more and taller pieces
+function roofHouse(w, h, d, wall, roof) {
+  const g = new THREE.Group();
+  const body = box(w, h, d, wall);
+  body.position.y = h / 2;
+  const top = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.78, h * 0.6, 4), mat(roof));
+  top.position.y = h + h * 0.3;
+  top.rotation.y = Math.PI / 4;
+  top.castShadow = true;
+  const door = box(0.35, 0.6, 0.05, 0x8a5a30, { shadow: false });
+  door.position.set(0, 0.3, d / 2 + 0.01);
+  g.add(body, top, door);
+  return g;
+}
+const CITY_MODELS = {
+  homes(l) {
+    const g = new THREE.Group();
+    const spots = [[-0.9, -0.9], [0.9, 0.9], [0.9, -0.9], [-0.9, 0.9]].slice(0, 1 + l);
+    spots.forEach(([x, z], k) => {
+      const hse = roofHouse(1.3, 1.1 + (k % 2) * 0.3, 1.3, pick([0xfff3c4, 0xffd6d6, 0xd6ecff, 0xd8f3dc]), pick([0xe5484d, 0x3d8bfd, 0x2e9e4f, 0xf5a623]));
+      hse.position.set(x, 0, z);
+      g.add(hse);
+    });
+    return g;
+  },
+  school(l) {
+    const g = new THREE.Group();
+    const body = box(3.0, 1.4 + l * 0.5, 1.8, 0xffe0a3);
+    body.position.y = (1.4 + l * 0.5) / 2;
+    const roof = box(3.2, 0.2, 2.0, 0xe5484d);
+    roof.position.y = 1.4 + l * 0.5 + 0.1;
+    const clock = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 16), mat(0xffffff));
+    clock.rotation.x = Math.PI / 2;
+    clock.position.set(0, 1.0 + l * 0.5, 0.93);
+    const pole = box(0.06, 2.6, 0.06, 0xdfe6ee);
+    pole.position.set(1.8, 1.3, 1.2);
+    const flag = box(0.6, 0.35, 0.03, 0x3d8bfd, { shadow: false });
+    flag.position.set(2.1, 2.4, 1.2);
+    g.add(body, roof, clock, pole, flag);
+    for (let i = 0; i < 3; i++) {
+      for (let r = 0; r < l + 1; r++) {
+        const win = box(0.4, 0.3, 0.04, 0x7fc8f8, { shadow: false });
+        win.position.set(-1.0 + i * 1.0, 0.55 + r * 0.5, 0.92);
+        g.add(win);
+      }
+    }
+    return g;
+  },
+  factory(l) {
+    const g = new THREE.Group();
+    const body = box(2.8, 1.3, 2.0, 0xb8c2cc);
+    body.position.y = 0.65;
+    g.add(body);
+    for (let i = 0; i < 3; i++) {
+      const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.55, 0.6, 3), mat(0x8792a0));
+      saw.rotation.z = Math.PI / 2;
+      saw.rotation.y = Math.PI / 2;
+      saw.position.set(-0.9 + i * 0.9, 1.55, 0);
+      g.add(saw);
+    }
+    for (let k = 0; k < l; k++) {
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 2.2 + k * 0.6, 10), mat(0xe5484d));
+      stack.position.set(1.0 - k * 0.7, 1.1 + k * 0.3, -0.6);
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 }));
+      puff.position.set(stack.position.x, 2.6 + k * 0.6, -0.6);
+      const base = puff.position.y;
+      decorAnims.push((t) => {
+        puff.position.y = base + ((t * 0.6 + k * 0.3) % 1) * 0.9;
+        puff.material.opacity = 0.75 * (1 - ((t * 0.6 + k * 0.3) % 1));
+      });
+      g.add(stack, puff);
+    }
+    const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.6), new THREE.MeshBasicMaterial({ map: signTexture((c) => {
+      c.font = '72px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('💊', 64, 68);
+    }) }));
+    cross.position.set(0, 0.8, 1.02);
+    g.add(cross);
+    return g;
+  },
+  bank(l) {
+    const g = new THREE.Group();
+    const h = 1.4 + l * 0.4;
+    const body = box(2.6, h, 1.8, 0xf4f4f0);
+    body.position.y = h / 2;
+    const pedi = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 1.7, 0.7, 4, 1), mat(0xdfe6ee));
+    pedi.scale.set(1, 1, 0.55);
+    pedi.rotation.y = Math.PI / 4;
+    pedi.position.y = h + 0.35;
+    g.add(body, pedi);
+    for (let i = 0; i < 4; i++) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, h, 10), mat(0xffffff));
+      col.position.set(-0.9 + i * 0.6, h / 2, 1.05);
+      g.add(col);
+    }
+    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.08, 18), mat(0xffd166));
+    coin.rotation.x = Math.PI / 2;
+    coin.position.set(0, h + 1.2, 0);
+    decorAnims.push((t) => { coin.rotation.z = t * 2; });
+    g.add(coin);
+    return g;
+  },
+  market(l) {
+    const g = new THREE.Group();
+    const colors = [0xe5484d, 0x3d8bfd, 0xffd166, 0x2e9e4f, 0x9b5de5, 0xff8fab];
+    for (let k = 0; k < l + 1; k++) {
+      const x = -1.2 + k * 1.2;
+      const table = box(1.0, 0.6, 0.7, 0xa0703c);
+      table.position.set(x, 0.3, 0.3);
+      const top = new THREE.Mesh(new THREE.ConeGeometry(0.8, 0.5, 4), mat(colors[k % colors.length]));
+      top.rotation.y = Math.PI / 4;
+      top.position.set(x, 1.6, 0.3);
+      const pole = box(0.06, 1.4, 0.06, 0xdfe6ee);
+      pole.position.set(x, 0.7, 0.3);
+      g.add(table, top, pole);
+      for (let f = 0; f < 3; f++) {
+        const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), mat(pick([0xff924c, 0xe5484d, 0x8ac926, 0xffd166])));
+        fruit.position.set(x - 0.25 + f * 0.25, 0.68, 0.3);
+        g.add(fruit);
+      }
+    }
+    return g;
+  },
+  garden(l) {
+    const g = new THREE.Group();
+    const lawn = new THREE.Mesh(new THREE.CircleGeometry(2.3, 24), mat(0x8fd16b));
+    lawn.rotation.x = -Math.PI / 2;
+    lawn.position.y = 0.03;
+    g.add(lawn);
+    for (let k = 0; k < 1 + l; k++) {
+      const t = TREES.round();
+      t.scale.setScalar(0.7);
+      const a = (k / (1 + l)) * Math.PI * 2;
+      t.position.set(Math.cos(a) * 1.5, 0, Math.sin(a) * 1.5);
+      g.add(t);
+    }
+    if (l >= 2) {
+      const basin = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 0.3, 16), mat(0xdfe6ee));
+      basin.position.y = 0.15;
+      const water = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.05, 16), mat(0x5ec8f2));
+      water.position.y = 0.3;
+      g.add(basin, water);
+    }
+    for (let i = 0; i < 6 * l; i++) {
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), mat(pick([0xff8fab, 0xffd166, 0xffffff, 0xc77dff])));
+      f.position.set(rand(-2, 2), 0.1, rand(-2, 2));
+      g.add(f);
+    }
+    return g;
+  },
+};
+
+// Rebuild any plot whose building or level changed
+function syncDistrict(animate = false) {
+  if (!district.built) return;
+  district.plots.forEach((slot, i) => {
+    const p = emp().plots[i];
+    const key = p ? `${p.type}:${p.lvl}` : '';
+    if (key === slot.key) return;
+    slot.key = key;
+    if (slot.group) scene.remove(slot.group);
+    if (slot.sign) scene.remove(slot.sign);
+    if (slot.collider) colliders.splice(colliders.indexOf(slot.collider), 1);
+    slot.collider = null;
+    const label = p ? `${CITY_BUILDINGS.find((b) => b.id === p.type).icon} ${'★'.repeat(p.lvl)}` : '🏗️ ที่ว่าง';
+    slot.sign = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.5), new THREE.MeshBasicMaterial({ map: signTex(label, p ? '#2e9e4f' : '#8a96a8'), side: THREE.DoubleSide }));
+    const zone = plotZone(slot.at);
+    slot.sign.position.set(zone.x, 2.2, zone.z - 1.1);
+    slot.sign.rotation.y = Math.PI / 2;
+    scene.add(slot.sign);
+    if (!p) {
+      slot.group = new THREE.Group();
+      const post = box(0.1, 1.2, 0.1, 0xdfe6ee);
+      post.position.set(0, 0.6, 0);
+      const board = box(1.0, 0.6, 0.05, 0xffd166);
+      board.position.set(0, 1.2, 0);
+      slot.group.add(post, board);
+    } else {
+      slot.group = CITY_MODELS[p.type](p.lvl);
+      // Face the road
+      slot.group.rotation.y = slot.at.x > DIST_ROAD_X ? -Math.PI / 2 : Math.PI / 2;
+      if (p.type !== 'garden') {
+        addCollider(slot.at.x, slot.at.z, 3.2, 3.2);
+        slot.collider = colliders[colliders.length - 1];
+      }
+    }
+    slot.group.position.set(slot.at.x, 0, slot.at.z);
+    slot.group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    scene.add(slot.group);
+    if (animate && p) {
+      popIn(slot.group);
+      burst(slot.group.position);
+    }
+  });
+}
+
+// Residents stroll along the district road once there are homes
+function updateDistrict(dt) {
+  if (!district.built) return;
+  const want = Math.min(6, cityLevel('homes') * 2);
+  while (district.residents.length < want) {
+    const person = makePerson({ shirt: pick(SHIRTS) });
+    person.group.position.set(DIST_ROAD_X + rand(-0.8, 0.8), 0, rand(-10, 12));
+    scene.add(person.group);
+    district.residents.push({ person, target: null, wait: rand(0, 3) });
+  }
+  for (const r of district.residents) {
+    if (!r.target) {
+      r.wait -= dt;
+      animatePerson(r.person, false, dt);
+      if (r.wait <= 0) r.target = Math.random() < 0.5 ? plotZone(pick(DISTRICT_PLOTS)) : v(DIST_ROAD_X + rand(-1, 1), rand(-10, 12));
+      continue;
+    }
+    const arrived = walkTo(r.person, r.target, 1.8, dt);
+    animatePerson(r.person, !arrived, dt);
+    if (arrived) {
+      r.target = null;
+      r.wait = rand(2, 5);
+    }
+  }
+  // Standing on a plot's ring for a moment opens the city panel on that plot
+  let here = -1;
+  if (player.floor === 0 && !autoBadge.classList.contains('show')) {
+    here = DISTRICT_PLOTS.findIndex((p) => flatDist(player.group.position, plotZone(p)) < ZONE_R);
+  }
+  if (here !== district.standing) {
+    district.standing = here;
+    district.stand = 0;
+  }
+  if (here < 0) {
+    district.opened = -1;
+    return;
+  }
+  district.stand += dt;
+  if (district.stand > 0.6 && district.opened !== here && branchPanel.style.display !== 'flex') {
+    district.opened = here;
+    empireTab = 0;
+    empireSel = here;
+    renderEmpire();
+    branchPanel.style.display = 'flex';
+  }
+}
+// Walk-free shortcut from the panel: jump to the district road, and back
+function visitDistrict() {
+  if (lift.riding) return;
+  if (player.floor !== 0) setFloor(0);
+  player.group.position.set(DIST_ROAD_X, 0, 12.5);
+  auto.idle = 0;
+  auto.task = null;
+  updateCamera(0, true);
+  branchPanel.style.display = 'none';
+  toast('🏙️ <b>เมืองหมอ</b> ยืนในวงฟ้าหน้าแปลงเพื่อสร้างหรืออัปเลเวล<br><small>กด 🏥 มุมขวาบนเพื่อกลับโรงพยาบาล</small>', 5000);
+}
+const homeBtn = document.getElementById('homebtn');
+homeBtn.addEventListener('click', () => {
+  player.group.position.copy(PLAYER_START);
+  updateCamera(0, true);
+});
+function updateHomeBtn() {
+  const show = running && player.floor === 0 && inDistrict(player.group.position);
+  if (homeBtn.style.display !== (show ? 'block' : 'none')) homeBtn.style.display = show ? 'block' : 'none';
+}
+
+// ---------- 3D empire maps: province, region, country and a globe ----------
+const mapView = {
+  active: false, tier: 1, scene: null, camera: new THREE.PerspectiveCamera(40, 1, 0.1, 400),
+  yaw: 0.5, pitch: 0.95, dist: 42, hits: [], labels: [], sel: null, drag: null, spin: 0, wasRunning: false,
+};
+const mvEl = document.getElementById('mapview');
+const mvLabels = document.getElementById('mvlabels');
+const mvSheet = document.getElementById('mvsheet');
+const mapPos = (n) => v((n.x - 50) * 0.32, (n.y - 50) * 0.32);
+const GLOBE_R = 11;
+function globePos(n, lift = 0) {
+  const lon = ((n.x - 50) / 50) * Math.PI;
+  const lat = ((50 - n.y) / 50) * (Math.PI / 2) * 0.92;
+  const r = GLOBE_R + lift;
+  return new THREE.Vector3(r * Math.cos(lat) * Math.sin(lon), r * Math.sin(lat), r * Math.cos(lat) * Math.cos(lon));
+}
+function miniCity(count, home, scale = 1) {
+  const g = new THREE.Group();
+  if (home) {
+    const hq = box(1.4, 1.2, 1.4, 0xffffff);
+    hq.position.y = 0.6;
+    const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), new THREE.MeshBasicMaterial({ map: signTexture((c) => {
+      c.fillStyle = '#e5484d'; c.fillRect(48, 20, 32, 88); c.fillRect(20, 48, 88, 32);
+    }) }));
+    cross.position.set(0, 0.7, 0.71);
+    g.add(hq, cross);
+  }
+  if (!count && !home) {
+    // For sale: a little flag on bare ground
+    const pole = box(0.08, 1.4, 0.08, 0xdfe6ee);
+    pole.position.y = 0.7;
+    const flag = box(0.6, 0.35, 0.04, 0xe5484d, { shadow: false });
+    flag.position.set(0.32, 1.2, 0);
+    g.add(pole, flag);
+  }
+  let seed = count * 31 + (home ? 7 : 3);
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < count; i++) {
+    const a = rnd() * Math.PI * 2;
+    const d = 0.9 + rnd() * 1.4;
+    const h = 0.4 + rnd() * (0.6 + count * 0.08);
+    const b = box(0.5 + rnd() * 0.3, h, 0.5 + rnd() * 0.3, pick([0xfff3c4, 0xffd6d6, 0xd6ecff, 0xd8f3dc, 0xf4f4f0]));
+    b.position.set(Math.cos(a) * d, h / 2, Math.sin(a) * d);
+    g.add(b);
+    if (rnd() < 0.5) {
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.35, 4), mat(pick([0xe5484d, 0x3d8bfd, 0xf5a623])));
+      roof.rotation.y = Math.PI / 4;
+      roof.position.set(b.position.x, h + 0.17, b.position.z);
+      g.add(roof);
+    }
+  }
+  g.scale.setScalar(scale);
+  return g;
+}
+// A landmark per region of the country map
+const LANDMARKS = {
+  'ภาคเหนือ': () => { const g = new THREE.Group(); [[0, 0, 2.2], [1.2, 0.6, 1.6], [-1.1, 0.5, 1.4]].forEach(([x, z, h]) => { const m = new THREE.Mesh(new THREE.ConeGeometry(1.0, h, 6), flatMat(0x52796f)); m.position.set(x, h / 2, z); const cap = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.5, 6), flatMat(0xffffff)); cap.position.set(x, h - 0.2, z); g.add(m, cap); }); return g; },
+  'ภาคอีสาน': () => { const g = new THREE.Group(); for (let i = 0; i < 5; i++) { const f = box(3.2, 0.1, 0.45, i % 2 ? 0xc9e265 : 0x8ac926); f.position.set(0, 0.05, -1 + i * 0.5); g.add(f); } return g; },
+  'ภาคกลาง': () => { const g = new THREE.Group(); [1.6, 1.1, 0.7].forEach((w, i) => { const t = box(w, 0.5, w, 0xffd166); t.position.y = 0.25 + i * 0.5; g.add(t); }); const spire = new THREE.Mesh(new THREE.ConeGeometry(0.25, 1.0, 8), mat(0xffd166)); spire.position.y = 2.0; g.add(spire); return g; },
+  'ภาคตะวันออก': () => { const g = new THREE.Group(); const sand = new THREE.Mesh(new THREE.CircleGeometry(1.6, 16), mat(0xf2dca0)); sand.rotation.x = -Math.PI / 2; sand.position.y = 0.06; const um = new THREE.Mesh(new THREE.ConeGeometry(0.6, 0.3, 8), mat(0xe5484d)); um.position.set(0.4, 0.9, 0); const pole = box(0.04, 0.8, 0.04, 0xffffff); pole.position.set(0.4, 0.45, 0); g.add(sand, um, pole); return g; },
+  'ภาคตะวันตก': () => { const g = new THREE.Group(); const body = box(1.0, 0.7, 0.6, 0x8d99ae); body.position.y = 0.8; const head = box(0.45, 0.45, 0.5, 0x8d99ae); head.position.set(0.65, 0.95, 0); const trunk = box(0.12, 0.6, 0.12, 0x8d99ae); trunk.position.set(0.9, 0.55, 0); g.add(body, head, trunk); [[-0.35, -0.2], [-0.35, 0.2], [0.35, -0.2], [0.35, 0.2]].forEach(([x, z]) => { const leg = box(0.18, 0.5, 0.18, 0x8d99ae); leg.position.set(x, 0.25, z); g.add(leg); }); return g; },
+  'ภาคใต้': () => { const g = TREES.palm(); g.scale.setScalar(0.5); return g; },
+};
+
+function addMapLabel(pos, html, i) {
+  const el = document.createElement('button');
+  el.className = 'mvlabel';
+  el.innerHTML = html;
+  el.addEventListener('click', () => selectMapNode(i));
+  mvLabels.append(el);
+  mapView.labels.push({ el, pos });
+}
+function buildMapScene(t) {
+  const sc = new THREE.Scene();
+  sc.background = new THREE.Color(t === 4 ? 0x0b1530 : 0x9fdcff);
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x5a7a9e, 1.5));
+  const sunL = new THREE.DirectionalLight(0xffffff, 1.6);
+  sunL.position.set(20, 30, 15);
+  sc.add(sunL);
+  mapView.hits = [];
+  mapView.labels = [];
+  mvLabels.innerHTML = '';
+  const nodes = EMPIRE_NODES[t];
+  const levels = nodeLevels(t);
+  const root = new THREE.Group();
+  sc.add(root);
+  mapView.root = root;
+  if (t === 4) {
+    // The globe: blue sphere, continents as green bumps, stars behind
+    const globe = new THREE.Mesh(new THREE.SphereGeometry(GLOBE_R, 40, 28), new THREE.MeshLambertMaterial({ color: 0x3fa9e0 }));
+    root.add(globe);
+    const stars = new THREE.BufferGeometry();
+    const sp = new Float32Array(600 * 3);
+    for (let i = 0; i < sp.length; i++) sp[i] = rand(-150, 150);
+    stars.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    sc.add(new THREE.Points(stars, new THREE.PointsMaterial({ color: 0xffffff, size: 0.6 })));
+  } else {
+    const sea = new THREE.Mesh(new THREE.CircleGeometry(220, 48), mat(0x6cc3f0));
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.y = -0.3;
+    sc.add(sea);
+    if (t !== 3) {
+      const land = new THREE.Mesh(new THREE.CylinderGeometry(19, 20, 0.6, 40), flatMat(t === 1 ? 0x8fd16b : 0x79c850));
+      land.position.y = -0.3;
+      root.add(land);
+    }
+  }
+  nodes.forEach((n, i) => {
+    const lvl = i === 0 ? PLACE_MAX : levels[i - 1];
+    const owned = lvl > 0;
+    let pos;
+    const g = new THREE.Group();
+    if (t === 4) {
+      pos = globePos(n, 0);
+      for (let k = 0; k < 7; k++) {
+        const bump = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), flatMat(n.name === 'แอนตาร์กติกา' ? 0xffffff : owned ? 0x79c850 : 0x9fb88a));
+        bump.scale.set(rand(1.2, 2.2), 0.35, rand(1.2, 2.2));
+        bump.position.set(rand(-1.5, 1.5), 0, rand(-1.5, 1.5));
+        g.add(bump);
+      }
+      const city = miniCity(i === 0 ? 4 : lvl * 3, i === 0, 0.55);
+      city.position.y = 0.2;
+      g.add(city);
+      g.position.copy(pos);
+      g.lookAt(pos.clone().multiplyScalar(2));
+      g.rotateX(Math.PI / 2);
+      root.add(g);
+      pos = globePos(n, 1.5);
+    } else {
+      pos = mapPos(n);
+      if (t === 3) {
+        // Country: each region is its own landmass, with its landmark
+        const land = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.6, 0.6, 9), flatMat(owned ? 0x79c850 : 0xa3b88f));
+        land.scale.set(1, 1, i === 5 ? 1.4 : 1);
+        land.position.y = -0.3;
+        g.add(land);
+        const mark = LANDMARKS[n.name]?.();
+        if (mark) {
+          mark.position.set(-1.6, 0, -1.2);
+          g.add(mark);
+        }
+      } else if (t === 2) {
+        const patch = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.4, 0.1, 24), mat(owned ? pick([0xb9e59a, 0xffe0a3, 0xd6ecff, 0xffd6ff]) : 0xc8d1b8));
+        patch.position.y = 0.02;
+        g.add(patch);
+      }
+      g.add(miniCity(i === 0 ? 6 : lvl * 3, i === 0, t === 1 ? 1 : 0.8));
+      g.position.copy(pos);
+      root.add(g);
+      if (i > 0) {
+        const road = new THREE.BufferGeometry().setFromPoints([mapPos(nodes[0]).setY(0.08), pos.clone().setY(0.08)]);
+        root.add(new THREE.Line(road, new THREE.LineBasicMaterial({ color: owned ? 0xffd166 : 0xffffff, transparent: true, opacity: owned ? 1 : 0.5 })));
+      }
+      pos = pos.clone().setY(2.6);
+    }
+    if (owned) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 2.9, 32), new THREE.MeshBasicMaterial({ color: i === 0 ? 0xe5484d : 0xffd166, side: THREE.DoubleSide }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.06;
+      if (t !== 4) g.add(ring);
+    }
+    const hit = new THREE.Mesh(new THREE.SphereGeometry(3, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.copy(t === 4 ? globePos(n, 0.5) : g.position.clone().setY(1));
+    hit.userData.node = i;
+    root.add(hit);
+    mapView.hits.push(hit);
+    addMapLabel(pos, `${n.icon} ${n.name}<small>${i === 0 ? '🏠 ของเรา' : '★'.repeat(lvl) + '☆'.repeat(PLACE_MAX - lvl)}</small>`, i);
+  });
+  if (t === 4) {
+    // Flight paths from home to every owned continent
+    nodes.forEach((n, i) => {
+      if (!i || !levels[i - 1]) return;
+      const a = globePos(nodes[0], 0.3).normalize();
+      const b = globePos(n, 0.3).normalize();
+      const pts = [];
+      for (let k = 0; k <= 24; k++) {
+        const p = a.clone().lerp(b, k / 24).normalize();
+        pts.push(p.multiplyScalar(GLOBE_R + 0.3 + Math.sin((k / 24) * Math.PI) * 2.2));
+      }
+      root.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xffd166 })));
+    });
+  }
+  mapView.scene = sc;
+}
+function openMapView(t) {
+  mapView.tier = t;
+  mapView.sel = null;
+  mapView.yaw = t === 4 ? 0 : 0.5;
+  mapView.pitch = t === 4 ? 0.25 : 1.05;
+  mapView.dist = t === 4 ? 38 : 44;
+  buildMapScene(t);
+  mapView.wasRunning = running;
+  running = false;
+  mapView.active = true;
+  branchPanel.style.display = 'none';
+  document.body.classList.add('mapopen');
+  mvEl.style.display = 'block';
+  document.getElementById('mvtitle').textContent = `${EMPIRE_TIERS[t].icon} แผนที่${EMPIRE_TIERS[t].name}`;
+  renderMapSheet();
+}
+function closeMapView() {
+  mapView.active = false;
+  mvEl.style.display = 'none';
+  document.body.classList.remove('mapopen');
+  running = mapView.wasRunning;
+  last = performance.now();
+  renderEmpire();
+  branchPanel.style.display = 'flex';
+}
+function selectMapNode(i) {
+  mapView.sel = i === 0 ? null : i;
+  renderMapSheet();
+}
+function renderMapSheet() {
+  const t = mapView.tier;
+  mvSheet.innerHTML = '';
+  if (!mapView.sel) {
+    mvSheet.innerHTML = `<small>ลากเพื่อหมุน · บีบหรือเลื่อนเพื่อซูม · แตะที่บนแผนที่เพื่อพัฒนา<br>ภาษีรวม +${empireRate().toLocaleString()}/วินาที</small>`;
+    return;
+  }
+  const i = mapView.sel;
+  const n = EMPIRE_NODES[t][i];
+  const l = nodeLevels(t)[i - 1];
+  const maxed = l >= PLACE_MAX;
+  const cost = maxed ? 0 : nodeCost(t, i, l);
+  const row = emEl('div', 'uprow', `<div class="upico">${n.icon}</div><div class="upinfo"><b>${n.name}</b> <span class="lv">Lv.${l}/${PLACE_MAX}</span><br><small>ภาษี +${nodeRate(t, i, l).toLocaleString()}/วินาที${maxed ? '' : ` → +${nodeRate(t, i, l + 1).toLocaleString()}/วินาที`}</small></div>`);
+  row.append(emButton(maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`, maxed || state.money < cost, () => {
+    upgradeNode(t, i);
+    branchPanel.style.display = 'none';
+    buildMapScene(t);
+    renderMapSheet();
+  }));
+  mvSheet.append(row);
+}
+function renderMapView(dt) {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  // Portrait phones: wider lens and further back so the whole map fits across
+  const portrait = w < h;
+  mapView.camera.fov = portrait ? 60 : 40;
+  mapView.camera.aspect = w / h;
+  mapView.camera.updateProjectionMatrix();
+  if (!mapView.drag) mapView.spin += dt * (mapView.tier === 4 ? 0.12 : 0.04);
+  const yaw = mapView.yaw + mapView.spin;
+  const d = mapView.dist * (portrait ? (mapView.tier === 4 ? 1.3 : 1.65) : 1);
+  mapView.camera.position.set(Math.sin(yaw) * Math.cos(mapView.pitch) * d, Math.sin(mapView.pitch) * d, Math.cos(yaw) * Math.cos(mapView.pitch) * d);
+  mapView.camera.lookAt(0, 0, 0);
+  renderer.render(mapView.scene, mapView.camera);
+  const camDir = mapView.camera.position.clone().normalize();
+  for (const lb of mapView.labels) {
+    tmpV.copy(lb.pos).project(mapView.camera);
+    const hidden = mapView.tier === 4 && lb.pos.clone().normalize().dot(camDir) < 0.15; // far side of the globe
+    lb.el.style.display = hidden || tmpV.z > 1 ? 'none' : 'block';
+    lb.el.style.left = `${(tmpV.x * 0.5 + 0.5) * w}px`;
+    lb.el.style.top = `${(-tmpV.y * 0.5 + 0.5) * h}px`;
+  }
+}
+// Drag to orbit, pinch or wheel to zoom, tap to pick
+const mvCanvas = document.getElementById('mvtouch');
+const mvPointers = new Map();
+mvCanvas.addEventListener('pointerdown', (e) => {
+  mvCanvas.setPointerCapture(e.pointerId);
+  mvPointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
+  mapView.drag = true;
+  mapView.pinch = null;
+});
+mvCanvas.addEventListener('pointermove', (e) => {
+  const p = mvPointers.get(e.pointerId);
+  if (!p) return;
+  if (mvPointers.size === 2) {
+    const [a, b] = [...mvPointers.values()];
+    const before = Math.hypot(a.x - b.x, a.y - b.y);
+    p.x = e.clientX;
+    p.y = e.clientY;
+    const after = Math.hypot(a.x - b.x, a.y - b.y);
+    mapView.dist = Math.max(14, Math.min(70, mapView.dist * (before / Math.max(1, after))));
+    return;
+  }
+  mapView.yaw -= (e.clientX - p.x) * 0.008;
+  mapView.pitch = Math.max(mapView.tier === 4 ? -1.2 : 0.35, Math.min(1.4, mapView.pitch + (e.clientY - p.y) * 0.006));
+  p.x = e.clientX;
+  p.y = e.clientY;
+});
+const mvUp = (e) => {
+  const p = mvPointers.get(e.pointerId);
+  mvPointers.delete(e.pointerId);
+  if (!mvPointers.size) mapView.drag = false;
+  if (!p || Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 8) return;
+  // A tap: what's under it?
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1), mapView.camera);
+  const hit = ray.intersectObjects(mapView.hits)[0];
+  if (hit) selectMapNode(hit.object.userData.node);
+};
+mvCanvas.addEventListener('pointerup', mvUp);
+mvCanvas.addEventListener('pointercancel', mvUp);
+mvCanvas.addEventListener('wheel', (e) => {
+  mapView.dist = Math.max(14, Math.min(70, mapView.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+}, { passive: true });
+document.getElementById('mvclose').addEventListener('click', closeMapView);
 
 // ---------- player actions ----------
 let actTimer = 0;
@@ -5751,6 +6376,7 @@ function frame(now) {
     updateSpills(dt);
     tickOtherBranches(dt);
     tickEmpire(dt);
+    updateDistrict(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
     updateRoof(dt);
@@ -5787,7 +6413,9 @@ function frame(now) {
   updateEventHud();
   tickMoneyDisplay(dt);
   watchFps(now);
-  renderer.render(scene, camera);
+  updateHomeBtn();
+  if (mapView.active) renderMapView(dt);
+  else renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
@@ -5799,6 +6427,7 @@ decorateDept('pill', false);
 load();
 applyTheme();
 applyOutfit();
+buildDistrict();
 spawnCrew();
 showNextTile();
 updateBag();
@@ -6234,4 +6863,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
