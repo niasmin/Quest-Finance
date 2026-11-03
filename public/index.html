@@ -214,6 +214,12 @@
   .boardrow .nm small { font-size: 11px; }
   .boardrow .er small { color: #b86b00; }
   #startname { font: inherit; font-size: 17px; padding: 10px 14px; border-radius: 14px; border: 3px solid #ffd166; width: min(320px, 86vw); text-align: center; color: #1d2433; user-select: text; -webkit-user-select: text; }
+  /* Quick icons, top right */
+  #hudicons { display: flex; gap: 6px; }
+  .hudbtn { width: 42px; height: 42px; border: none; border-radius: 50%; font-size: 21px; line-height: 1; cursor: pointer; pointer-events: auto; padding: 0;
+    background: rgba(20, 28, 48, .55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  .hudbtn:active { transform: scale(.9); }
+  #boardname { display: block; margin: 12px auto 0; font-size: 16px; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
 </style>
 </head>
@@ -229,6 +235,7 @@
     <div id="saved" class="pill"></div>
   </div>
   <div id="right">
+    <div id="hudicons"><button id="soundbtn" class="hudbtn" aria-label="เสียง">🔊</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
     <div id="evchips"></div>
   </div>
@@ -242,13 +249,13 @@
   <button id="missionbtn" class="dockbtn locked"><span class="di">📋</span><span class="dl">ภารกิจ</span></button>
   <button id="branchbtn" class="dockbtn locked"><span class="di">🌏</span><span class="dl">อาณาจักร</span></button>
   <button id="stylebtn" class="dockbtn locked"><span class="di">🎨</span><span class="dl">ตกแต่ง</span></button>
-  <button id="menubtn" class="dockbtn"><span class="di">⚙️</span><span class="dl">เมนู</span></button>
+  <button id="leaderbtn" class="dockbtn"><span class="di">🏆</span><span class="dl">อันดับ</span></button>
 </nav>
 <div id="tut"><div id="tutstep"></div><div id="tuttext"></div></div>
 <div id="goal" class="pill"></div>
 <div id="hint" class="pill">ลากนิ้วบนจอเพื่อเดิน</div>
 <div id="autobadge" class="pill">🤖 AUTO เล่นให้อยู่ · แตะจอเพื่อเล่นเอง</div>
-<div id="board"><div class="box"><h3>🏆 อันดับผู้เล่น</h3><div id="boardtabs"><button data-tab="all">🏆 รวม</button><button data-tab="daily">📅 วันนี้</button><button data-tab="room">👥 ห้องเพื่อน</button></div><p id="boardsub"></p><div id="boardlist"></div><button id="boardclose" class="btn ghost">ปิด</button></div></div>
+<div id="board"><div class="box"><h3>🏆 อันดับผู้เล่น</h3><div id="boardtabs"><button data-tab="all">🏆 รวม</button><button data-tab="daily">📅 วันนี้</button><button data-tab="room">👥 ห้องเพื่อน</button></div><p id="boardsub"></p><div id="boardlist"></div><button id="boardname" class="btn ghost">✏️ เปลี่ยนชื่อ</button><button id="boardclose" class="btn ghost">ปิด</button></div></div>
 <div id="branches"><div class="box"><h3 id="emtitle">🌏 อาณาจักร</h3><div id="emtabs"></div><div id="blist"></div><div id="empage"></div><button id="bclose" class="btn ghost">ปิด</button></div></div>
 <div id="missions"><div class="box"><h3>📋 ภารกิจวันนี้</h3><p class="sub">ภารกิจใหม่ทุกวัน</p><div id="mlist"></div><button id="mclose" class="btn ghost">ปิด</button></div></div>
 <div id="upgrades"><div class="box"><h3>⬆️ อัปเกรดโรงพยาบาล</h3><div id="uplist"></div><button id="upclose" class="btn ghost">ปิด</button></div></div>
@@ -270,10 +277,8 @@
   <div class="box">
     <h3>⚙️ เมนู</h3>
     <button id="resume" class="btn ghost">เล่นต่อ</button>
-    <button id="soundbtn" class="btn ghost">🔊 เสียง: เปิด</button>
     <button id="litebtn" class="btn ghost">⚡ โหมดประหยัด: ปิด</button>
     <button id="savenow" class="btn ghost">💾 บันทึกตอนนี้</button>
-    <button id="leaderbtn" class="btn ghost">🏆 อันดับผู้เล่น</button>
     <p id="cloudstatus"></p>
     <button id="claimcode" class="btn ghost">📲 ใส่รหัสย้ายเครื่อง</button>
     <button id="namebtn" class="btn ghost">✏️ ตั้งชื่อ</button>

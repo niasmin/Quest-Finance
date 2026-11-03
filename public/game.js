@@ -5554,7 +5554,7 @@ function startMusic() {
 function setSound(on) {
   soundOn = on;
   if (master) master.gain.value = on ? 1 : 0;
-  document.getElementById('soundbtn').textContent = on ? '🔊 เสียง: เปิด' : '🔇 เสียง: ปิด';
+  document.getElementById('soundbtn').textContent = on ? '🔊' : '🔇';
   try {
     localStorage.setItem('drquest-sound', on ? 'on' : 'off');
   } catch {
@@ -6058,12 +6058,22 @@ document.getElementById('claimcode').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('namebtn').addEventListener('click', async () => {
+async function askName() {
   const name = prompt('ตั้งชื่อที่จะแสดงบนกระดานอันดับ (ไม่เกิน 20 ตัวอักษร)', cloud.nickname || '');
-  if (!name || !name.trim()) return;
+  if (!name || !name.trim()) return false;
   cloud.pendingName = name.trim().slice(0, 20);
+  try {
+    localStorage.setItem('drquest-name', cloud.pendingName);
+  } catch {
+    // ignore
+  }
   await cloudPush();
+  return true;
+}
+document.getElementById('boardname').addEventListener('click', async () => {
+  if (await askName()) renderBoard();
 });
+document.getElementById('namebtn').addEventListener('click', askName);
 
 const board = document.getElementById('board');
 let boardTab = 'all';
