@@ -158,9 +158,16 @@ const SAVE_KEY = 'drquest-tycoon:v1';
 
 // ---------- renderer & scene ----------
 const view = document.getElementById('view');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
+// Low-power mode for older phones: no shadows or antialiasing, 1x pixels, less scenery
+let LITE = false;
+try {
+  LITE = localStorage.getItem('drquest-lite') === 'on';
+} catch {
+  // Storage blocked: full quality
+}
+const renderer = new THREE.WebGLRenderer({ antialias: !LITE });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, LITE ? 1 : 2));
+renderer.shadowMap.enabled = !LITE;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 view.append(renderer.domElement);
 
@@ -172,7 +179,7 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x5a9e4a, 1.4));
 const sun = new THREE.DirectionalLight(0xffffff, 1.9);
 sun.position.set(9, 18, 8);
-sun.castShadow = true;
+sun.castShadow = !LITE;
 // Smaller shadow map on phones keeps the frame rate up
 const shadowSize = matchMedia('(pointer: coarse)').matches ? 1024 : 2048;
 sun.shadow.mapSize.set(shadowSize, shadowSize);
@@ -490,7 +497,7 @@ function applyBranchTheme() {
   // Same layout every visit: trees come from a seeded random per branch
   let seed = 1234 + (state.branch || 0) * 977;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < (LITE ? 30 : 90); i++) {
     const x = -32 + rnd() * 64;
     const z = -26 + rnd() * 56;
     if (sceneryBlocked(x, z) || (th.sea && x > 21)) continue;
@@ -522,7 +529,7 @@ function setWeather(kind) {
   weather.points = null;
   weather.kind = kind;
   if (!kind) return;
-  const n = kind === 'snow' ? 500 : 700;
+  const n = (kind === 'snow' ? 500 : 700) / (LITE ? 3 : 1);
   const pos = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
     pos[i * 3] = rand(-18, 18);
@@ -2189,17 +2196,17 @@ function applyUnlock(id, animate) {
     case 'dentist': hireRoomStaff(ROOMS.dental, animate); break;
     case 'surgery': buildRoom(ROOMS.surgery, animate); decorateDept('surgery', animate); break;
     case 'surgeon': hireRoomStaff(ROOMS.surgery, animate); break;
-    case 'eye': buildWing(animate); buildRoom(ROOMS.eye, animate); wingSign('eye', animate); break;
+    case 'eye': buildWing(animate); buildRoom(ROOMS.eye, animate); wingSign('eye', animate); if (animate) tip('wing'); break;
     case 'optometrist': hireRoomStaff(ROOMS.eye, animate); break;
     case 'physio': buildRoom(ROOMS.physio, animate); wingSign('physio', animate); break;
     case 'therapist': hireRoomStaff(ROOMS.physio, animate); break;
     case 'lab': buildRoom(ROOMS.lab, animate); wingSign('lab', animate); break;
     case 'labtech': hireRoomStaff(ROOMS.lab, animate); break;
-    case 'parking': buildParking(animate); break;
+    case 'parking': buildParking(animate); if (animate) tip('outdoor'); break;
     case 'kiosk': buildKiosk(animate); break;
     case 'pharmacist': hireKioskClerk(animate); break;
     case 'park': buildPark(animate); break;
-    case 'roof': buildRoof(animate); break;
+    case 'roof': buildRoof(animate); if (animate) tip('lift3'); break;
     case 'icu': buildIcu(animate); break;
     case 'paramedic': hireParamedic(animate); break;
     case 'icunurse': hireIcuNurse(animate); break;
@@ -2321,6 +2328,7 @@ function buildElevator(animate) {
 }
 
 function setFloor(f) {
+  if (running) tip(f === 1 ? 'floor2' : f === 2 ? 'roof' : '');
   player.floor = f;
   player.group.position.y = FLOOR_Y[f];
   showFloor(f);
@@ -2923,6 +2931,35 @@ const eventPayMult = () => (ev.rush ? 1.5 : 1) * (state.style.outfit === 'crown'
 const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.floor(sec % 60))).padStart(2, '0')}`;
 
 const toastEl = document.getElementById('toast');
+// One-time explanations the first time something new shows up; queued so they don't overlap
+const TIPS = {
+  rush: '💡 <b>ปุ่ม 🚨 เร่งด่วน</b> มาแล้ว (มุมขวาบน)<br>กดเมื่อพร้อม คนไข้แห่มา 75 วินาที รายได้ ×1.5',
+  stylebtn: '💡 <b>🎨 ตกแต่ง</b> เปิดแล้ว<br>ซื้อของตกแต่งให้คนไข้รอนานขึ้น และเปลี่ยนชุดหมอได้',
+  branchbtn: '💡 <b>🌏 อาณาจักร</b> เปิดแล้ว<br>สร้างเมืองด้วยเงินจาก รพ. ทุกสาขาจะเก่งขึ้น',
+  floor2: '💡 <b>ชั้น 2</b> เก็บวัตถุดิบไปใส่หม้อ เอาชามไปวางเคาน์เตอร์<br>เงินชั้นนี้ส่งลงตะกร้าเชือกหน้า รพ.',
+  roof: '💡 <b>ดาดฟ้า</b> ยืนวงส้มเพื่อเข็นเปลเข้าไอซียู<br>แล้วยืนวงเขียวที่เคาน์เตอร์เพื่อดูแลจนหาย',
+  lift3: '💡 ลิฟต์มี <b>3 ชั้น</b> แล้ว<br>ยืนบนลิฟต์แล้วกดเลือกชั้นที่จะไป',
+  wing: '💡 <b>อาคารใหม่</b> เข้าทางประตูที่ผนังทางเดินฝั่งขวา',
+  outdoor: '💡 <b>ฝั่งตรงข้ามถนน</b> เดินออกประตูหน้า แล้วข้ามถนนไปเก็บค่าจอดรถ',
+  boss: '💡 <b>เชื้อโรคยักษ์!</b> แค่ยืนใกล้ ๆ หมอยิงยาใส่เอง<br>ถ้าเปิด AUTO หมอจะวิ่งไปเอง',
+  special: '💡 <b>เคสพิเศษ</b> (เสื้อม่วง ⭐) ต้องไปหลายห้องตามลำดับ<br>ดูเส้นทางที่มุมขวาบน',
+};
+const tipQueue = [];
+function tip(id) {
+  if (!state.tips || state.tips.includes(id) || !TIPS[id]) return;
+  state.tips.push(id);
+  tipQueue.push(TIPS[id]);
+  if (tipQueue.length === 1) setTimeout(nextTip, 1500);
+  save();
+}
+function nextTip() {
+  if (!tipQueue.length) return;
+  toast(tipQueue[0], 6500);
+  setTimeout(() => {
+    tipQueue.shift();
+    nextTip();
+  }, 7000);
+}
 function toast(html, ms = 3200) {
   toastEl.innerHTML = html;
   toastEl.classList.remove('show');
@@ -3037,6 +3074,9 @@ function spawnBoss() {
   tone(196, 0.3, 'sawtooth', 0.05);
   const dept = DEPTS.find((d) => d.id === id);
   toast(`🦠 <b>เชื้อโรคยักษ์บุก${dept.name}!</b><br>รีบไปยืนใกล้ ๆ หมอจะยิงยาใส่เอง`, 4000);
+  // A growl: three falling saw notes
+  [196, 165, 131].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'sawtooth', 0.05), i * 140));
+  tip('boss');
 }
 
 function removeBoss() {
@@ -3135,6 +3175,7 @@ function spawnSpecial() {
   const bonus = Math.round(((60 + 20 * state.step) * len * branchMult()) / 10) * 10;
   ev.special = { p, chain, t: 45 + 35 * len, bonus };
   tone(660, 0.15, 'triangle', 0.06);
+  tip('special');
   toast(`⭐ <b>เคสพิเศษ!</b> ${chain.map(serviceIcon).join(' → ')}<br>รักษาให้ครบทันเวลา รับทิป 💵${bonus.toLocaleString()}`, 4000);
   return true;
 }
@@ -3176,6 +3217,7 @@ let evHtml = '';
 function updateEventHud() {
   const cooling = Math.max(0, ((state.style.rushAt || 0) - Date.now()) / 1000);
   rushBtn.style.display = running && tutorialDone() && state.step >= 3 && !ev.rush ? 'flex' : 'none';
+  if (rushBtn.style.display === 'flex') tip('rush');
   rushBtn.disabled = cooling > 0;
   const label = cooling > 0 ? `⏳ ${fmtClock(cooling)}` : 'เร่งด่วน';
   if (rushBtn.lastChild.textContent !== label) rushBtn.lastChild.textContent = label;
@@ -3702,6 +3744,11 @@ function updateCars(dt) {
     } else if (!c.leaving) {
       if (!c.paid) {
         c.paid = true;
+        // Beep-beep when parking nearby
+        if (player.floor === 0 && flatDist(player.group.position, c.mesh.position) < 12) {
+          tone(440, 0.09, 'square', 0.03);
+          setTimeout(() => tone(554, 0.12, 'square', 0.03), 130);
+        }
         const fee = Math.round(10 * priceMult() * eventPayMult());
         OUT.parkingCash.add(fee);
         floatText(OUT.parkingCash.pos, `🅿️ +${fee}`, '#8be08f');
@@ -3763,7 +3810,7 @@ function hireKioskClerk(animate) {
 // People strolling along the far sidewalk; with the kiosk open some stop to buy
 function updateWalkers(dt) {
   OUT.walkTimer -= dt;
-  if (OUT.walkTimer <= 0 && OUT.walkers.length < 10) {
+  if (OUT.walkTimer <= 0 && OUT.walkers.length < (LITE ? 4 : 10)) {
     OUT.walkTimer = rand(2.5, 5);
     const dir = Math.random() < 0.5 ? 1 : -1;
     const person = makePerson({ shirt: pick(SHIRTS) });
@@ -4157,6 +4204,12 @@ function updateHeli(dt) {
   const m = h.mesh;
   const flying = h.state !== 'idle';
   m.userData.rotor.rotation.y += dt * (flying ? 22 : 0);
+  // Rotor chop while it's flying and you're up here to hear it
+  h.chop = (h.chop || 0) - dt;
+  if (flying && m.visible && F3.group.visible && h.chop <= 0) {
+    h.chop = 0.11;
+    tone(70 + Math.random() * 10, 0.07, 'square', 0.025);
+  }
   if (!F3.icu) return;
   if (h.state === 'idle') {
     if (!F3.stretcher) F3.heliTimer -= dt * staffMult();
@@ -4353,7 +4406,7 @@ const PLACE_MAX = 3;
 const defaultEmpire = () => ({ tier: 0, plots: Array(CITY_PLOTS).fill(null), nodes: {}, buys: 0 });
 const emp = () => state.empire;
 const cityLevel = (type) => (emp()?.plots || []).reduce((a, p) => a + (p?.type === type ? p.lvl : 0), 0);
-const marketRate = (l) => Math.round([0, 6, 18, 40][l] * (1 + 0.5 * (emp()?.tier || 0)));
+const marketRate = (l) => Math.round([0, 3, 9, 20][l] * (1 + 0.5 * (emp()?.tier || 0)));
 const plotCost = () => Math.round((4000 * 1.25 ** emp().buys) / 10) * 10;
 const nodeLevels = (t) => {
   const e = emp();
@@ -4362,7 +4415,8 @@ const nodeLevels = (t) => {
 };
 const nodeBase = (t, i) => EMPIRE_TIERS[t].base * (1 + 0.2 * i);
 const nodeCost = (t, i, lvl) => Math.round((nodeBase(t, i) * 2.5 ** lvl) / 10) * 10;
-const nodeRate = (t, i, lvl) => Math.round((nodeBase(t, i) / 900) * [0, 1, 3.5, 9][lvl]);
+// Pays back the first level in ~45 minutes; taxes never count toward the leaderboard
+const nodeRate = (t, i, lvl) => Math.round((nodeBase(t, i) / 2700) * [0, 1, 3, 7][lvl]);
 // Boosts the city gives to every branch
 const empireArrival = () => 1 + 0.04 * cityLevel('homes');
 const empireStaff = () => 1 + 0.05 * cityLevel('school');
@@ -4411,7 +4465,7 @@ function tickEmpire(dt) {
   if (empireBuffer >= 1) {
     const whole = Math.floor(empireBuffer);
     empireBuffer -= whole;
-    addMoney(whole);
+    addMoney(whole, false);
     empireShown += whole;
   }
   tickEmpire.t = (tickEmpire.t || 0) + dt;
@@ -4961,6 +5015,7 @@ function otherBranchesRate() {
 }
 
 let pendingIdle = 0;
+let pendingTax = 0;
 function offerIdleEarnings(seconds) {
   if (seconds < 60) return;
   const here = idleIncome(seconds);
@@ -4973,6 +5028,7 @@ function offerIdleEarnings(seconds) {
   const text = document.getElementById('awaytext');
   if (amount > 0) {
     pendingIdle = amount;
+    pendingTax = taxes;
     text.innerHTML = `คุณไม่อยู่ ${formatDuration(seconds)}<br>พนักงานช่วยกันดูแลคนไข้ได้<br><b>💵 ${amount.toLocaleString()}</b>`
       + (others > 0 ? `<br><small>(รวมสาขาอื่น 💵${others.toLocaleString()})</small>` : '')
       + (taxes > 0 ? `<br><small>(รวมภาษีอาณาจักร 💵${taxes.toLocaleString()})</small>` : '')
@@ -5041,9 +5097,9 @@ const bagEl = document.getElementById('bag');
 const goalEl = document.getElementById('goal');
 let shownMoney = 0;
 
-function addMoney(n) {
+function addMoney(n, countsForBoard = true) {
   state.money += n;
-  if (n > 0) state.earned = (state.earned || 0) + n; // lifetime earnings for the leaderboard
+  if (n > 0 && countsForBoard) state.earned = (state.earned || 0) + n; // lifetime earnings for the leaderboard
   updateMoney();
 }
 function updateMoney() {
@@ -5135,6 +5191,26 @@ const MISSIONS = [
 ];
 const todayKey = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
 
+// One shared challenge a day: the same goal for everyone, scored on its own leaderboard
+const CHALLENGES = [
+  { id: 'serve', icon: '🧑‍⚕️', text: 'ท้าทายวันนี้: รักษาคนไข้ให้ได้มากที่สุด', counts: ['serve'] },
+  { id: 'earn', icon: '💵', text: 'ท้าทายวันนี้: หาเงินจากคนไข้ให้ได้มากที่สุด', counts: ['earn'] },
+  { id: 'tips', icon: '💖', text: 'ท้าทายวันนี้: ได้ทิปให้ได้มากที่สุด', counts: ['tips'] },
+  { id: 'vip', icon: '👑', text: 'ท้าทายวันนี้: ดูแลคนไข้ VIP และฉุกเฉินให้ได้มากที่สุด', counts: ['vip', 'emergency'] },
+  { id: 'hero', icon: '🦸', text: 'ท้าทายวันนี้: ล่าบอส + เคสพิเศษ + เร่งด่วน (ครั้งละ 10 แต้ม)', counts: ['boss', 'special', 'rush'], weight: 10 },
+];
+function todayChallenge() {
+  let h = 7;
+  for (const ch of todayKey()) h = (Math.imul(h, 131) + ch.charCodeAt(0)) >>> 0;
+  return CHALLENGES[h % CHALLENGES.length];
+}
+function challengeProgress(type, n) {
+  const c = todayChallenge();
+  if (!c.counts.includes(type)) return;
+  if (state.challenge?.date !== todayKey()) state.challenge = { date: todayKey(), score: 0 };
+  state.challenge.score += n * (c.weight || 1);
+}
+
 function rollDaily() {
   const key = todayKey();
   const rnd = (() => {
@@ -5161,6 +5237,7 @@ function ensureDaily() {
   }
 }
 function missionProgress(type, n) {
+  challengeProgress(type, n);
   if (!state.daily) return;
   for (const m of state.daily.missions) if (m.type === type && !m.claimed) m.progress = Math.min(m.target, m.progress + n);
 }
@@ -5170,6 +5247,21 @@ const missionList = document.getElementById('mlist');
 const missionBtn = document.getElementById('missionbtn');
 function renderMissions() {
   missionList.innerHTML = '';
+  const c = todayChallenge();
+  const card = document.createElement('div');
+  card.className = 'branchcard';
+  card.innerHTML = `<b>${c.icon} ${c.text}</b><br><small>คะแนนคุณวันนี้: <b>${Math.floor(state.challenge?.date === todayKey() ? state.challenge.score : 0).toLocaleString()}</b> · แข่งกับทุกคน รีเซ็ตเที่ยงคืน</small><br>`;
+  const btn = document.createElement('button');
+  btn.className = 'btn upbuy';
+  btn.textContent = '📅 ดูอันดับวันนี้';
+  btn.addEventListener('click', () => {
+    missionPanel.style.display = 'none';
+    boardTab = 'daily';
+    board.style.display = 'flex';
+    renderBoard();
+  });
+  card.append(btn);
+  missionList.append(card);
   for (const m of state.daily.missions) {
     const def = MISSIONS.find((d) => d.type === m.type);
     const done = m.progress >= m.target;
@@ -5358,7 +5450,10 @@ function updateDock(initial = false) {
     const show = visible();
     if (show && el.classList.contains('locked')) {
       el.classList.remove('locked');
-      if (!initial) el.classList.add('fresh');
+      if (!initial) {
+        el.classList.add('fresh');
+        tip(id);
+      }
     } else if (!show && !el.classList.contains('locked')) {
       el.classList.add('locked');
     }
@@ -5419,19 +5514,38 @@ const STEP = 60 / 138 / 2;
 let musicStep = 0;
 let musicTime = 0;
 
+// How each branch theme plays the tune: wave, key, tempo, and a scale twist
+const MUSIC_STYLE = {
+  city: { wave: 'square', shift: 0, tempo: 1 },
+  beach: { wave: 'triangle', shift: 2, tempo: 1.1, vol: 1.4 },
+  snow: { wave: 'sine', shift: 12, tempo: 0.85, vol: 1.8 },
+  jungle: { wave: 'square', shift: -3, tempo: 1.05, drum: true },
+  night: { wave: 'triangle', shift: -5, tempo: 0.9, minor: true, vol: 1.4 },
+  desert: { wave: 'sawtooth', shift: -2, tempo: 0.95, minor: true, flat2: true, vol: 0.7 },
+};
+function styledNote(n, st) {
+  const pc = ((n % 12) + 12) % 12;
+  // Minor: flatten the 3rd, 6th and 7th of C major; desert also flattens the 2nd
+  if (st.minor && (pc === 4 || pc === 9 || pc === 11)) n -= 1;
+  if (st.flat2 && pc === 2) n -= 1;
+  return n + st.shift;
+}
 function startMusic() {
   musicTime = audio.currentTime + 0.1;
   setInterval(() => {
     if (!audio || audio.state !== 'running') return;
     // Schedule a little ahead so timing stays tight
+    const st = MUSIC_STYLE[themeOf(state.branch).id] || MUSIC_STYLE.city;
+    const step = STEP / st.tempo;
     while (musicTime < audio.currentTime + 0.15) {
       const note = MELODY[musicStep % MELODY.length];
-      if (note) tone(midi(note), STEP * 0.9, 'square', 0.022, musicTime);
+      if (note) tone(midi(styledNote(note, st)), step * 0.9, st.wave, 0.022 * (st.vol || 1), musicTime);
       if (musicStep % 2 === 0) {
         const root = BASS[Math.floor(musicStep / 8) % BASS.length];
-        tone(midi(musicStep % 4 === 0 ? root : root + 12), STEP * 1.6, 'triangle', 0.05, musicTime);
+        tone(midi(styledNote(musicStep % 4 === 0 ? root : root + 12, { ...st, shift: Math.min(st.shift, 0) })), step * 1.6, 'triangle', 0.05, musicTime);
       }
-      musicTime += STEP;
+      if (st.drum && musicStep % 4 === 2) tone(110, 0.08, 'square', 0.03, musicTime);
+      musicTime += step;
       musicStep++;
     }
   }, 40);
@@ -5461,7 +5575,8 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // ---------- save / load ----------
 // state.branch is the open branch's index; state.branches holds a snapshot of every
 // branch (null = opened but never played). Money, earnings and missions are shared.
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0, style: defaultStyle(), empire: defaultEmpire() };
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0, style: defaultStyle(), empire: defaultEmpire(),
+  challenge: { date: '', score: 0 }, room: null, tips: [] };
 
 let awayOnLoad = 0;
 let localSavedAt = 0;
@@ -5485,6 +5600,7 @@ function saveData() {
   state.branches[state.branch] = branchSnapshot();
   return {
     v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(), tutorial: state.tutorial, style: state.style, empire: state.empire,
+    challenge: state.challenge, room: state.room, tips: state.tips,
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
     branch: state.branches.length - 1, step: state.step,
@@ -5549,6 +5665,9 @@ function load() {
   state.earned = data.earned || 0;
   state.style = { ...defaultStyle(), ...(data.style || {}) };
   state.empire = { ...defaultEmpire(), ...(data.empire || {}) };
+  if (data.challenge?.date === todayKey()) state.challenge = data.challenge;
+  state.room = typeof data.room === 'string' ? data.room : null;
+  state.tips = Array.isArray(data.tips) ? data.tips : [];
   while (state.empire.plots.length < CITY_PLOTS) state.empire.plots.push(null);
   // Players from before the tutorial existed (or anyone who has earned money) skip it
   state.tutorial = data.tutorial ?? (state.earned > 0 || state.branches.some((b) => b?.step) ? TUTORIAL.length : 0);
@@ -5599,6 +5718,24 @@ function updateCamera(dt, snap = false) {
   sun.target.updateMatrixWorld();
 }
 
+// Slow phone? After 12 s of play, suggest low-power mode once
+const fpsWatch = { start: 0, frames: 0, done: LITE };
+function watchFps(now) {
+  if (fpsWatch.done || !running) return;
+  if (!fpsWatch.start) fpsWatch.start = now;
+  fpsWatch.frames++;
+  if (now - fpsWatch.start < 12000) return;
+  fpsWatch.done = true;
+  const fps = (fpsWatch.frames * 1000) / (now - fpsWatch.start);
+  let asked = false;
+  try {
+    asked = localStorage.getItem('drquest-lite-asked') === '1';
+    localStorage.setItem('drquest-lite-asked', '1');
+  } catch {
+    // ignore
+  }
+  if (fps < 26 && !asked) toast(`🐢 เกมกระตุกไหม? (${Math.round(fps)} fps)<br>ลองเปิด <b>⚡ โหมดประหยัด</b> ในเมนู ⚙️`, 6500);
+}
 let last = performance.now();
 let saveTimer = 0;
 let running = false;
@@ -5649,6 +5786,7 @@ function frame(now) {
   }
   updateEventHud();
   tickMoneyDisplay(dt);
+  watchFps(now);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -5671,6 +5809,17 @@ requestAnimationFrame(frame);
 save();
 
 function start() {
+  const nameIn = document.getElementById('startname');
+  const name = nameIn.value.trim().slice(0, 20);
+  if (name && name !== cloud.nickname) {
+    cloud.pendingName = name;
+    try {
+      localStorage.setItem('drquest-name', name);
+    } catch {
+      // ignore
+    }
+    cloudPush();
+  }
   running = true;
   document.getElementById('start').style.display = 'none';
   document.getElementById('hud').style.display = 'flex';
@@ -5687,6 +5836,17 @@ function start() {
   awayOnLoad = 0;
   updateWakeLock();
 }
+const liteBtn = document.getElementById('litebtn');
+liteBtn.textContent = LITE ? '⚡ โหมดประหยัด: เปิด' : '⚡ โหมดประหยัด: ปิด';
+liteBtn.addEventListener('click', () => {
+  try {
+    localStorage.setItem('drquest-lite', LITE ? 'off' : 'on');
+  } catch {
+    return;
+  }
+  save();
+  location.reload(); // shadows and antialiasing are set when the renderer is made
+});
 document.getElementById('soundbtn').addEventListener('click', () => {
   initAudio();
   audio?.resume();
@@ -5694,6 +5854,11 @@ document.getElementById('soundbtn').addEventListener('click', () => {
 });
 setSound(soundOn);
 document.getElementById('startbtn').addEventListener('click', start);
+try {
+  document.getElementById('startname').value = localStorage.getItem('drquest-name') || '';
+} catch {
+  // ignore
+}
 
 const menu = document.getElementById('menu');
 document.getElementById('menubtn').addEventListener('click', () => {
@@ -5766,6 +5931,8 @@ const CLOUD_URL = 'https://wxwarbeioqqlptyzbykx.supabase.co';
 const CLOUD_KEY = 'sb_publishable_9g0q_evWnjxBGElTtsdYdQ_teojMuGk'; // publishable: safe in the browser
 const DEVICE_KEY = 'drquest-device-key';
 const cloud = { code: null, nickname: null, lastSync: 0, ok: null, busy: false, pendingName: null };
+// Local test servers stay off the real leaderboard (add ?cloud=1 to test the cloud anyway)
+const CLOUD_OFF = ['localhost', '127.0.0.1'].includes(location.hostname) && !location.search.includes('cloud=1');
 
 function deviceSecret() {
   try {
@@ -5782,6 +5949,7 @@ function deviceSecret() {
 }
 
 async function rpc(name, body, keepalive = false) {
+  if (CLOUD_OFF) throw new Error('cloud off on a local test server');
   const res = await fetch(`${CLOUD_URL}/rest/v1/rpc/${name}`, {
     method: 'POST',
     headers: { apikey: CLOUD_KEY, 'Content-Type': 'application/json' },
@@ -5860,6 +6028,9 @@ async function replaceSave(data, pushToCloud = true) {
 
 const cloudEl = document.getElementById('cloudstatus');
 function renderCloud() {
+  // Fill the start screen's name box from the cloud once we know it
+  const nameIn = document.getElementById('startname');
+  if (nameIn && !nameIn.value && cloud.nickname && cloud.nickname !== 'หมอนิรนาม') nameIn.value = cloud.nickname;
   if (cloud.ok === null) cloudEl.textContent = '☁️ กำลังเชื่อมต่อคลาวด์…';
   else if (!cloud.ok) cloudEl.innerHTML = '☁️ ยังเชื่อมคลาวด์ไม่ได้ (เล่นต่อได้ จะลองใหม่อัตโนมัติ)';
   else {
@@ -5895,26 +6066,95 @@ document.getElementById('namebtn').addEventListener('click', async () => {
 });
 
 const board = document.getElementById('board');
-document.getElementById('leaderbtn').addEventListener('click', async () => {
+let boardTab = 'all';
+const titleOf = (tier) => EMPIRE_TIERS[Math.max(0, Math.min(4, tier || 0))];
+function boardRow(r, right, me) {
+  const row = document.createElement('div');
+  row.className = 'boardrow' + (me ? ' me' : '');
+  const medal = ['🥇', '🥈', '🥉'][r.rank - 1] || `${r.rank}.`;
+  const t = titleOf(r.tier);
+  row.innerHTML = `<span class="rk">${medal}</span><span class="nm">${escapeHtml(r.nickname)}<br><small>${t.icon} ${t.title}${r.branch ? ` · ${r.branch + 1} สาขา` : ''}</small></span><span class="er">${right}</span>`;
+  return row;
+}
+async function renderBoard() {
+  for (const b of document.querySelectorAll('#boardtabs button')) b.classList.toggle('on', b.dataset.tab === boardTab);
   const list = document.getElementById('boardlist');
+  const sub = document.getElementById('boardsub');
   list.textContent = 'กำลังโหลด…';
-  board.style.display = 'flex';
   try {
     await cloudPush();
-    const rows = await rpc('leaderboard', { p_limit: 20 });
     list.innerHTML = '';
-    rows.forEach((r) => {
-      const row = document.createElement('div');
-      row.className = 'boardrow' + (r.nickname === cloud.nickname && r.earned === state.earned ? ' me' : '');
-      const medal = ['🥇', '🥈', '🥉'][r.rank - 1] || `${r.rank}.`;
-      row.innerHTML = `<span class="rk">${medal}</span><span class="nm">${escapeHtml(r.nickname)}${r.branch ? ` <small>สาขา ${r.branch + 1}</small>` : ''}</span><span class="er">💵${Number(r.earned).toLocaleString()}</span>`;
-      list.append(row);
-    });
-    if (!rows.length) list.textContent = 'ยังไม่มีใครในกระดาน';
+    if (boardTab === 'all') {
+      sub.textContent = 'จัดอันดับจากรายได้สะสมจากคนไข้ (ไม่นับภาษีอาณาจักร)';
+      const rows = await rpc('leaderboard2', { p_limit: 30 });
+      rows.forEach((r) => list.append(boardRow(r, `💵${Number(r.earned).toLocaleString()}`, r.nickname === cloud.nickname && r.earned === state.earned)));
+      if (!rows.length) list.textContent = 'ยังไม่มีใครในกระดาน';
+    } else if (boardTab === 'daily') {
+      const c = todayChallenge();
+      sub.innerHTML = `${c.icon} ${c.text}<br>คะแนนคุณวันนี้: <b>${Math.floor(state.challenge.score).toLocaleString()}</b> · รีเซ็ตเที่ยงคืน`;
+      const rows = await rpc('daily_board', { p_date: todayKey(), p_limit: 30 });
+      rows.forEach((r) => list.append(boardRow(r, `${c.icon}${Number(r.score).toLocaleString()}`, r.nickname === cloud.nickname && r.score === Math.floor(state.challenge.score))));
+      if (!rows.length) list.textContent = 'วันนี้ยังไม่มีใครทำคะแนน เป็นคนแรกเลย!';
+    } else {
+      renderRoom(list, sub);
+    }
   } catch {
     list.textContent = 'โหลดไม่ได้ ตรวจสอบอินเทอร์เน็ต';
   }
+}
+async function renderRoom(list, sub) {
+  if (!state.room) {
+    sub.textContent = 'สร้างห้อง แล้วส่งรหัสให้เพื่อนในกลุ่ม จะเห็นอันดับเฉพาะพวกเรา';
+    const make = emEl('button', 'btn', '➕ สร้างห้องใหม่');
+    make.addEventListener('click', () => {
+      const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      state.room = Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => abc[b % abc.length]).join('');
+      save();
+      renderBoard();
+    });
+    const join = emEl('button', 'btn ghost', '🔑 ใส่รหัสห้องของเพื่อน');
+    join.addEventListener('click', () => {
+      const code = (prompt('ใส่รหัสห้อง 5 ตัว') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (code.length !== 5) return;
+      state.room = code;
+      save();
+      renderBoard();
+    });
+    list.append(make, join);
+    return;
+  }
+  sub.innerHTML = `รหัสห้อง <b class="roomcode">${state.room}</b> · ส่งรหัสนี้ให้เพื่อน<br>${todayChallenge().icon} = คะแนนท้าทายวันนี้`;
+  const rows = await rpc('room_board', { p_room: state.room, p_date: todayKey() });
+  rows.forEach((r) => list.append(boardRow(r, `💵${Number(r.earned).toLocaleString()}<br><small>${todayChallenge().icon}${Number(r.score).toLocaleString()}</small>`, r.nickname === cloud.nickname && r.earned === state.earned)));
+  const share = emEl('button', 'btn ghost', '📋 คัดลอกคำชวนเพื่อน');
+  share.addEventListener('click', async () => {
+    const text = `มาแข่งเปิดโรงพยาบาลกัน! เล่นที่ ${location.origin}${location.pathname} แล้วเข้าห้องเพื่อนด้วยรหัส ${state.room}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      share.textContent = '✅ คัดลอกแล้ว';
+    } catch {
+      prompt('คัดลอกข้อความนี้', text);
+    }
+  });
+  const leave = emEl('button', 'btn danger', 'ออกจากห้อง');
+  leave.addEventListener('click', () => {
+    if (!confirm('ออกจากห้องนี้?')) return;
+    state.room = null;
+    save();
+    renderBoard();
+  });
+  list.append(share, leave);
+}
+document.getElementById('leaderbtn').addEventListener('click', () => {
+  board.style.display = 'flex';
+  renderBoard();
 });
+for (const b of document.querySelectorAll('#boardtabs button')) {
+  b.addEventListener('click', () => {
+    boardTab = b.dataset.tab;
+    renderBoard();
+  });
+}
 document.getElementById('boardclose').addEventListener('click', () => {
   board.style.display = 'none';
 });
@@ -5973,7 +6213,9 @@ setAuto(auto.on);
 document.getElementById('awayok').addEventListener('click', () => {
   document.getElementById('away').style.display = 'none';
   if (pendingIdle > 0) {
-    addMoney(pendingIdle);
+    addMoney(pendingIdle - pendingTax);
+    addMoney(pendingTax, false);
+    pendingTax = 0;
     floatText(player.group.position, `+${pendingIdle.toLocaleString()}`, '#8be08f');
     sfxUnlock();
     pendingIdle = 0;
