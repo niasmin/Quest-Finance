@@ -220,6 +220,23 @@
     background: rgba(20, 28, 48, .55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
   .hudbtn:active { transform: scale(.9); }
   #boardname { display: block; margin: 12px auto 0; font-size: 16px; }
+  /* 3D empire maps */
+  #mapview { position: fixed; inset: 0; display: none; z-index: 12; }
+  #mvtouch { position: absolute; inset: 0; touch-action: none; }
+  #mvlabels { position: absolute; inset: 0; pointer-events: none; }
+  .mvlabel { position: absolute; transform: translate(-50%, -100%); pointer-events: auto; border: none; border-radius: 10px; padding: 3px 8px; font: inherit; font-size: 12px; line-height: 1.25;
+    background: rgba(255,255,255,.9); color: #1d2433; box-shadow: 0 2px 6px rgba(0,0,0,.25); white-space: nowrap; cursor: pointer; }
+  .mvlabel small { display: block; color: #b86b00; font-size: 10px; }
+  .mvtop { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+  .mvtop b { font-size: 20px; text-shadow: 0 2px 0 rgba(0,0,0,.4); }
+  .mvtop .btn { pointer-events: auto; font-size: 16px; padding: 8px 14px; }
+  #mvsheet { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom)); width: min(400px, 94vw); background: #fff; color: #1d2433; border-radius: 18px;
+    padding: 10px 12px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+  #mvsheet small { color: #6b7790; }
+  #mvsheet .uprow { border: none; text-align: left; }
+  body.mapopen #hud, body.mapopen #dock, body.mapopen #goal, body.mapopen #hint, body.mapopen #autobadge, body.mapopen #liftpick, body.mapopen #toast { display: none !important; }
+  .btn.emgo { display: block; width: 100%; margin-top: 8px; font-size: 17px; }
+  #homebtn { display: none; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
 </style>
 </head>
@@ -236,11 +253,13 @@
   </div>
   <div id="right">
     <div id="hudicons"><button id="soundbtn" class="hudbtn" aria-label="เสียง">🔊</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
+    <button id="homebtn" class="evbtn ready" style="display:none">🏥 กลับ รพ.</button>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
     <div id="evchips"></div>
   </div>
 </div>
 <div id="toast"></div>
+<div id="mapview"><div id="mvtouch"></div><div id="mvlabels"></div><div class="mvtop"><b id="mvtitle"></b><button id="mvclose" class="btn ghost">✕ ปิด</button></div><div id="mvsheet"></div></div>
 <div id="liftpick"></div>
 <!-- Bottom dock: buttons appear as the features they open become useful -->
 <nav id="dock">
