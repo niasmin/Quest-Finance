@@ -105,12 +105,12 @@ const UPGRADES = [
 const upLevel = (id) => state.upgrades[id] || 0;
 const upCost = (u) => Math.round((u.base * u.growth ** upLevel(u.id)) / 10) * 10;
 const speedMult = () => 1 + 0.08 * upLevel('speed');
-const staffMult = () => 1 + 0.1 * upLevel('staff');
-const machineMult = () => 1 + 0.1 * upLevel('machine');
+const staffMult = () => (1 + 0.1 * upLevel('staff')) * empireStaff();
+const machineMult = () => (1 + 0.1 * upLevel('machine')) * empireMachine();
 const branchMult = () => 1 + 0.5 * (state.branch || 0);
-const priceMult = () => (1 + 0.1 * upLevel('price')) * branchMult();
+const priceMult = () => (1 + 0.1 * upLevel('price')) * branchMult() * empirePrice();
 // Reputation (0-5 stars) and advertising both bring patients in faster
-const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating) * (1 + 0.02 * comfort()) * (OUT.parking ? 1.15 : 1);
+const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating) * (1 + 0.02 * comfort()) * (OUT.parking ? 1.15 : 1) * empireArrival();
 
 // Patient types: [weight, unlocked from step]
 const PATIENT_TYPES = {
@@ -3233,7 +3233,7 @@ const RARE_ORDER = ['hero', 'statue', 'rainbow', 'crown'];
 const defaultStyle = () => ({ decor: [], themes: ['default'], theme: 'default', outfits: ['classic'], outfit: 'classic', rushAt: 0, bossKills: 0 });
 const styleItem = (id) => DECOR.find((d) => d.id === id) || OUTFITS.find((o) => o.id === id) || THEMES.find((t) => t.id === id);
 const ownsStyle = (id) => state.style.decor.includes(id) || state.style.outfits.includes(id) || state.style.themes.includes(id);
-const comfort = () => (state.style?.decor || []).reduce((a, id) => a + (DECOR.find((d) => d.id === id)?.comfort || 0), 0) + (OUT.park ? 4 : 0);
+const comfort = () => (state.style?.decor || []).reduce((a, id) => a + (DECOR.find((d) => d.id === id)?.comfort || 0), 0) + (OUT.park ? 4 : 0) + empireComfort();
 const themeColor = (deptId) => {
   const theme = THEMES.find((t) => t.id === state.style?.theme) || THEMES[0];
   return theme.colors[DEPTS.findIndex((d) => d.id === deptId)];
@@ -4302,6 +4302,306 @@ function startRide(dest) {
   tone(988, 0.2, 'sine', 0.06);
 }
 
+// ---------- empire map: city → province → region → country → world ----------
+// Money from the hospitals builds up a city; a finished city grows into a province, and so on.
+// City buildings boost every branch; places on the bigger maps pay "tax" every second.
+const EMPIRE_TIERS = [
+  { id: 'city', icon: '🏙️', name: 'เมือง', title: 'หมอประจำเมือง' },
+  { id: 'province', icon: '🏞️', name: 'จังหวัด', title: 'หมอประจำจังหวัด', cost: 60000, branches: 1, base: 15000 },
+  { id: 'region', icon: '🗾', name: 'ภูมิภาค', title: 'หมอใหญ่ประจำภาค', cost: 600000, branches: 2, base: 150000 },
+  { id: 'country', icon: '🗺️', name: 'ประเทศ', title: 'หมอแห่งชาติ', cost: 6000000, branches: 3, base: 1500000 },
+  { id: 'world', icon: '🌏', name: 'โลก', title: 'หมอแห่งโลก', cost: 60000000, branches: 4, base: 15000000 },
+];
+// Places on each bigger map. The first is home: what the previous tier built. x/y are % of the map.
+const EMPIRE_NODES = [
+  null,
+  [
+    { icon: '🏙️', name: 'เมืองหมอ', x: 50, y: 50 },
+    { icon: '🌿', name: 'เมืองสมุนไพร', x: 20, y: 22 }, { icon: '🌈', name: 'เมืองสายรุ้ง', x: 52, y: 13 },
+    { icon: '🛶', name: 'เมืองริมน้ำ', x: 82, y: 25 }, { icon: '⛰️', name: 'เมืองภูเขา', x: 84, y: 66 },
+    { icon: '🌸', name: 'เมืองดอกไม้', x: 52, y: 86 }, { icon: '🏖️', name: 'เมืองชายทะเล', x: 16, y: 72 },
+  ],
+  [
+    { icon: '🏞️', name: 'จังหวัดของเรา', x: 50, y: 52 },
+    { icon: '😊', name: 'จังหวัดสุขใจ', x: 22, y: 20 }, { icon: '😄', name: 'จังหวัดยิ้มแย้ม', x: 78, y: 18 },
+    { icon: '💪', name: 'จังหวัดแข็งแรง', x: 85, y: 62 }, { icon: '☀️', name: 'จังหวัดอบอุ่น', x: 50, y: 88 },
+    { icon: '✨', name: 'จังหวัดสดใส', x: 15, y: 68 },
+  ],
+  [
+    { icon: '🏯', name: 'ภาคกลาง', x: 46, y: 50 },
+    { icon: '⛰️', name: 'ภาคเหนือ', x: 38, y: 14 }, { icon: '🌾', name: 'ภาคอีสาน', x: 74, y: 30 },
+    { icon: '🐘', name: 'ภาคตะวันตก', x: 20, y: 44 }, { icon: '🏖️', name: 'ภาคตะวันออก', x: 72, y: 60 },
+    { icon: '🏝️', name: 'ภาคใต้', x: 34, y: 86 },
+  ],
+  [
+    { icon: '🐼', name: 'เอเชีย', x: 72, y: 32 },
+    { icon: '🏰', name: 'ยุโรป', x: 50, y: 22 }, { icon: '🦁', name: 'แอฟริกา', x: 52, y: 56 },
+    { icon: '🗽', name: 'อเมริกาเหนือ', x: 20, y: 26 }, { icon: '🦜', name: 'อเมริกาใต้', x: 30, y: 68 },
+    { icon: '🦘', name: 'โอเชียเนีย', x: 82, y: 72 }, { icon: '🐧', name: 'แอนตาร์กติกา', x: 52, y: 92 },
+  ],
+];
+const CITY_BUILDINGS = [
+  { id: 'homes', icon: '🏘️', name: 'หมู่บ้าน', desc: (l) => `คนไข้มา +${4 * l}% ทุกสาขา` },
+  { id: 'school', icon: '🏫', name: 'โรงเรียนแพทย์', desc: (l) => `พนักงานไว +${5 * l}% ทุกสาขา` },
+  { id: 'factory', icon: '🏭', name: 'โรงงานยา', desc: (l) => `เครื่องผลิตเร็ว +${5 * l}% ทุกสาขา` },
+  { id: 'bank', icon: '🏦', name: 'ธนาคาร', desc: (l) => `รายได้ +${4 * l}% ทุกสาขา` },
+  { id: 'market', icon: '🏪', name: 'ตลาด', desc: (l) => `ภาษี +${marketRate(l)}/วินาที` },
+  { id: 'garden', icon: '🌳', name: 'สวนสาธารณะ', desc: (l) => `ความสบาย +${2 * l}` },
+];
+const CITY_PLOTS = 8;
+const PLACE_MAX = 3;
+const defaultEmpire = () => ({ tier: 0, plots: Array(CITY_PLOTS).fill(null), nodes: {}, buys: 0 });
+const emp = () => state.empire;
+const cityLevel = (type) => (emp()?.plots || []).reduce((a, p) => a + (p?.type === type ? p.lvl : 0), 0);
+const marketRate = (l) => Math.round([0, 6, 18, 40][l] * (1 + 0.5 * (emp()?.tier || 0)));
+const plotCost = () => Math.round((4000 * 1.25 ** emp().buys) / 10) * 10;
+const nodeLevels = (t) => {
+  const e = emp();
+  if (!e.nodes[t]) e.nodes[t] = Array(EMPIRE_NODES[t].length - 1).fill(0);
+  return e.nodes[t];
+};
+const nodeBase = (t, i) => EMPIRE_TIERS[t].base * (1 + 0.2 * i);
+const nodeCost = (t, i, lvl) => Math.round((nodeBase(t, i) * 2.5 ** lvl) / 10) * 10;
+const nodeRate = (t, i, lvl) => Math.round((nodeBase(t, i) / 900) * [0, 1, 3.5, 9][lvl]);
+// Boosts the city gives to every branch
+const empireArrival = () => 1 + 0.04 * cityLevel('homes');
+const empireStaff = () => 1 + 0.05 * cityLevel('school');
+const empireMachine = () => 1 + 0.05 * cityLevel('factory');
+const empirePrice = () => (1 + 0.04 * cityLevel('bank')) * (1 + 0.1 * (emp()?.tier || 0)); // each tier reached: +10%
+const empireComfort = () => 2 * cityLevel('garden');
+function empireRate() {
+  const e = emp();
+  if (!e) return 0;
+  let rate = e.plots.reduce((a, p) => a + (p?.type === 'market' ? marketRate(p.lvl) : 0), 0);
+  for (let t = 1; t <= e.tier; t++) nodeLevels(t).forEach((l, i) => { rate += nodeRate(t, i + 1, l); });
+  return rate;
+}
+// Is the current tier's map filled in (everything built at least once)?
+function tierFilled(t) {
+  if (t === 0) return emp().plots.every(Boolean);
+  return nodeLevels(t).every((l) => l > 0);
+}
+function advanceCheck() {
+  const e = emp();
+  const next = EMPIRE_TIERS[e.tier + 1];
+  if (!next) return null;
+  const reqs = [
+    { ok: tierFilled(e.tier), text: e.tier === 0 ? `สร้างครบ ${CITY_PLOTS} แปลงในเมือง` : `พัฒนาทุกที่บนแผนที่${EMPIRE_TIERS[e.tier].name}อย่างน้อย Lv.1` },
+    { ok: state.branches.length >= next.branches, text: `มีโรงพยาบาล ${next.branches} สาขาขึ้นไป (ตอนนี้ ${state.branches.length})` },
+    { ok: state.money >= next.cost, text: `เงิน 💵${next.cost.toLocaleString()}` },
+  ];
+  return { next, reqs, ok: reqs.every((r) => r.ok) };
+}
+function cheapestEmpireCost() {
+  const e = emp();
+  const costs = [];
+  if (e.plots.some((p) => !p || p.lvl < PLACE_MAX)) costs.push(plotCost());
+  for (let t = 1; t <= e.tier; t++) nodeLevels(t).forEach((l, i) => { if (l < PLACE_MAX) costs.push(nodeCost(t, i + 1, l)); });
+  const adv = advanceCheck();
+  if (adv && adv.reqs[0].ok && adv.reqs[1].ok) costs.push(adv.next.cost);
+  return costs.length ? Math.min(...costs) : Infinity;
+}
+
+let empireBuffer = 0;
+let empireShown = 0;
+function tickEmpire(dt) {
+  const rate = empireRate();
+  if (!rate) return;
+  empireBuffer += rate * dt;
+  if (empireBuffer >= 1) {
+    const whole = Math.floor(empireBuffer);
+    empireBuffer -= whole;
+    addMoney(whole);
+    empireShown += whole;
+  }
+  tickEmpire.t = (tickEmpire.t || 0) + dt;
+  if (tickEmpire.t > 20 && empireShown > 0) {
+    floatText(player.group.position, `🌏 +${empireShown.toLocaleString()} ภาษีอาณาจักร`, '#ffe08a');
+    empireShown = 0;
+    tickEmpire.t = 0;
+  }
+}
+
+function empireSpend(cost) {
+  if (state.money < cost) return false;
+  state.money -= cost;
+  updateMoney();
+  sfxUnlock();
+  return true;
+}
+function buildPlot(i, type) {
+  const e = emp();
+  const p = e.plots[i];
+  if ((p && p.lvl >= PLACE_MAX) || !empireSpend(plotCost())) return;
+  e.buys++;
+  e.plots[i] = p ? { ...p, lvl: p.lvl + 1 } : { type, lvl: 1 };
+  save();
+  renderEmpire();
+}
+function upgradeNode(t, i) {
+  const levels = nodeLevels(t);
+  const l = levels[i - 1];
+  if (l >= PLACE_MAX || !empireSpend(nodeCost(t, i, l))) return;
+  levels[i - 1] = l + 1;
+  save();
+  renderEmpire();
+}
+function advanceTier() {
+  const adv = advanceCheck();
+  if (!adv?.ok || !empireSpend(adv.next.cost)) return;
+  const e = emp();
+  e.tier++;
+  nodeLevels(e.tier);
+  empireTab = e.tier;
+  empireSel = null;
+  burst(player.group.position);
+  toast(`${adv.next.icon} <b>ยกระดับเป็น${adv.next.name}แล้ว!</b><br>ตำแหน่งใหม่: ${adv.next.title}<br><small>รายได้ทุกสาขา +10%</small>`, 5000);
+  save();
+  renderEmpire();
+}
+
+// --- the panel: a tab for branches, then one per tier ---
+let empireTab = 'branches';
+let empireSel = null;
+const emTabs = document.getElementById('emtabs');
+const emPage = document.getElementById('empage');
+function renderEmpire() {
+  const e = emp();
+  if (empireTab !== 'branches' && empireTab > e.tier) empireTab = e.tier;
+  const title = EMPIRE_TIERS[e.tier];
+  document.getElementById('emtitle').innerHTML = `${title.icon} อาณาจักรของคุณ<br><small>👑 ${title.title} · ภาษี +${empireRate().toLocaleString()}/วินาที</small>`;
+  emTabs.innerHTML = '';
+  const tabs = [['branches', '🏥', 'สาขา'], ...EMPIRE_TIERS.map((t, i) => [i, i > e.tier ? '🔒' : t.icon, t.name])];
+  for (const [id, icon, name] of tabs) {
+    const b = document.createElement('button');
+    b.innerHTML = `${icon}<br><small>${name}</small>`;
+    b.className = empireTab === id ? 'on' : '';
+    b.disabled = id !== 'branches' && id > e.tier;
+    b.addEventListener('click', () => {
+      empireTab = id;
+      empireSel = null;
+      renderEmpire();
+    });
+    emTabs.append(b);
+  }
+  const showBranches = empireTab === 'branches';
+  branchList.style.display = showBranches ? 'block' : 'none';
+  emPage.style.display = showBranches ? 'none' : 'block';
+  if (showBranches) {
+    renderBranches();
+    return;
+  }
+  emPage.innerHTML = '';
+  if (empireTab === 0) renderCity();
+  else renderTierMap(empireTab);
+  if (empireTab === e.tier) renderAdvance();
+}
+function emEl(tag, cls, html) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (html !== undefined) el.innerHTML = html;
+  return el;
+}
+function emButton(label, disabled, onClick) {
+  const b = emEl('button', 'btn upbuy', label);
+  b.disabled = disabled;
+  b.addEventListener('click', onClick);
+  return b;
+}
+function renderCity() {
+  const e = emp();
+  const grid = emEl('div', 'citygrid');
+  // 3x3: the hospital in the middle, building plots around it
+  const order = [0, 1, 2, 3, -1, 4, 5, 6, 7];
+  for (const i of order) {
+    if (i < 0) {
+      grid.append(emEl('div', 'plot hq', `🏥<small>โรงพยาบาล ×${state.branches.length}</small>`));
+      continue;
+    }
+    const p = e.plots[i];
+    const b = CITY_BUILDINGS.find((x) => x.id === p?.type);
+    const cell = emEl('button', `plot${p ? ' built' : ''}${empireSel === i ? ' sel' : ''}`,
+      p ? `${b.icon}<small>${b.name}</small><span class="lv">${'★'.repeat(p.lvl)}${'☆'.repeat(PLACE_MAX - p.lvl)}</span>` : '＋<small>ที่ว่าง</small>');
+    cell.addEventListener('click', () => {
+      empireSel = i;
+      renderEmpire();
+    });
+    grid.append(cell);
+  }
+  emPage.append(grid);
+  if (empireSel === null) {
+    emPage.append(emEl('p', 'emhint', 'แตะที่ว่างเพื่อสร้าง แตะสิ่งก่อสร้างเพื่ออัปเลเวล · ราคาเพิ่มขึ้นทุกครั้งที่สร้าง'));
+    return;
+  }
+  const p = e.plots[empireSel];
+  const cost = plotCost();
+  if (!p) {
+    for (const b of CITY_BUILDINGS) {
+      const row = emEl('div', 'uprow', `<div class="upico">${b.icon}</div><div class="upinfo"><b>${b.name}</b><br><small>${b.desc(1)}</small></div>`);
+      row.append(emButton(`💵${cost.toLocaleString()}`, state.money < cost, () => buildPlot(empireSel, b.id)));
+      emPage.append(row);
+    }
+  } else {
+    const b = CITY_BUILDINGS.find((x) => x.id === p.type);
+    const maxed = p.lvl >= PLACE_MAX;
+    const row = emEl('div', 'uprow', `<div class="upico">${b.icon}</div><div class="upinfo"><b>${b.name}</b> <span class="lv">Lv.${p.lvl}/${PLACE_MAX}</span><br><small>${b.desc(p.lvl)}${maxed ? '' : ` → Lv.${p.lvl + 1}: ${b.desc(p.lvl + 1)}`}</small></div>`);
+    row.append(emButton(maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`, maxed || state.money < cost, () => buildPlot(empireSel, p.type)));
+    emPage.append(row);
+  }
+}
+function renderTierMap(t) {
+  const nodes = EMPIRE_NODES[t];
+  const levels = nodeLevels(t);
+  const map = emEl('div', `emmap t${t}`);
+  // Roads from home to every other place
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  for (let i = 1; i < nodes.length; i++) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    Object.entries({ x1: nodes[0].x, y1: nodes[0].y, x2: nodes[i].x, y2: nodes[i].y }).forEach(([k, val]) => line.setAttribute(k, val));
+    line.setAttribute('class', levels[i - 1] ? 'road on' : 'road');
+    svg.append(line);
+  }
+  map.append(svg);
+  nodes.forEach((n, i) => {
+    const lvl = i === 0 ? PLACE_MAX : levels[i - 1];
+    const el = emEl('button', `node${i === 0 ? ' home' : ''}${lvl ? ' owned' : ''}${empireSel === i ? ' sel' : ''}`,
+      `<span class="ni">${n.icon}</span><span class="nn">${n.name}</span><span class="lv">${i === 0 ? '🏠 ของเรา' : '★'.repeat(lvl) + '☆'.repeat(PLACE_MAX - lvl)}</span>`);
+    el.style.left = `${n.x}%`;
+    el.style.top = `${n.y}%`;
+    el.addEventListener('click', () => {
+      empireSel = i === 0 ? null : i;
+      renderEmpire();
+    });
+    map.append(el);
+  });
+  emPage.append(map);
+  if (!empireSel) {
+    emPage.append(emEl('p', 'emhint', `แตะที่บนแผนที่เพื่อพัฒนา แต่ละที่จ่ายภาษีให้ทุกวินาที`));
+    return;
+  }
+  const n = nodes[empireSel];
+  const l = levels[empireSel - 1];
+  const maxed = l >= PLACE_MAX;
+  const cost = maxed ? 0 : nodeCost(t, empireSel, l);
+  const row = emEl('div', 'uprow', `<div class="upico">${n.icon}</div><div class="upinfo"><b>${n.name}</b> <span class="lv">Lv.${l}/${PLACE_MAX}</span><br><small>ภาษี +${nodeRate(t, empireSel, l).toLocaleString()}/วินาที${maxed ? '' : ` → +${nodeRate(t, empireSel, l + 1).toLocaleString()}/วินาที`}</small></div>`);
+  row.append(emButton(maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`, maxed || state.money < cost, () => upgradeNode(t, empireSel)));
+  emPage.append(row);
+}
+function renderAdvance() {
+  const adv = advanceCheck();
+  const card = emEl('div', 'branchcard');
+  if (!adv) {
+    card.innerHTML = '<b>🏆 คุณคือหมอแห่งโลกแล้ว!</b><br><small>อาณาจักรครบทุกระดับ อัปเลเวลทุกที่ให้ครบ ★★★ เพื่อเก็บภาษีให้มากที่สุด</small>';
+  } else {
+    card.innerHTML = `<b>${adv.next.icon} ยกระดับเป็น${adv.next.name}</b><br><small>ตำแหน่ง: ${adv.next.title} · รายได้ทุกสาขา +10% · เปิดแผนที่ใหม่</small><br>`
+      + adv.reqs.map((r) => `<small>${r.ok ? '✅' : '⬜'} ${r.text}</small>`).join('<br>');
+    card.append(document.createElement('br'), emButton(`ยกระดับ · 💵${adv.next.cost.toLocaleString()}`, !adv.ok, advanceTier));
+  }
+  emPage.append(card);
+}
+
 // ---------- player actions ----------
 let actTimer = 0;
 function playerActions(dt) {
@@ -4665,8 +4965,9 @@ function offerIdleEarnings(seconds) {
   if (seconds < 60) return;
   const here = idleIncome(seconds);
   const others = Math.floor(otherBranchesRate() * here.seconds);
-  const amount = here.amount + others;
-  const perHour = here.perHour + Math.round(otherBranchesRate() * 3600);
+  const taxes = Math.floor(empireRate() * OFFLINE_RATE * here.seconds);
+  const amount = here.amount + others + taxes;
+  const perHour = here.perHour + Math.round((otherBranchesRate() + empireRate() * OFFLINE_RATE) * 3600);
   const counted = here.seconds;
   const box = document.getElementById('away');
   const text = document.getElementById('awaytext');
@@ -4674,6 +4975,7 @@ function offerIdleEarnings(seconds) {
     pendingIdle = amount;
     text.innerHTML = `คุณไม่อยู่ ${formatDuration(seconds)}<br>พนักงานช่วยกันดูแลคนไข้ได้<br><b>💵 ${amount.toLocaleString()}</b>`
       + (others > 0 ? `<br><small>(รวมสาขาอื่น 💵${others.toLocaleString()})</small>` : '')
+      + (taxes > 0 ? `<br><small>(รวมภาษีอาณาจักร 💵${taxes.toLocaleString()})</small>` : '')
       + (seconds > counted ? '<br><small>(นับสูงสุด 6 ชั่วโมง)</small>' : '')
       + `<br><small>รายได้ตอนไม่อยู่ประมาณ ${perHour.toLocaleString()}/ชม.</small>`;
     document.getElementById('awayok').textContent = 'เก็บเงิน';
@@ -4763,7 +5065,7 @@ function updateBag() {
 function updateGoal() {
   const u = UNLOCKS[state.step];
   goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label}${u.floor === 2 ? ' (ดาดฟ้า)' : u.floor ? ' (ชั้น 2)' : ''} · 💵${u.price}`
-    : canOpenBranch() ? '🏆 ครบทุกแผนก! กด 🗺️ เพื่อเปิดสาขาใหม่' : '🏆 สาขานี้ครบทุกแผนกแล้ว!';
+    : canOpenBranch() ? '🏆 ครบทุกแผนก! กด 🌏 เพื่อเปิดสาขาใหม่' : '🏆 สาขานี้ครบทุกแผนกแล้ว!';
 }
 
 // ---------- rating & upgrades UI ----------
@@ -4815,7 +5117,7 @@ function cheapestUpgrade() {
 function updateUpgradeDot() {
   const c = cheapestUpgrade();
   upBtn.classList.toggle('ready', Boolean(c && state.money >= upCost(c)));
-  branchBtn.classList.toggle('ready', canOpenBranch() && state.money >= newBranchCost());
+  branchBtn.classList.toggle('ready', (canOpenBranch() && state.money >= newBranchCost()) || (DOCK.branchbtn() && state.money >= cheapestEmpireCost()));
 }
 
 // ---------- daily missions ----------
@@ -5047,7 +5349,7 @@ const DOCK = {
   autobtn: () => tutorialDone(),
   upbtn: () => tutorialDone(),
   missionbtn: () => tutorialDone(),
-  branchbtn: () => canOpenBranch() || state.branches.length > 1,
+  branchbtn: () => tutorialDone() && (state.step >= 10 || state.branches.length > 1),
   stylebtn: () => tutorialDone() && state.step >= 2,
 };
 function updateDock(initial = false) {
@@ -5159,7 +5461,7 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // ---------- save / load ----------
 // state.branch is the open branch's index; state.branches holds a snapshot of every
 // branch (null = opened but never played). Money, earnings and missions are shared.
-const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0, style: defaultStyle() };
+const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0, style: defaultStyle(), empire: defaultEmpire() };
 
 let awayOnLoad = 0;
 let localSavedAt = 0;
@@ -5182,7 +5484,7 @@ function branchSnapshot() {
 function saveData() {
   state.branches[state.branch] = branchSnapshot();
   return {
-    v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(), tutorial: state.tutorial, style: state.style,
+    v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(), tutorial: state.tutorial, style: state.style, empire: state.empire,
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
     branch: state.branches.length - 1, step: state.step,
@@ -5246,6 +5548,8 @@ function load() {
   state.daily = data.daily || null;
   state.earned = data.earned || 0;
   state.style = { ...defaultStyle(), ...(data.style || {}) };
+  state.empire = { ...defaultEmpire(), ...(data.empire || {}) };
+  while (state.empire.plots.length < CITY_PLOTS) state.empire.plots.push(null);
   // Players from before the tutorial existed (or anyone who has earned money) skip it
   state.tutorial = data.tutorial ?? (state.earned > 0 || state.branches.some((b) => b?.step) ? TUTORIAL.length : 0);
   state.branches = Array.isArray(data.branches) && data.branches.length ? data.branches : [null];
@@ -5309,6 +5613,7 @@ function frame(now) {
     updatePatients(dt);
     updateSpills(dt);
     tickOtherBranches(dt);
+    tickEmpire(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
     updateRoof(dt);
@@ -5648,7 +5953,9 @@ applyBranchLook();
 ensureDaily();
 setInterval(ensureDaily, 60000);
 branchBtn.addEventListener('click', () => {
-  renderBranches();
+  empireTab = canOpenBranch() && state.money >= newBranchCost() ? 'branches' : (empireTab === 'branches' ? emp().tier : empireTab);
+  empireSel = null;
+  renderEmpire();
   branchPanel.style.display = 'flex';
 });
 document.getElementById('bclose').addEventListener('click', () => {
@@ -5675,4 +5982,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
