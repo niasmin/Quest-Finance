@@ -119,10 +119,10 @@ const UPGRADES = [
 const upLevel = (id) => state.upgrades[id] || 0;
 const upCost = (u) => Math.round((u.base * u.growth ** upLevel(u.id)) / 10) * 10;
 const speedMult = () => 1 + 0.08 * upLevel('speed');
-const staffMult = () => (1 + 0.1 * upLevel('staff')) * empireStaff();
-const machineMult = () => (1 + 0.1 * upLevel('machine')) * empireMachine();
+const staffMult = () => (1 + 0.1 * upLevel('staff')) * empireStaff() * prestigeSpeed();
+const machineMult = () => (1 + 0.1 * upLevel('machine')) * empireMachine() * prestigeSpeed() * (researched('machine2') ? 1.15 : 1);
 const branchMult = () => 1 + 0.5 * (state.branch || 0);
-const priceMult = () => (1 + 0.1 * upLevel('price')) * branchMult() * empirePrice();
+const priceMult = () => (1 + 0.1 * upLevel('price')) * branchMult() * empirePrice() * prestigeIncome();
 // Reputation (0-5 stars) and advertising both bring patients in faster
 const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating) * (1 + 0.02 * comfort()) * (OUT.parking ? 1.15 : 1) * empireArrival();
 
@@ -702,7 +702,23 @@ let trashLid = null;
 // so walkers never cut through partition walls
 const inWing = (p) => p.x > WING.x0 - 0.1 && p.z > WING.z0 && p.z < WING.z1;
 const wingRow = (z) => (z < WING_BOUNDS[0] ? WING_ROWS.eye : z < WING_BOUNDS[1] ? WING_ROWS.physio : WING_ROWS.lab);
+function districtRoute(from, to) {
+  if (flatDist(from, to) < 2.6) return to;
+  const rf = roadOf(from.x);
+  const rt = roadOf(to.x);
+  if (Math.abs(from.x - rf) > 0.6) return v(rf, from.z);
+  if (rf !== rt) return Math.abs(from.z - 14.6) > 0.5 ? v(rf, 14.6) : v(rt, 14.6);
+  if (Math.abs(from.z - to.z) > 0.4) return v(rt, to.z);
+  return to;
+}
 function route(from, to) {
+  if (inDistrict(to)) {
+    if (inDistrict(from)) return districtRoute(from, to);
+    // Out through the front gate, along the front sidewalk, then up the district road
+    if (from.z <= FLOOR.z1 && from.x > FLOOR.x0) return route(from, GATE_OUT);
+    const entry = v(roadOf(to.x), 14.6);
+    return flatDist(from, entry) > 0.5 ? entry : to;
+  }
   if (inDistrict(from) && !inDistrict(to)) {
     const rx = roadOf(from.x);
     return Math.abs(from.x - rx) > 0.6 ? v(rx, from.z) : v(rx, 14.6);
@@ -1253,7 +1269,7 @@ function updateLine(line, dt) {
   const staffed = line.cashierNurse || (player.floor === 0 && flatDist(player.group.position, line.cashier) < ZONE_R);
   line.serveTimer -= dt;
   if (front && front.arrived && staffed && line.shelf.count > 0 && front.got + front.pending < front.need && line.serveTimer <= 0) {
-    line.serveTimer = 0.22 / staffMult();
+    line.serveTimer = 0.22 / staffMult() / cardSpeed(line.id);
     const item = line.shelf.take();
     front.pending++;
     fly(item, item.position.clone(), () => front.person.group.position.clone().setY(1.1), (m) => {
@@ -1531,7 +1547,7 @@ function updateRoom(room, dt) {
   const staffed = room.staffHired || (player.floor === 0 && flatDist(player.group.position, room.operator) < ZONE_R);
   const working = Boolean(front && front.arrived && staffed);
   if (working) {
-    room.scan += dt * (room.staffHired ? staffMult() : 1);
+    room.scan += dt * (room.staffHired ? staffMult() : 1) * cardSpeed(room.id);
     if (room.scan >= room.time) {
       room.scan = 0;
       const pay = front.payout(room.price);
@@ -1593,7 +1609,7 @@ class Patient {
   }
   // Decorations make waiting comfier
   patienceMax() {
-    return this.t.patience * (1 + 0.04 * comfort());
+    return this.t.patience * (1 + 0.04 * comfort()) * (researched('patience') ? 1.15 : 1);
   }
   patienceLeft() {
     return Math.max(0, 1 - this.waited / this.patienceMax());
@@ -1611,7 +1627,7 @@ class Patient {
   // Final bill: patient type bonus, price upgrade and a tip for quick service
   payout(base) {
     this.tipped = this.waited < this.patienceMax() * 0.4;
-    const amount = Math.round(base * this.t.pay * priceMult() * eventPayMult() * (this.tipped ? 1.2 : 1));
+    const amount = Math.round(base * this.t.pay * priceMult() * eventPayMult() * (this.tipped ? (researched('tips') ? 1.44 : 1.2) : 1) * (1 + cardBonus(this.kind) / 200));
     if (ev.rush) {
       ev.rush.served++;
       ev.rush.earned += amount;
@@ -1694,7 +1710,10 @@ class Patient {
     }
     if (this.leaving) {
       if (arrived && ++this.exitStep > 2) {
-        if (!this.angry) maybeParkVisitor();
+        if (!this.angry) {
+          maybeParkVisitor();
+          sellKrathong();
+        }
         this.remove();
         return false;
       }
@@ -1768,7 +1787,7 @@ class Patient {
 }
 
 function changeRating(delta) {
-  state.rating = Math.max(0, Math.min(5, state.rating + delta));
+  state.rating = Math.max(researched('rating') ? 3.5 : 0, Math.min(5, state.rating + delta));
   updateRating();
 }
 
@@ -2092,7 +2111,7 @@ function updateCollectors(dt) {
     }
     const target = c.pile ? c.pile.pos : COLLECTOR_HOME;
     const way = route(pos, target);
-    const arrived = walkTo(c.person, way, 4.2 * staffMult(), dt);
+    const arrived = walkTo(c.person, way, 4.2 * staffMult() * (researched('collector') ? 1.3 : 1), dt);
     animatePerson(c.person, !arrived, dt);
     if (!c.pile || flatDist(pos, c.pile.pos) > 1.2) continue;
     c.timer -= dt;
@@ -3002,7 +3021,7 @@ function restoreFloor2(s) {
 function updateFloor2(dt) {
   if (F2.kitchen) updateKitchen(dt);
   if (F2.ward) updateWard(dt);
-  updateBasket(dt);
+  updateBasket(dt * (researched('basket') ? 2 : 1));
 }
 
 // ---------- events: rush hour, giant germ boss, special cases ----------
@@ -3059,7 +3078,7 @@ function toast(html, ms = 3200) {
 const rushReady = () => state.step >= 3 && !ev.rush && Date.now() >= (state.style.rushAt || 0);
 function startRush() {
   if (!rushReady()) return;
-  ev.rush = { t: RUSH_TIME, served: 0, earned: 0, target: Math.round(10 + state.step * 1.6) };
+  ev.rush = { t: RUSH_TIME + (researched('rush') ? 30 : 0), served: 0, earned: 0, target: Math.round(10 + state.step * 1.6) };
   spawnTimer = 0.2;
   sfxUnlock();
   toast('🚨 <b>ชั่วโมงเร่งด่วน!</b><br>คนไข้แห่มาเพียบ · รายได้ ×1.5');
@@ -3189,7 +3208,7 @@ function shootDart(b) {
 }
 
 function defeatBoss(b) {
-  const reward = Math.round(((80 + 25 * state.step) * branchMult()) / 10) * 10;
+  const reward = Math.round(((80 + 25 * state.step) * branchMult() * (researched('boss') ? 2 : 1)) / 10) * 10;
   burst(b.mesh.position);
   removeBoss();
   addMoney(reward);
@@ -3258,7 +3277,7 @@ function spawnSpecial() {
   p.stage = 0;
   joinQueue(p);
   patients.push(p);
-  const bonus = Math.round(((60 + 20 * state.step) * len * branchMult()) / 10) * 10;
+  const bonus = Math.round(((60 + 20 * state.step) * len * branchMult() * (researched('special') ? 1.5 : 1)) / 10) * 10;
   ev.special = { p, chain, t: 45 + 35 * len, bonus };
   tone(660, 0.15, 'triangle', 0.06);
   tip('special');
@@ -3356,6 +3375,7 @@ const OUTFITS = [
   { id: 'fancy', icon: '🎩', name: 'หมอสุดเท่', price: 3000, coat: 0x2b2d42, shirt: 0xffffff, pants: 0x2b2d42, hat: 'top' },
   { id: 'hero', icon: '🦸', name: 'ชุดฮีโร่นักล่าเชื้อโรค', rare: true, perk: 'ยิงเชื้อโรคแรง ×2', coat: 0xe5484d, shirt: 0xffd166, pants: 0x1d3a8a, hat: 'band', cape: 0xe5484d },
   { id: 'crown', icon: '👑', name: 'หมอมงกุฎทองคำ', rare: true, perk: 'รายได้ +10%', coat: 0xfff3c4, shirt: 0x9b5de5, pants: 0x6c4ab6, hat: 'crown' },
+  { id: 'thai', icon: '🏮', name: 'ชุดไทยลอยกระทง', rare: true, event: true, perk: 'ชุดพิเศษเทศกาล', coat: 0xd4a373, shirt: 0xffd166, pants: 0x8a1c2b, hat: 'crown' },
 ];
 const RARE_ORDER = ['hero', 'statue', 'rainbow', 'crown'];
 const defaultStyle = () => ({ decor: [], themes: ['default'], theme: 'default', outfits: ['classic'], outfit: 'classic', rushAt: 0, bossKills: 0 });
@@ -3706,7 +3726,7 @@ function renderStyle() {
       styleRow({
         icon: o.icon, name: o.name, owned,
         sub: o.perk ? `💎 ${o.perk}` : 'ชุดสวย ๆ ไว้อวดเพื่อน',
-        label: using ? 'ใส่อยู่' : owned ? 'ใส่' : o.rare ? '🦠 ได้จากบอส' : `💵${o.price.toLocaleString()}`,
+        label: using ? 'ใส่อยู่' : owned ? 'ใส่' : o.event ? '🏮 อีเวนต์' : o.rare ? '🦠 ได้จากบอส' : `💵${o.price.toLocaleString()}`,
         disabled: using || (!owned && (o.rare || state.money < o.price)),
         onClick: () => {
           if (!owned) buyStyle(o);
@@ -3749,7 +3769,7 @@ const OUT = {
   cars: [], walkers: [], visitors: [], kioskQueue: [], carTimer: 3, walkTimer: 1, kioskTimer: 0,
   parkingCash: null, kioskCash: null, parkCash: null,
 };
-const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash].filter(Boolean);
+const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash, KT.cash].filter(Boolean);
 const kioskSlot = (i) => v(KIOSK.x - i * 0.95, 19.75);
 
 function stripeLine(x, z, w, d) {
@@ -4377,7 +4397,7 @@ function updateIcu(dt) {
   for (const bed of F3.beds) {
     bed.beat += dt;
     if (bed.patient && caring) {
-      bed.care += dt * staffMult();
+      bed.care += dt * staffMult() * (researched('icu') ? 1.25 : 1);
       if (bed.care >= ICU_TIME) {
         F3.group.remove(bed.patient.group);
         bed.patient = null;
@@ -4523,7 +4543,7 @@ function empireRate() {
   if (!e) return 0;
   let rate = e.plots.reduce((a, p) => a + (p?.type === 'market' ? marketRate(p.lvl) : 0), 0);
   for (let t = 1; t <= e.tier; t++) nodeLevels(t).forEach((l, i) => { rate += nodeRate(t, i + 1, l); });
-  return rate;
+  return rate * prestigeTax() * (researched('tax') ? 1.2 : 1);
 }
 // Is the current tier's map filled in (everything built at least once)?
 function tierFilled(t) {
@@ -4622,7 +4642,7 @@ function renderEmpire() {
   const title = EMPIRE_TIERS[e.tier];
   document.getElementById('emtitle').innerHTML = `${title.icon} อาณาจักรของคุณ<br><small>👑 ${title.title} · ภาษี +${empireRate().toLocaleString()}/วินาที</small>`;
   emTabs.innerHTML = '';
-  const tabs = [['branches', '🏥', 'สาขา'], ...EMPIRE_TIERS.map((t, i) => [i, i > e.tier ? '🔒' : t.icon, t.name])];
+  const tabs = [['branches', '🏥', 'สาขา'], ...EMPIRE_TIERS.map((t, i) => [i, i > e.tier ? '🔒' : t.icon, t.name]), ['prestige', '⭐', 'เกิดใหม่']];
   for (const [id, icon, name] of tabs) {
     const b = document.createElement('button');
     b.innerHTML = `${icon}<br><small>${name}</small>`;
@@ -4643,6 +4663,7 @@ function renderEmpire() {
     return;
   }
   emPage.innerHTML = '';
+  if (empireTab === 'prestige') return renderPrestige();
   if (empireTab === 0) renderCity();
   else renderTierMap(empireTab);
   if (empireTab === e.tier) renderAdvance();
@@ -5086,7 +5107,7 @@ function updateDistrict(dt) {
     return;
   }
   district.stand += dt;
-  if (district.stand > 0.6 && district.opened !== here && branchPanel.style.display !== 'flex') {
+  if (district.stand > 0.6 && district.opened !== here && branchPanel.style.display !== 'flex' && !epiTargets().includes(here)) {
     district.opened = here;
     empireTab = 0;
     empireSel = here;
@@ -5604,7 +5625,7 @@ function updateUpperFloor(f, dt) {
     const front = r.queue[0];
     const staffed = r.staff || (player.floor === f && flatDist(player.group.position, r.op) < ZONE_R);
     if (front?.arrived && staffed) {
-      r.scan += dt * (r.staff ? staffMult() : 1);
+      r.scan += dt * (r.staff ? staffMult() : 1) * cardSpeed(r.id);
       if (r.scan >= r.time) {
         r.scan = 0;
         upperPay(Math.round(r.price * priceMult() * eventPayMult()), r);
@@ -5660,6 +5681,696 @@ function upperPerSecond() {
     for (const r of rooms) if (r.staff) rate += Math.min(each, staffMult() / r.time) * r.price * priceMult();
   }
   return rate;
+}
+
+// ---------- prestige: start a new chain for permanent ⭐ stars ----------
+const defaultPrestige = () => ({ stars: 0, total: 0, runs: 0, base: 0, perks: {} });
+const PERKS = [
+  { id: 'income', icon: '💵', name: 'รายได้ทุกสาขา', desc: (l) => `+${25 * l}%`, max: 20, cost: 1 },
+  { id: 'tax', icon: '🏛️', name: 'ภาษีอาณาจักร', desc: (l) => `+${25 * l}%`, max: 10, cost: 1 },
+  { id: 'speed', icon: '⚡', name: 'พนักงานและเครื่องผลิต', desc: (l) => `เร็ว +${10 * l}%`, max: 10, cost: 2 },
+  { id: 'startcash', icon: '💼', name: 'เงินตั้งต้นรอบใหม่', desc: (l) => `💵${(5000 * l * l).toLocaleString()}`, max: 10, cost: 1 },
+  { id: 'headstart', icon: '🚀', name: 'เริ่มรอบใหม่ที่ขั้น', desc: (l) => `ขั้น ${3 * l}`, max: 4, cost: 3 },
+];
+const prs = () => state.prestige || defaultPrestige();
+const perk = (id) => prs().perks[id] || 0;
+const perkCost = (p) => p.cost * (perk(p.id) + 1);
+const prestigeIncome = () => 1 + 0.25 * perk('income');
+const prestigeTax = () => 1 + 0.25 * perk('tax');
+const prestigeSpeed = () => 1 + 0.1 * perk('speed');
+const runEarned = () => Math.max(0, (state.earned || 0) - prs().base);
+const starsToGain = () => Math.floor(5 * Math.sqrt(runEarned() / 1e7));
+function buyPerk(p) {
+  const c = perkCost(p);
+  if (perk(p.id) >= p.max || prs().stars < c) return;
+  state.prestige.stars -= c;
+  state.prestige.perks[p.id] = perk(p.id) + 1;
+  sfxUnlock();
+  save();
+  renderEmpire();
+}
+function doPrestige() {
+  const gain = starsToGain();
+  if (gain < 1) return;
+  if (!confirm(`เกิดใหม่ เริ่มเครือโรงพยาบาลใหม่ทั้งหมด แลกกับ ⭐ ${gain} ดาว?\n\nเงิน สาขา อาณาจักร และงานวิจัยจะเริ่มใหม่\nเก็บไว้: ดาว โบนัสถาวร ของตกแต่ง ชุดหมอ การ์ดหมอ ความสำเร็จ และอันดับรายได้สะสม`)) return;
+  const p = prs();
+  const headstart = Math.min(3 * perk('headstart'), CORE_STEPS);
+  const data = saveData();
+  replaceSave({
+    v: 2, money: 5000 * perk('startcash') ** 2, earned: state.earned, daily: state.daily, tutorial: state.tutorial,
+    current: 0, branches: [{ step: headstart, rating: 3.5 }], branch: 0, step: headstart,
+    style: state.style, challenge: state.challenge, room: state.room, tips: state.tips, week: state.week,
+    stats: state.stats, achievements: state.achievements, cards: state.cards, cardPulls: state.cardPulls, quiz: state.quiz,
+    prestige: { ...p, stars: p.stars + gain, total: p.total + gain, runs: p.runs + 1, base: state.earned },
+    empire: defaultEmpire(), research: { done: [], cur: null }, savedAt: data.savedAt,
+  });
+}
+function renderPrestige() {
+  const p = prs();
+  const gain = starsToGain();
+  const card = emEl('div', 'branchcard', `<b>⭐ เกิดใหม่ (Prestige)</b><br><small>ดาวที่มี: <b>${p.stars}</b> · ได้มาทั้งหมด ${p.total} · เกิดใหม่แล้ว ${p.runs} ครั้ง<br>`
+    + `รายได้รอบนี้ 💵${Math.floor(runEarned()).toLocaleString()} → ได้ <b>⭐ ${gain}</b> ดาวถ้าเกิดใหม่ตอนนี้${gain < 1 ? '<br>(หาเงินรอบนี้ให้ถึง 400,000 ก่อน)' : ''}</small><br>`);
+  card.append(emButton(`🔄 เกิดใหม่ รับ ⭐ ${gain}`, gain < 1, doPrestige));
+  emPage.append(card);
+  emPage.append(emEl('p', 'emhint', 'ใช้ดาวซื้อโบนัสถาวร (ติดตัวทุกรอบ)'));
+  for (const pk of PERKS) {
+    const l = perk(pk.id);
+    const maxed = l >= pk.max;
+    const row = emEl('div', 'uprow', `<div class="upico">${pk.icon}</div><div class="upinfo"><b>${pk.name}</b> <span class="lv">Lv.${l}/${pk.max}</span><br><small>${pk.desc(l)}${maxed ? '' : ` → ${pk.desc(l + 1)}`}</small></div>`);
+    row.append(emButton(maxed ? 'สูงสุด' : `⭐ ${perkCost(pk)}`, maxed || p.stars < perkCost(pk), () => buyPerk(pk)));
+    emPage.append(row);
+  }
+}
+
+// ---------- doctor cards: collect named doctors who make a department better ----------
+const CARD_NAMES = ['หมอใจดี', 'หมอยิ้มหวาน', 'หมอมือนิ่ม', 'หมอสายฟ้า', 'หมอขยัน', 'หมอแม่นยำ', 'หมอใจเย็น', 'หมอนักสู้', 'หมอตาคม', 'หมอมือทอง', 'หมอสดใส', 'หมอเทวดา', 'หมอหัวใจเพชร', 'หมอดาวรุ่ง', 'หมอมหาเทพ'];
+const CARD_DEPTS = ['pill', 'vaccine', 'xray', 'dental', 'surgery', 'eye', 'physio', 'lab', 'psych', 'massage', 'nutrition', 'prenatal', 'delivery', 'nursery'];
+const deptIcon = (d) => PRODUCTS[d]?.icon || ROOMS[d]?.icon || UPPER_ROOMS[d]?.icon || '🏥';
+const deptName = (d) => PRODUCTS[d]?.name || DEPTS.find((x) => x.id === d)?.name || WING_INFO[d]?.[0] || UPPER_ROOMS[d]?.name || d;
+const CARD_ODDS = [[1, 50], [2, 30], [3, 13], [4, 5], [5, 2]];
+const cardCost = () => Math.round((3000 * 1.3 ** Math.min(state.cardPulls || 0, 40)) / 10) * 10;
+// Best card for a department: % faster service and a little more pay
+function cardBonus(dept) {
+  let best = 0;
+  for (const c of state.cards || []) if (c.dept === dept) best = Math.max(best, c.stars * 6 + (c.lvl - 1) * 3);
+  return best;
+}
+const cardSpeed = (dept) => 1 + cardBonus(dept) / 100;
+function pullCard() {
+  const cost = cardCost();
+  if (state.money < cost) return;
+  state.money -= cost;
+  updateMoney();
+  state.cardPulls = (state.cardPulls || 0) + 1;
+  let r = Math.random() * 100;
+  let stars = 1;
+  for (const [s, w] of CARD_ODDS) {
+    r -= w;
+    if (r <= 0) {
+      stars = s;
+      break;
+    }
+  }
+  const dept = pick(CARD_DEPTS);
+  state.cards = state.cards || [];
+  const same = state.cards.find((c) => c.dept === dept && c.stars === stars);
+  let text;
+  if (same && same.lvl < 5) {
+    same.lvl++;
+    text = `${same.name} ${'⭐'.repeat(stars)} เลเวลอัป → Lv.${same.lvl}`;
+  } else {
+    const card = { name: pick(CARD_NAMES), dept, stars, lvl: 1 };
+    state.cards.push(card);
+    text = `${card.name} ${'⭐'.repeat(stars)}`;
+  }
+  stats().cards = (stats().cards || 0) + 1;
+  if (stars >= 4) burst(player.group.position);
+  (stars >= 4 ? sfxUnlock : sfxCoin)();
+  toast(`🃏 <b>${text}</b><br>${deptIcon(dept)} ${deptName(dept)} เร็วขึ้น +${cardBonus(dept)}%`, 3500);
+  save();
+  renderUpgrades();
+}
+function renderCards() {
+  const cost = cardCost();
+  const top = emEl('div', 'branchcard', `<b>🃏 สุ่มการ์ดหมอ</b><br><small>หมอแต่ละใบทำให้แผนกหนึ่งทำงานเร็วขึ้น ⭐ ยิ่งมากยิ่งเก่ง ได้ซ้ำจะเลเวลอัป<br>โอกาส: ⭐50% ⭐⭐30% ⭐⭐⭐13% ⭐⭐⭐⭐5% ⭐⭐⭐⭐⭐2%</small><br>`);
+  top.append(emButton(`สุ่ม 1 ใบ · 💵${cost.toLocaleString()}`, state.money < cost, pullCard));
+  upList.append(top);
+  const cards = [...(state.cards || [])].sort((a, b) => b.stars - a.stars || b.lvl - a.lvl);
+  if (!cards.length) upList.append(emEl('p', 'emhint', 'ยังไม่มีการ์ด ลองสุ่มดูสิ!'));
+  for (const c of cards) {
+    upList.append(emEl('div', `uprow card s${c.stars}`, `<div class="upico">${deptIcon(c.dept)}</div><div class="upinfo"><b>${c.name}</b> <span class="lv">Lv.${c.lvl}</span><br><small>${'⭐'.repeat(c.stars)} · ${deptName(c.dept)} เร็วขึ้น +${c.stars * 6 + (c.lvl - 1) * 3}%</small></div>`));
+  }
+}
+
+// ---------- research: one project at a time, finishing in real time ----------
+const RESEARCH = [
+  { id: 'machine2', icon: '⚙️', name: 'เครื่องผลิตรุ่นใหม่', desc: 'เครื่องผลิตเร็ว +15%' },
+  { id: 'patience', icon: '😌', name: 'ห้องรอแอร์เย็น', desc: 'คนไข้รอได้นานขึ้น +15%' },
+  { id: 'tips', icon: '💖', name: 'บริการประทับใจ', desc: 'ทิปจากคนไข้ +20% (จาก ×1.2 เป็น ×1.44)' },
+  { id: 'collector', icon: '💰', name: 'รถเข็นเงิน', desc: 'พนักงานเก็บเงินเดินเร็ว +30%' },
+  { id: 'rush', icon: '🚨', name: 'แผนรับมือเร่งด่วน', desc: 'ชั่วโมงเร่งด่วนนานขึ้น 30 วินาที' },
+  { id: 'boss', icon: '🦠', name: 'วัคซีนสูตรใหม่', desc: 'เงินรางวัลจากบอส ×2' },
+  { id: 'basket', icon: '🧺', name: 'รอกไฟฟ้า', desc: 'ตะกร้าเงินขึ้นลงเร็ว ×2' },
+  { id: 'special', icon: '⭐', name: 'ทีมเคสพิเศษ', desc: 'ทิปเคสพิเศษ ×1.5' },
+  { id: 'icu', icon: '🫁', name: 'เครื่องมือ ICU ทันสมัย', desc: 'ดูแลไอซียูเร็วขึ้น +25%' },
+  { id: 'rating', icon: '🏅', name: 'มาตรฐานโรงพยาบาล', desc: 'คะแนนดาวไม่ต่ำกว่า 3.5' },
+  { id: 'tax', icon: '🏛️', name: 'ระบบภาษีออนไลน์', desc: 'ภาษีอาณาจักร +20%' },
+  { id: 'offline', icon: '🌙', name: 'เวรกลางคืน', desc: 'รายได้ตอนไม่อยู่ 35% → 50%' },
+];
+RESEARCH.forEach((r, i) => Object.assign(r, { cost: Math.round((20000 * 1.6 ** i) / 100) * 100, time: 90 + i * 45 }));
+const researched = (id) => Boolean(state.research?.done?.includes(id));
+const offlineRate = () => (researched('offline') ? 0.5 : OFFLINE_RATE);
+function startResearch(r) {
+  const R = state.research;
+  if (R.cur || researched(r.id) || state.money < r.cost) return;
+  state.money -= r.cost;
+  updateMoney();
+  R.cur = { id: r.id, until: Date.now() + r.time * 1000 };
+  sfxUnlock();
+  save();
+  renderUpgrades();
+}
+function updateResearch() {
+  const R = state.research;
+  if (!R?.cur || Date.now() < R.cur.until) return;
+  const r = RESEARCH.find((x) => x.id === R.cur.id);
+  R.done.push(R.cur.id);
+  R.cur = null;
+  stats().research = (stats().research || 0) + 1;
+  sfxUnlock();
+  toast(`🧪 <b>วิจัยสำเร็จ!</b><br>${r.icon} ${r.name}: ${r.desc}`, 4500);
+  save();
+  if (upPanel.style.display === 'flex' && upTab === 'research') renderUpgrades();
+}
+function renderResearch() {
+  const R = state.research;
+  if (R.cur) {
+    const r = RESEARCH.find((x) => x.id === R.cur.id);
+    const left = Math.max(0, (R.cur.until - Date.now()) / 1000);
+    const pct = 100 * (1 - left / r.time);
+    upList.append(emEl('div', 'branchcard', `<b>🧪 กำลังวิจัย: ${r.icon} ${r.name}</b><br><div class="mbar"><div style="width:${pct}%"></div></div><small>เหลือ ${formatDuration(left) || `${Math.ceil(left)} วินาที`} (ทำต่อแม้ปิดเกม)</small>`));
+  } else {
+    upList.append(emEl('p', 'emhint', 'เลือกวิจัยได้ทีละอย่าง งานวิจัยเดินต่อแม้ปิดเกม (เริ่มใหม่เมื่อเกิดใหม่)'));
+  }
+  for (const r of RESEARCH) {
+    const done = researched(r.id);
+    const row = emEl('div', 'uprow', `<div class="upico">${r.icon}</div><div class="upinfo"><b>${r.name}</b><br><small>${r.desc} · ใช้เวลา ${formatDuration(r.time) || `${r.time} วินาที`}</small></div>`);
+    row.append(emButton(done ? 'สำเร็จ ✓' : `💵${r.cost.toLocaleString()}`, done || Boolean(R.cur) || state.money < r.cost, () => startResearch(r)));
+    upList.append(row);
+  }
+}
+let upTab = 'up';
+
+// ---------- epidemic in the city: stand at each sick building to vaccinate it ----------
+const epi = { on: null, timer: rand(240, 360) };
+function startEpidemic() {
+  const built = district.plots.map((p, i) => (emp().plots[i] ? i : -1)).filter((i) => i >= 0);
+  if (built.length < 3) return false;
+  const sick = [];
+  while (sick.length < Math.min(3, built.length)) {
+    const i = pick(built);
+    if (!sick.includes(i)) sick.push(i);
+  }
+  const marks = sick.map((i) => {
+    const g = germModel(0x9ef01a, 0x55a630);
+    g.scale.setScalar(0.45);
+    g.position.set(district.plots[i].at.x, 4.2, district.plots[i].at.z);
+    scene.add(g);
+    return g;
+  });
+  epi.on = { sick, marks, cured: [], t: 120, stand: 0 };
+  tone(220, 0.3, 'sawtooth', 0.04);
+  toast('🦠 <b>โรคระบาดในเมืองหมอ!</b><br>ไปยืนวงฟ้าหน้าตึกที่มีเชื้อเพื่อฉีดวัคซีน (2 นาที)', 4500);
+  return true;
+}
+function endEpidemic(win) {
+  const o = epi.on;
+  for (const m of o.marks) scene.remove(m);
+  epi.on = null;
+  epi.timer = rand(300, 480);
+  if (win) {
+    const bonus = Math.round(((500 + 100 * state.step) * branchMult()) / 10) * 10;
+    addMoney(bonus);
+    stats().epidemics = (stats().epidemics || 0) + 1;
+    burst(player.group.position);
+    sfxUnlock();
+    toast(`💉 <b>หยุดโรคระบาดได้!</b> โบนัส +${bonus.toLocaleString()}`, 4000);
+  } else {
+    changeRating(-0.3);
+    toast('😷 โรคระบาดลุกลาม ⭐ ลดลง ครั้งหน้ารีบไปฉีดวัคซีนนะ', 4000);
+  }
+}
+const epiTargets = () => (epi.on ? epi.on.sick.filter((i) => !epi.on.cured.includes(i)) : []);
+function updateEpidemic(dt) {
+  if (!district.built) return;
+  if (!epi.on) {
+    if (tutorialDone() && running) {
+      epi.timer -= dt;
+      if (epi.timer <= 0 && !startEpidemic()) epi.timer = 120;
+    }
+    return;
+  }
+  const o = epi.on;
+  o.t -= dt;
+  const now = performance.now() / 1000;
+  o.marks.forEach((m, k) => {
+    m.visible = !o.cured.includes(o.sick[k]);
+    m.position.y = 4.2 + Math.sin(now * 2 + k) * 0.3;
+    m.rotation.y = now;
+  });
+  const here = epiTargets().find((i) => player.floor === 0 && flatDist(player.group.position, plotZone(district.plots[i].at)) < ZONE_R);
+  if (here !== undefined) {
+    o.stand += dt;
+    if (o.stand > 2) {
+      o.stand = 0;
+      o.cured.push(here);
+      sfxCoin();
+      floatText(district.plots[here].at.clone().setY(2), '💉 หายแล้ว!', '#8be08f');
+    }
+  } else {
+    o.stand = 0;
+  }
+  if (!epiTargets().length) endEpidemic(true);
+  else if (o.t <= 0) endEpidemic(false);
+}
+
+// ---------- day and night, following the phone's clock ----------
+let dayNightOn = true;
+try {
+  dayNightOn = localStorage.getItem('drquest-daynight') !== 'off';
+} catch {
+  // Storage blocked: on
+}
+const NIGHT_SKY = new THREE.Color(0x0f1a3a);
+const dayBase = { sky: new THREE.Color(), hemi: 1.4, sun: 1.9, f: -1 };
+// 1 = full day, 0 = night; dawn 5-7, dusk 17:30-19:30
+function daylight() {
+  if (!dayNightOn) return 1;
+  const d = new Date();
+  const h = d.getHours() + d.getMinutes() / 60;
+  if (h >= 7 && h <= 17.5) return 1;
+  if (h >= 19.5 || h <= 5) return 0;
+  return h < 12 ? (h - 5) / 2 : (19.5 - h) / 2;
+}
+const isNight = () => daylight() < 0.5;
+function updateDayNight() {
+  const f = daylight();
+  if (Math.abs(f - dayBase.f) < 0.01) return;
+  dayBase.f = f;
+  const th = themeOf(state.branch);
+  dayBase.sky.set(th.sky).lerp(NIGHT_SKY, (1 - f) * (th.night ? 0.5 : 0.85));
+  scene.background.copy(dayBase.sky);
+  scene.fog.color.copy(dayBase.sky);
+  const base = th.night ? 0.75 : 1.4;
+  hemiLight.intensity = base * (0.5 + 0.5 * f);
+  sun.intensity = (th.night ? 0.9 : 1.9) * (0.35 + 0.65 * f);
+  // Lit windows after dark, and more emergencies at night
+  mat(0x7fc8f8).color.set(f < 0.5 ? 0xffe08a : 0x7fc8f8);
+  PATIENT_TYPES.emergency.weight = f < 0.5 ? 24 : 12;
+}
+
+// ---------- Loy Krathong festival (10-30 November) ----------
+const krathongSeason = () => {
+  const d = new Date();
+  return location.search.includes('krathong=1') || (d.getMonth() === 10 && d.getDate() >= 10 && d.getDate() <= 30);
+};
+const KT = { built: false, lanterns: [], cash: null, stallAt: v(11.2, 14.6), sold: 0, floats: [] };
+function krathongModel(scale = 1) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.3, 0.14, 12), mat(0x52b788));
+  base.position.y = 0.07;
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.4, 8), mat(0xff8fab));
+  cone.position.y = 0.32;
+  const flame = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), new THREE.MeshBasicMaterial({ color: 0xffd166 }));
+  flame.position.y = 0.6;
+  g.add(base, cone, flame);
+  g.scale.setScalar(scale);
+  return g;
+}
+function buildKrathong() {
+  if (KT.built || !krathongSeason()) return;
+  KT.built = true;
+  // String lights along the front wall and the entrance arch
+  const colors = [0xff595e, 0xffca3a, 0x8ac926, 0x1982c4, 0x6a4c93];
+  const lights = new THREE.Group();
+  for (let x = FLOOR.x0; x <= FLOOR.x1; x += 0.6) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), new THREE.MeshBasicMaterial({ color: colors[Math.round(x / 0.6 + 100) % colors.length] }));
+    b.position.set(x, 0.75 + Math.sin(x * 2) * 0.05, FLOOR.z1 + 0.32);
+    lights.add(b);
+  }
+  for (let x = 4.6; x <= 9; x += 0.4) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), new THREE.MeshBasicMaterial({ color: colors[Math.round(x / 0.4) % colors.length] }));
+    b.position.set(x, 3.75, FLOOR.z1 + 0.32);
+    lights.add(b);
+  }
+  scene.add(lights);
+  // Krathong stall by the entrance
+  const stall = new THREE.Group();
+  const table = box(2.2, 0.8, 0.9, 0xa0703c);
+  table.position.y = 0.4;
+  stall.add(table);
+  for (let i = 0; i < 4; i++) {
+    const k = krathongModel(0.8);
+    k.position.set(-0.75 + i * 0.5, 0.8, 0);
+    stall.add(k);
+  }
+  const roof = box(2.6, 0.12, 1.4, 0xff8fab);
+  roof.position.y = 2.1;
+  for (const dx of [-1.2, 1.2]) {
+    const post = box(0.08, 2.1, 0.08, 0xffffff);
+    post.position.set(dx, 1.05, 0.5);
+    stall.add(post);
+  }
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.55), new THREE.MeshBasicMaterial({ map: signTex('🏮 ร้านกระทง', '#d6336c'), side: THREE.DoubleSide }));
+  sign.position.set(0, 2.6, 0.5);
+  stall.add(roof, sign);
+  stall.position.copy(KT.stallAt);
+  scene.add(stall);
+  addCollider(KT.stallAt.x, KT.stallAt.z, 2.2, 0.9);
+  KT.cash = new MoneyPile(v(KT.stallAt.x - 2.0, 14.7));
+  // Sky lanterns drifting up all over
+  for (let i = 0; i < 26; i++) {
+    const l = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.22, 0.5, 8), new THREE.MeshBasicMaterial({ color: 0xffb347 }));
+    l.position.set(rand(-25, 25), rand(2, 26), rand(-22, 30));
+    l.userData.speed = rand(0.5, 1.1);
+    scene.add(l);
+    KT.lanterns.push(l);
+  }
+  // Free festival outfit
+  if (!ownsStyle('thai')) {
+    state.style.outfits.push('thai');
+    setTimeout(() => toast('🏮 <b>เทศกาลลอยกระทง!</b><br>ได้ชุดไทยฟรี ใส่ได้ที่ 🎨 ตกแต่ง<br><small>ร้านกระทงหน้า รพ. ขายดีมาก</small>', 6000), 2500);
+  }
+}
+function updateKrathong(dt) {
+  if (!KT.built) return;
+  const t = performance.now() / 1000;
+  for (const l of KT.lanterns) {
+    l.position.y += l.userData.speed * dt * 0.6;
+    l.position.x += Math.sin(t * 0.3 + l.position.z) * dt * 0.2;
+    if (l.position.y > 30) l.position.y = 1;
+  }
+  if (OUT.park && KT.floats.length < 5) {
+    const k = krathongModel(0.6);
+    k.userData.a = rand(0, Math.PI * 2);
+    scene.add(k);
+    KT.floats.push(k);
+  }
+  KT.floats.forEach((k, i) => {
+    k.userData.a += dt * 0.25;
+    k.position.set(14.8 + Math.cos(k.userData.a + i) * 1.0, 0.05, 23.6 + Math.sin(k.userData.a + i) * 1.0);
+  });
+}
+// Happy patients going home buy a krathong
+function sellKrathong() {
+  if (!KT.built || Math.random() > 0.4) return;
+  const pay = Math.round(15 * priceMult() * eventPayMult());
+  KT.cash.add(pay);
+  KT.sold++;
+  stats().krathong = (stats().krathong || 0) + 1;
+  floatText(KT.cash.pos, `🏮 +${pay}`, '#ffb3c7');
+}
+
+// ---------- health quiz: three real health questions a day ----------
+const QUIZ = [
+  ['ล้างมือด้วยสบู่ ควรถูมือให้ทั่วอย่างน้อยกี่วินาที?', ['5 วินาที', '10 วินาที', '20 วินาที', '2 นาที'], 2, 'ควรถูมือด้วยสบู่ให้ทั่วอย่างน้อย 20 วินาที ทั้งฝ่ามือ หลังมือ ซอกนิ้ว และปลายนิ้ว'],
+  ['หมายเลขโทรเรียกรถพยาบาลฉุกเฉินในประเทศไทยคือ?', ['191', '199', '1669', '1323'], 2, '1669 คือสายด่วนการแพทย์ฉุกเฉิน (191 ตำรวจ, 199 ดับเพลิง, 1323 สุขภาพจิต)'],
+  ['ความดันโลหิตปกติของผู้ใหญ่ ควรต่ำกว่าเท่าไร?', ['120/80 มม.ปรอท', '140/90 มม.ปรอท', '160/100 มม.ปรอท', '180/110 มม.ปรอท'], 0, 'ความดันที่เหมาะสมคือต่ำกว่า 120/80 มม.ปรอท ถ้าตั้งแต่ 140/90 ขึ้นไปถือว่าความดันสูง'],
+  ['ผู้ใหญ่ควรนอนหลับคืนละประมาณกี่ชั่วโมง?', ['3–4 ชั่วโมง', '5 ชั่วโมง', '7–9 ชั่วโมง', '12 ชั่วโมงขึ้นไป'], 2, 'ผู้ใหญ่ส่วนใหญ่ควรนอน 7–9 ชั่วโมงต่อคืน'],
+  ['การทำ CPR ผู้ใหญ่ ควรกดหน้าอกด้วยอัตรากี่ครั้งต่อนาที?', ['40–60 ครั้ง', '60–80 ครั้ง', '100–120 ครั้ง', '150–180 ครั้ง'], 2, 'กดหน้าอก 100–120 ครั้งต่อนาที ลึกประมาณ 5–6 ซม. และปล่อยให้หน้าอกคืนตัวทุกครั้ง'],
+  ['การทำ CPR ผู้ใหญ่ ควรกดหน้าอกลึกประมาณเท่าไร?', ['1–2 ซม.', '3 ซม.', '5–6 ซม.', '10 ซม.'], 2, 'กดลึกประมาณ 5–6 ซม. (2–2.4 นิ้ว) สำหรับผู้ใหญ่'],
+  ['ระดับน้ำตาลในเลือดหลังอดอาหาร 8 ชั่วโมง ตั้งแต่เท่าไรถือว่าเป็นเบาหวาน?', ['80 มก./ดล.', '100 มก./ดล.', '126 มก./ดล.', '300 มก./ดล.'], 2, 'น้ำตาลหลังอดอาหารตั้งแต่ 126 มก./ดล. ขึ้นไป (ตรวจซ้ำ) เข้าเกณฑ์เบาหวาน'],
+  ['องค์การอนามัยโลกแนะนำให้ผู้ใหญ่ออกกำลังกายระดับปานกลางอย่างน้อยสัปดาห์ละกี่นาที?', ['30 นาที', '60 นาที', '150 นาที', '1,000 นาที'], 2, 'อย่างน้อย 150–300 นาทีต่อสัปดาห์ เช่น เดินเร็ววันละ 30 นาที 5 วัน'],
+  ['ยาปฏิชีวนะ (ยาฆ่าเชื้อ) ใช้รักษาอะไร?', ['หวัดจากไวรัส', 'การติดเชื้อแบคทีเรีย', 'ภูมิแพ้', 'ปวดหัวจากความเครียด'], 1, 'ยาปฏิชีวนะรักษาการติดเชื้อแบคทีเรีย ไม่ได้ช่วยไข้หวัดจากไวรัส ใช้พร่ำเพรื่อทำให้เชื้อดื้อยา'],
+  ['ค่าดัชนีมวลกาย (BMI) ที่ถือว่าปกติสำหรับคนเอเชียคือ?', ['ต่ำกว่า 16', '18.5–22.9', '25–29.9', '30 ขึ้นไป'], 1, 'สำหรับคนเอเชีย BMI 18.5–22.9 ถือว่าปกติ ตั้งแต่ 23 ขึ้นไปเริ่มน้ำหนักเกิน'],
+  ['โดนน้ำร้อนลวกเล็กน้อย ควรทำอะไรเป็นอย่างแรก?', ['ทายาสีฟัน', 'ให้น้ำสะอาดอุณหภูมิห้องไหลผ่านนาน ๆ', 'ทาเนยหรือน้ำปลา', 'ประคบน้ำแข็งตรง ๆ'], 1, 'ให้น้ำเย็นธรรมดาไหลผ่านแผลประมาณ 20 นาที ห้ามทายาสีฟัน เนย หรือประคบน้ำแข็งตรง ๆ'],
+  ['ข้อใด "ไม่ใช่" อาการเตือนโรคหลอดเลือดสมอง?', ['หน้าเบี้ยว ปากเบี้ยว', 'แขนขาอ่อนแรงซีกเดียว', 'พูดไม่ชัดทันที', 'ไอมีเสมหะ'], 3, 'จำ BEFAST: เสียการทรงตัว ตามัว หน้าเบี้ยว แขนอ่อนแรง พูดไม่ชัด รีบโทร 1669 ทันที'],
+  ['วัคซีนไข้หวัดใหญ่ควรฉีดบ่อยแค่ไหน?', ['ครั้งเดียวตลอดชีวิต', 'ทุกปี', 'ทุก 10 ปี', 'ไม่ต้องฉีด'], 1, 'เชื้อไข้หวัดใหญ่เปลี่ยนสายพันธุ์บ่อย จึงควรฉีดทุกปี'],
+  ['ท้องเสีย ควรดื่มอะไรเพื่อป้องกันการขาดน้ำ?', ['น้ำอัดลม', 'ผงเกลือแร่ ORS', 'กาแฟ', 'เครื่องดื่มชูกำลัง'], 1, 'ORS (โออาร์เอส) ชดเชยน้ำและเกลือแร่ได้ดีที่สุด น้ำอัดลมหวานเกินอาจทำให้ถ่ายมากขึ้น'],
+  ['ชีพจรปกติของผู้ใหญ่ขณะพัก ประมาณกี่ครั้งต่อนาที?', ['30–50', '60–100', '120–150', '160–200'], 1, 'ชีพจรขณะพักปกติประมาณ 60–100 ครั้งต่อนาที'],
+  ['อุณหภูมิร่างกายตั้งแต่เท่าไรขึ้นไปถือว่ามีไข้ (วัดทางปาก)?', ['36.0°C', '36.5°C', '37.5°C', '39.5°C'], 2, 'ตั้งแต่ประมาณ 37.5°C ขึ้นไปถือว่ามีไข้'],
+  ['ควรแปรงฟันอย่างน้อยวันละกี่ครั้ง?', ['1 ครั้ง', '2 ครั้ง', '5 ครั้ง', 'ไม่ต้องทุกวัน'], 1, 'แปรงฟันอย่างน้อยวันละ 2 ครั้ง ครั้งละ 2 นาที ด้วยยาสีฟันผสมฟลูออไรด์'],
+  ['ไข้เลือดออกติดต่อผ่านยุงชนิดใด?', ['ยุงลาย', 'ยุงก้นปล่อง', 'ยุงรำคาญ', 'แมลงวัน'], 0, 'ยุงลายเป็นพาหะไข้เลือดออก ช่วยกันกำจัดแหล่งน้ำขังรอบบ้าน (ยุงก้นปล่องเป็นพาหะมาลาเรีย)'],
+  ['สงสัยไข้เลือดออก ควรหลีกเลี่ยงยาลดไข้ชนิดใด?', ['พาราเซตามอล', 'แอสไพรินและไอบูโพรเฟน', 'การเช็ดตัวลดไข้', 'ผงเกลือแร่'], 1, 'แอสไพรินและยากลุ่ม NSAIDs เพิ่มความเสี่ยงเลือดออก ให้ใช้พาราเซตามอลตามขนาดและพบแพทย์'],
+  ['ผู้ใหญ่สุขภาพดี ไม่ควรกินพาราเซตามอลเกินวันละกี่กรัม?', ['1 กรัม', '4 กรัม', '10 กรัม', 'ไม่จำกัด'], 1, 'ไม่ควรเกินวันละ 4 กรัม (500 มก. 8 เม็ด) เกินขนาดอาจทำลายตับ'],
+  ['ควรฉีดวัคซีนบาดทะยักกระตุ้นทุกกี่ปี?', ['ทุกปี', 'ทุก 10 ปี', 'ครั้งเดียวพอ', 'ทุก 30 ปี'], 1, 'ผู้ใหญ่ควรฉีดกระตุ้นบาดทะยักทุก 10 ปี'],
+  ['กฎ 20-20-20 เพื่อพักสายตาจากจอคืออะไร?', ['ทุก 20 นาที มองไกล 20 ฟุต นาน 20 วินาที', 'นอน 20 นาทีทุก 20 ชั่วโมง', 'กะพริบตา 20 ครั้ง', 'ดูจอห่าง 20 ซม.'], 0, 'ทุก 20 นาที ให้มองไกลประมาณ 20 ฟุต (6 เมตร) นานอย่างน้อย 20 วินาที'],
+  ['หญิงตั้งครรภ์ควรได้รับกรดโฟลิก เพื่อช่วยป้องกันอะไรในทารก?', ['ฟันผุ', 'ความพิการของท่อประสาท', 'ผมร่วง', 'สายตาสั้น'], 1, 'กรดโฟลิกช่วยลดความเสี่ยงความพิการแต่กำเนิดของท่อประสาท ควรเริ่มก่อนตั้งครรภ์'],
+  ['ทารกควรกินนมแม่อย่างเดียว (ไม่ต้องให้น้ำหรืออาหารอื่น) ถึงอายุกี่เดือน?', ['1 เดือน', '3 เดือน', '6 เดือน', '12 เดือน'], 2, 'แนะนำนมแม่อย่างเดียว 6 เดือน แล้วเริ่มอาหารตามวัยควบคู่นมแม่'],
+  ['ถ้าเพื่อนบอกว่าไม่อยากมีชีวิตอยู่ ควรทำอย่างไร?', ['เพิกเฉย เดี๋ยวก็หาย', 'รับฟังอย่างใส่ใจและพาไปพบผู้เชี่ยวชาญหรือโทร 1323', 'ล้อเล่นให้หายเครียด', 'ดุให้เข้มแข็ง'], 1, 'รับฟังโดยไม่ตัดสิน อยู่เป็นเพื่อน และขอความช่วยเหลือ สายด่วนสุขภาพจิต 1323 ฟรี 24 ชม.'],
+  ['การเอกซเรย์ปอดใช้อะไรสร้างภาพ?', ['รังสีเอกซ์', 'คลื่นเสียงความถี่สูง', 'สนามแม่เหล็ก', 'แสงอินฟราเรด'], 0, 'เอกซเรย์ใช้รังสีเอกซ์ ส่วนอัลตราซาวด์ใช้คลื่นเสียง และ MRI ใช้สนามแม่เหล็ก'],
+  ['เครื่อง MRI สร้างภาพด้วยหลักการใด?', ['รังสีเอกซ์', 'สนามแม่เหล็กแรงสูงและคลื่นวิทยุ', 'คลื่นเสียงความถี่สูง', 'แสงเลเซอร์'], 1, 'MRI ใช้สนามแม่เหล็กแรงสูงและคลื่นวิทยุ จึงห้ามนำโลหะเข้าห้องตรวจ'],
+  ['กลุ่มเลือดที่ให้เม็ดเลือดแดงแก่ผู้รับได้ทุกกลุ่ม (ผู้ให้สากล) คือ?', ['A', 'B', 'AB', 'O Rh ลบ'], 3, 'O Rh ลบ เป็นผู้ให้เม็ดเลือดแดงสากล ส่วน AB Rh บวกเป็นผู้รับสากล'],
+  ['องค์การอนามัยโลกแนะนำให้กินโซเดียมไม่เกินวันละเท่าไร?', ['500 มก.', '2,000 มก.', '5,000 มก.', '10,000 มก.'], 1, 'ไม่เกิน 2,000 มก. ต่อวัน (ประมาณเกลือ 1 ช้อนชา) คนไทยมักกินเกินเกือบ 2 เท่า'],
+  ['ฟันน้ำนมของเด็กมีทั้งหมดกี่ซี่?', ['10 ซี่', '20 ซี่', '28 ซี่', '32 ซี่'], 1, 'ฟันน้ำนมมี 20 ซี่ ฟันแท้ของผู้ใหญ่มี 28–32 ซี่'],
+  ['กระดูกในร่างกายผู้ใหญ่มีประมาณกี่ชิ้น?', ['106 ชิ้น', '206 ชิ้น', '306 ชิ้น', '500 ชิ้น'], 1, 'ผู้ใหญ่มีกระดูกประมาณ 206 ชิ้น ทารกมีมากกว่าเพราะบางชิ้นยังไม่เชื่อมกัน'],
+  ['เมื่อมีคนสำลักอาหาร พูดไม่ได้ หายใจไม่ออก ควรช่วยด้วยวิธีใด?', ['ให้ดื่มน้ำตาม', 'รัดกระตุกที่ท้อง (Heimlich)', 'ให้นอนลงพัก', 'ตบหลังเบา ๆ แล้วรอ'], 1, 'ยืนด้านหลัง กำมือวางเหนือสะดือ แล้วรัดกระตุกเข้าและขึ้นจนสิ่งอุดหลุด ถ้าหมดสติให้ทำ CPR และโทร 1669'],
+];
+const QUIZ_PER_DAY = 3;
+function todayQuiz() {
+  let h = 11;
+  for (const ch of todayKey()) h = (Math.imul(h, 131) + ch.charCodeAt(0)) >>> 0;
+  const picks = [];
+  while (picks.length < QUIZ_PER_DAY) {
+    h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+    const i = h % QUIZ.length;
+    if (!picks.includes(i)) picks.push(i);
+  }
+  return picks;
+}
+function quizState() {
+  if (state.quiz?.date !== todayKey()) state.quiz = { date: todayKey(), done: [] };
+  return state.quiz;
+}
+const quizReward = () => Math.round((300 * (1 + state.step * 0.2) * branchMult()) / 10) * 10;
+const quizEl = document.getElementById('quiz');
+function openQuiz() {
+  const q = quizState();
+  const picks = todayQuiz();
+  const box = quizEl.querySelector('.box');
+  if (q.done.length >= QUIZ_PER_DAY) {
+    const right = q.done.filter((d) => d.ok).length;
+    box.innerHTML = `<h3>🩺 ควิซสุขภาพวันนี้</h3><p class="qtext">ตอบครบแล้ว! ถูก ${right}/${QUIZ_PER_DAY} ข้อ<br>มาใหม่พรุ่งนี้นะ</p>`;
+  } else {
+    const idx = picks[q.done.length];
+    const [text, choices] = QUIZ[idx];
+    box.innerHTML = `<h3>🩺 ควิซสุขภาพ ข้อ ${q.done.length + 1}/${QUIZ_PER_DAY}</h3><p class="qtext">${text}</p>`;
+    choices.forEach((c, k) => {
+      const b = emEl('button', 'btn ghost qopt', c);
+      b.addEventListener('click', () => answerQuiz(idx, k));
+      box.append(b);
+    });
+  }
+  const close = emEl('button', 'btn ghost', 'ปิด');
+  close.addEventListener('click', () => { quizEl.style.display = 'none'; renderMissions(); });
+  box.append(close);
+  quizEl.style.display = 'flex';
+}
+function answerQuiz(idx, k) {
+  const q = quizState();
+  const [, choices, ans, why] = QUIZ[idx];
+  const ok = k === ans;
+  q.done.push({ i: idx, ok });
+  if (ok) {
+    const r = quizReward();
+    addMoney(r, false);
+    stats().quiz = (stats().quiz || 0) + 1;
+    sfxUnlock();
+  } else {
+    tone(200, 0.2, 'triangle', 0.05);
+  }
+  save();
+  const box = quizEl.querySelector('.box');
+  box.innerHTML = `<h3>${ok ? '✅ ถูกต้อง!' : '❌ ยังไม่ถูก'}</h3><p class="qtext">คำตอบ: <b>${choices[ans]}</b><br><small>${why}</small>${ok ? `<br><b class="qgain">+💵${quizReward().toLocaleString()}</b>` : ''}</p>`;
+  const next = emEl('button', 'btn', q.done.length < QUIZ_PER_DAY ? 'ข้อต่อไป ▶' : 'ดูผล');
+  next.addEventListener('click', openQuiz);
+  box.append(next);
+}
+
+// ---------- achievements ----------
+const stats = () => {
+  if (!state.stats) state.stats = {};
+  return state.stats;
+};
+const builtPlots = () => emp().plots.filter(Boolean).length;
+const ACHIEVEMENTS = [
+  { id: 'serve100', icon: '🧑‍⚕️', name: 'รักษาครบ 100 คน', ok: () => (stats().served || 0) >= 100, reward: 500 },
+  { id: 'serve1k', icon: '🩺', name: 'รักษาครบ 1,000 คน', ok: () => (stats().served || 0) >= 1000, reward: 3000 },
+  { id: 'serve10k', icon: '🏥', name: 'รักษาครบ 10,000 คน', ok: () => (stats().served || 0) >= 10000, reward: 25000 },
+  { id: 'boss1', icon: '🦠', name: 'ล่าบอสตัวแรก', ok: () => (state.style.bossKills || 0) >= 1, reward: 1000 },
+  { id: 'boss25', icon: '🦸', name: 'ล่าบอส 25 ตัว', ok: () => (state.style.bossKills || 0) >= 25, reward: 15000 },
+  { id: 'special10', icon: '⭐', name: 'เคสพิเศษ 10 เคส', ok: () => (stats().specials || 0) >= 10, reward: 5000 },
+  { id: 'rush10', icon: '🚨', name: 'โบนัสเร่งด่วน 10 ครั้ง', ok: () => (stats().rushes || 0) >= 10, reward: 5000 },
+  { id: 'step24', icon: '🏗️', name: 'สร้างครบ 24 ขั้น', ok: () => state.step >= 24, reward: 5000 },
+  { id: 'stepall', icon: '🏢', name: 'สร้างครบทุกชั้น', ok: () => state.step >= UNLOCKS.length, reward: 50000 },
+  { id: 'branch3', icon: '🗺️', name: 'มี 3 สาขา', ok: () => state.branches.length >= 3, reward: 10000 },
+  { id: 'branch10', icon: '🌐', name: 'มี 10 สาขา', ok: () => state.branches.length >= 10, reward: 100000 },
+  { id: 'tier1', icon: '🏞️', name: 'ขึ้นเป็นจังหวัด', ok: () => emp().tier >= 1, reward: 10000 },
+  { id: 'tier4', icon: '🌏', name: 'หมอแห่งโลก', ok: () => emp().tier >= 4, reward: 500000 },
+  { id: 'city24', icon: '🏙️', name: 'เมือง 24 แปลง', ok: () => builtPlots() >= 24, reward: 200000 },
+  { id: 'card10', icon: '🃏', name: 'สุ่มการ์ด 10 ใบ', ok: () => (stats().cards || 0) >= 10, reward: 10000 },
+  { id: 'card5', icon: '✨', name: 'ได้การ์ด 5 ดาว', ok: () => (state.cards || []).some((c) => c.stars === 5), reward: 50000 },
+  { id: 'research5', icon: '🧪', name: 'วิจัยสำเร็จ 5 อย่าง', ok: () => (stats().research || 0) >= 5, reward: 20000 },
+  { id: 'quiz30', icon: '📚', name: 'ตอบควิซถูก 30 ข้อ', ok: () => (stats().quiz || 0) >= 30, reward: 30000 },
+  { id: 'epidemic5', icon: '💉', name: 'หยุดโรคระบาด 5 ครั้ง', ok: () => (stats().epidemics || 0) >= 5, reward: 30000 },
+  { id: 'prestige1', icon: '🔄', name: 'เกิดใหม่ครั้งแรก', ok: () => prs().runs >= 1, reward: 10000 },
+  { id: 'krathong', icon: '🏮', name: 'ขายกระทง 30 ใบ', ok: () => (stats().krathong || 0) >= 30, reward: 15000 },
+  { id: 'decor', icon: '🎨', name: 'ตกแต่งครบทุกอย่าง', ok: () => DECOR.every((d) => ownsStyle(d.id)), reward: 50000 },
+];
+let achTimer = 0;
+function updateAchievements(dt) {
+  achTimer -= dt;
+  if (achTimer > 0) return;
+  achTimer = 2;
+  state.achievements = state.achievements || [];
+  for (const a of ACHIEVEMENTS) {
+    if (state.achievements.includes(a.id) || !a.ok()) continue;
+    state.achievements.push(a.id);
+    addMoney(a.reward, false);
+    sfxUnlock();
+    toast(`🏅 <b>ความสำเร็จใหม่!</b><br>${a.icon} ${a.name}<br><small>รางวัล 💵${a.reward.toLocaleString()}</small>`, 4500);
+    save();
+    break; // one at a time
+  }
+}
+function renderAchievements(list) {
+  const got = state.achievements || [];
+  list.append(emEl('h4', 'achhead', `🏅 ความสำเร็จ ${got.length}/${ACHIEVEMENTS.length}`));
+  const wall = emEl('div', 'achwall');
+  for (const a of ACHIEVEMENTS) {
+    const el = emEl('div', `ach${got.includes(a.id) ? ' got' : ''}`, `${a.icon}<small>${a.name}</small>`);
+    wall.append(el);
+  }
+  list.append(wall);
+}
+
+// ---------- friend room: weekly score and daily gifts ----------
+function weekKey() {
+  const d = new Date();
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return `${t.getUTCFullYear()}-W${String(Math.ceil(((t - y0) / 86400000 + 1) / 7)).padStart(2, '0')}`;
+}
+function weekProgress(n) {
+  if (state.week?.key !== weekKey()) state.week = { key: weekKey(), score: 0 };
+  state.week.score += n;
+}
+async function sendRoomGift() {
+  try {
+    const n = await rpc('send_room_gift', { p_secret: deviceSecret(), p_room: state.room });
+    if (n === -1) toast('🎁 วันนี้ส่งของขวัญไปแล้ว พรุ่งนี้ส่งใหม่ได้');
+    else toast(`🎁 ส่งของขวัญให้เพื่อน ${n} คนแล้ว!`);
+  } catch {
+    toast('🎁 ยังส่งของขวัญไม่ได้ ลองใหม่อีกครั้ง');
+  }
+}
+async function claimGifts() {
+  if (CLOUD_OFF) return;
+  try {
+    const rows = await rpc('claim_gifts', { p_secret: deviceSecret() });
+    if (!rows?.length) return;
+    const each = Math.round(Math.max(500, idleIncome(3600).perHour * 0.05) / 10) * 10;
+    addMoney(each * rows.length, false);
+    sfxUnlock();
+    const names = [...new Set(rows.map((r) => r.from_name))].slice(0, 3).map(escapeHtml).join(', ');
+    toast(`🎁 <b>ได้ของขวัญ ${rows.length} ชิ้น!</b><br>จาก ${names}<br><b>+${(each * rows.length).toLocaleString()}</b>`, 5000);
+    save();
+  } catch {
+    // Not available yet: try again later
+  }
+}
+
+// ---------- share a picture of your hospital ----------
+const shareEl = document.getElementById('share');
+function loadImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+async function makeShareCard() {
+  // Bird's-eye shot over the hospital, rendered on demand
+  const saved = { zoom: camZoom, pos: player.group.position.clone(), vis: visibleFloor() };
+  showFloor(0);
+  player.group.position.set(-3, 0, 2);
+  setZoom(2.4);
+  updateCamera(0, true);
+  renderer.render(scene, camera);
+  const shot = await loadImage(renderer.domElement.toDataURL('image/jpeg', 0.92));
+  player.group.position.copy(saved.pos);
+  showFloor(saved.vis);
+  setZoom(saved.zoom);
+  updateCamera(0, true);
+  const W = 1080;
+  const H = 1350;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#63c7ff');
+  grad.addColorStop(1, '#2f9e57');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+  const logo = await loadImage('logo.png');
+  if (logo) g.drawImage(logo, (W - 760) / 2, 40, 760, (760 * logo.height) / logo.width);
+  if (shot) {
+    const sw = 980;
+    const sh = 640;
+    g.save();
+    roundRect(g, (W - sw) / 2, 270, sw, sh, 36);
+    g.clip();
+    const s = Math.max(sw / shot.width, sh / shot.height);
+    g.drawImage(shot, (W - shot.width * s) / 2, 270 + (sh - shot.height * s) / 2, shot.width * s, shot.height * s);
+    g.restore();
+    g.strokeStyle = '#ffd166';
+    g.lineWidth = 10;
+    roundRect(g, (W - sw) / 2, 270, sw, sh, 36);
+    g.stroke();
+  }
+  const t = EMPIRE_TIERS[emp().tier];
+  g.fillStyle = '#ffffff';
+  g.textAlign = 'center';
+  g.font = '700 64px Mitr, sans-serif';
+  let name = cloud.nickname && cloud.nickname !== 'หมอนิรนาม' ? cloud.nickname : '';
+  try {
+    name = name || localStorage.getItem('drquest-name') || '';
+  } catch {
+    // ignore
+  }
+  g.fillText(name || 'โรงพยาบาลของฉัน', W / 2, 1000);
+  g.font = '500 40px Mitr, sans-serif';
+  g.fillText(`${t.icon} ${t.title} · ${state.branches.length} สาขา · ⭐ ${state.rating.toFixed(1)}`, W / 2, 1065);
+  g.fillText(`💵 รายได้สะสม ${Math.floor(state.earned).toLocaleString()} · 🏅 ${(state.achievements || []).length} ความสำเร็จ`, W / 2, 1125);
+  g.fillStyle = '#ffd166';
+  roundRect(g, 140, 1185, W - 280, 100, 50);
+  g.fill();
+  g.fillStyle = '#1d3a70';
+  g.font = '700 40px Mitr, sans-serif';
+  g.fillText('▶ เล่นฟรี niasmin.github.io/Quest-Finance', W / 2, 1250);
+  return c;
+}
+async function shareHospital() {
+  shareEl.style.display = 'flex';
+  const box = shareEl.querySelector('.box');
+  box.innerHTML = '<h3>📸 แชร์โรงพยาบาลของฉัน</h3><p class="qtext">กำลังถ่ายรูป…</p>';
+  const canvas = await makeShareCard();
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.9));
+  const url = URL.createObjectURL(blob);
+  const text = `มาดูโรงพยาบาลของฉันใน Dr. Quest! เล่นฟรีบนมือถือ 🏥 ${location.origin}${location.pathname}`;
+  box.innerHTML = `<h3>📸 แชร์โรงพยาบาลของฉัน</h3><img class="shareimg" src="${url}" alt="">`;
+  const file = new File([blob], 'dr-quest.jpg', { type: 'image/jpeg' });
+  if (navigator.canShare?.({ files: [file] })) {
+    const sh = emEl('button', 'btn', '📤 แชร์ไป Facebook / LINE');
+    sh.addEventListener('click', () => navigator.share({ files: [file], text }).catch(() => {}));
+    box.append(sh);
+  }
+  const dl = emEl('a', 'btn ghost', '💾 บันทึกรูป');
+  dl.href = url;
+  dl.download = 'dr-quest.jpg';
+  const cp = emEl('button', 'btn ghost', '📋 คัดลอกข้อความชวนเพื่อน');
+  cp.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      cp.textContent = '✅ คัดลอกแล้ว';
+    } catch {
+      prompt('คัดลอกข้อความนี้', text);
+    }
+  });
+  const close = emEl('button', 'btn ghost', 'ปิด');
+  close.addEventListener('click', () => { shareEl.style.display = 'none'; });
+  box.append(dl, cp, close);
+}
+
+function updateExtras(dt) {
+  updateResearch();
+  updateEpidemic(dt);
+  updateKrathong(dt);
+  updateAchievements(dt);
 }
 
 // ---------- player actions ----------
@@ -5863,6 +6574,13 @@ function autoTasks() {
     const b = ev.boss;
     return [{ at: bossStand(b), keep: () => ev.boss === b }];
   }
+  // A city epidemic comes next: go vaccinate the sick buildings
+  const sick = epiTargets();
+  if (sick.length) {
+    if (player.floor !== 0) return [{ at: ELEVATOR, ride: 0, keep: () => player.floor !== 0 }];
+    const near = sick.map((i) => plotZone(district.plots[i].at)).sort((a, b) => flatDist(player.group.position, a) - flatDist(player.group.position, b))[0];
+    return [{ at: near, keep: () => epiTargets().length > 0 && epiTargets().some((i) => flatDist(plotZone(district.plots[i].at), near) < 0.1) }];
+  }
   if (player.floor === 1) return floor2Tasks();
   if (player.floor === 2) return roofTasks();
   if (player.floor >= 3) return upperTasks(player.floor);
@@ -6034,7 +6752,7 @@ function idleIncome(seconds) {
   });
   perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond();
   const t = Math.min(seconds, OFFLINE_CAP);
-  return { amount: Math.floor(perSecond * t * OFFLINE_RATE), perHour: Math.round(perSecond * 3600 * OFFLINE_RATE), seconds: t };
+  return { amount: Math.floor(perSecond * t * offlineRate()), perHour: Math.round(perSecond * 3600 * offlineRate()), seconds: t };
 }
 
 function formatDuration(sec) {
@@ -6056,9 +6774,9 @@ function offerIdleEarnings(seconds) {
   if (seconds < 60) return;
   const here = idleIncome(seconds);
   const others = Math.floor(otherBranchesRate() * here.seconds);
-  const taxes = Math.floor(empireRate() * OFFLINE_RATE * here.seconds);
+  const taxes = Math.floor(empireRate() * offlineRate() * here.seconds);
   const amount = here.amount + others + taxes;
-  const perHour = here.perHour + Math.round((otherBranchesRate() + empireRate() * OFFLINE_RATE) * 3600);
+  const perHour = here.perHour + Math.round((otherBranchesRate() + empireRate() * offlineRate()) * 3600);
   const counted = here.seconds;
   const box = document.getElementById('away');
   const text = document.getElementById('awaytext');
@@ -6095,6 +6813,7 @@ function guideTarget() {
     if (at) return at;
   }
   if (ev.boss) return player.floor !== 0 ? ELEVATOR : bossStand(ev.boss);
+  if (epiTargets().length) return player.floor !== 0 ? ELEVATOR : plotZone(district.plots[epiTargets()[0]].at);
   if (player.floor === 1) return floor2Tasks()[0]?.at || null;
   if (player.floor === 2) return roofTasks()[0]?.at || null;
   if (player.floor >= 3) return upperTasks(player.floor)[0]?.at || null;
@@ -6136,7 +6855,10 @@ let shownMoney = 0;
 
 function addMoney(n, countsForBoard = true) {
   state.money += n;
-  if (n > 0 && countsForBoard) state.earned = (state.earned || 0) + n; // lifetime earnings for the leaderboard
+  if (n > 0 && countsForBoard) {
+    state.earned = (state.earned || 0) + n; // lifetime earnings for the leaderboard
+    weekProgress(n);
+  }
   updateMoney();
 }
 function updateMoney() {
@@ -6172,6 +6894,9 @@ const upList = document.getElementById('uplist');
 const upBtn = document.getElementById('upbtn');
 function renderUpgrades() {
   upList.innerHTML = '';
+  for (const b of document.querySelectorAll('#uptabs button')) b.classList.toggle('on', b.dataset.tab === upTab);
+  if (upTab === 'cards') return renderCards();
+  if (upTab === 'research') return renderResearch();
   for (const u of UPGRADES) {
     const lvl = upLevel(u.id);
     const maxed = lvl >= u.max;
@@ -6279,6 +7004,9 @@ function ensureDaily() {
 }
 function missionProgress(type, n) {
   challengeProgress(type, n);
+  const st = stats();
+  const key = { serve: 'served', special: 'specials', rush: 'rushes' }[type];
+  if (key) st[key] = (st[key] || 0) + n;
   if (!state.daily) return;
   for (const m of state.daily.missions) if (m.type === type && !m.claimed) m.progress = Math.min(m.target, m.progress + n);
 }
@@ -6303,6 +7031,12 @@ function renderMissions() {
   });
   card.append(btn);
   missionList.append(card);
+  const q = quizState();
+  const quiz = document.createElement('div');
+  quiz.className = 'branchcard';
+  quiz.innerHTML = `<b>🩺 ควิซสุขภาพวันนี้ ${q.done.length}/${QUIZ_PER_DAY}</b><br><small>ตอบถูกข้อละ 💵${quizReward().toLocaleString()} · ได้ความรู้สุขภาพจริง</small><br>`;
+  quiz.append(emButton(q.done.length >= QUIZ_PER_DAY ? 'ตอบครบแล้ว ✓' : '✏️ ตอบควิซ', false, () => { missionPanel.style.display = 'none'; openQuiz(); }));
+  missionList.append(quiz);
   for (const m of state.daily.missions) {
     const def = MISSIONS.find((d) => d.type === m.type);
     const done = m.progress >= m.target;
@@ -6328,6 +7062,7 @@ function renderMissions() {
     row.append(btn);
     missionList.append(row);
   }
+  renderAchievements(missionList);
 }
 function updateMissionDot() {
   const ready = state.daily?.missions.some((m) => !m.claimed && m.progress >= m.target);
@@ -6617,7 +7352,8 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // state.branch is the open branch's index; state.branches holds a snapshot of every
 // branch (null = opened but never played). Money, earnings and missions are shared.
 const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0, style: defaultStyle(), empire: defaultEmpire(),
-  challenge: { date: '', score: 0 }, room: null, tips: [] };
+  challenge: { date: '', score: 0 }, room: null, tips: [],
+  prestige: defaultPrestige(), cards: [], cardPulls: 0, research: { done: [], cur: null }, stats: {}, achievements: [], quiz: null, week: null };
 
 let awayOnLoad = 0;
 let localSavedAt = 0;
@@ -6642,6 +7378,8 @@ function saveData() {
   return {
     v: 2, money: state.money, earned: state.earned, daily: state.daily, savedAt: Date.now(), tutorial: state.tutorial, style: state.style, empire: state.empire,
     challenge: state.challenge, room: state.room, tips: state.tips,
+    prestige: state.prestige, cards: state.cards, cardPulls: state.cardPulls, research: state.research,
+    stats: state.stats, achievements: state.achievements, quiz: state.quiz, week: state.week,
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
     branch: state.branches.length - 1, step: state.step,
@@ -6709,6 +7447,14 @@ function load() {
   if (data.challenge?.date === todayKey()) state.challenge = data.challenge;
   state.room = typeof data.room === 'string' ? data.room : null;
   state.tips = Array.isArray(data.tips) ? data.tips : [];
+  state.prestige = { ...defaultPrestige(), ...(data.prestige || {}) };
+  state.cards = Array.isArray(data.cards) ? data.cards : [];
+  state.cardPulls = data.cardPulls || 0;
+  state.research = { done: [], cur: null, ...(data.research || {}) };
+  state.stats = data.stats || {};
+  state.achievements = Array.isArray(data.achievements) ? data.achievements : [];
+  state.quiz = data.quiz || null;
+  state.week = data.week || null;
   while (state.empire.plots.length < CITY_PLOTS + 4 * (state.empire.land || 0)) state.empire.plots.push(null);
   // Players from before the tutorial existed (or anyone who has earned money) skip it
   state.tutorial = data.tutorial ?? (state.earned > 0 || state.branches.some((b) => b?.step) ? TUTORIAL.length : 0);
@@ -6795,6 +7541,7 @@ function watchFps(now) {
   if (fps < 26 && !asked) toast(`🐢 เกมกระตุกไหม? (${Math.round(fps)} fps)<br>ลองเปิด <b>⚡ โหมดประหยัด</b> ในเมนู ⚙️`, 6500);
 }
 let last = performance.now();
+let dnTimer = 0;
 let saveTimer = 0;
 let running = false;
 function frame(now) {
@@ -6811,6 +7558,7 @@ function frame(now) {
     tickEmpire(dt);
     updateDistrict(dt);
     updateCollectors(dt);
+    updateExtras(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
     updateRoof(dt);
@@ -6849,6 +7597,12 @@ function frame(now) {
   tickMoneyDisplay(dt);
   watchFps(now);
   updateHomeBtn();
+  dnTimer -= dt;
+  if (dnTimer <= 0) {
+    dnTimer = 1;
+    updateDayNight();
+    if (upPanel.style.display === 'flex' && upTab === 'research' && state.research.cur) renderUpgrades();
+  }
   if (mapView.active) renderMapView(dt);
   else renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -6863,6 +7617,7 @@ load();
 applyTheme();
 applyOutfit();
 buildDistrict();
+buildKrathong();
 spawnCrew();
 syncCollectors();
 showNextTile();
@@ -7148,7 +7903,7 @@ function boardRow(r, right, me) {
   row.className = 'boardrow' + (me ? ' me' : '');
   const medal = ['🥇', '🥈', '🥉'][r.rank - 1] || `${r.rank}.`;
   const t = titleOf(r.tier);
-  row.innerHTML = `<span class="rk">${medal}</span><span class="nm">${escapeHtml(r.nickname)}<br><small>${t.icon} ${t.title}${r.branch ? ` · ${r.branch + 1} สาขา` : ''}</small></span><span class="er">${right}</span>`;
+  row.innerHTML = `<span class="rk">${medal}</span><span class="nm">${escapeHtml(r.nickname)}<br><small>${t.icon} ${t.title}${r.branch ? ` · ${r.branch + 1} สาขา` : ''}${r.badges ? ` · 🏅${r.badges}` : ''}${r.stars ? ` · ⭐${r.stars}` : ''}</small></span><span class="er">${right}</span>`;
   return row;
 }
 async function renderBoard() {
@@ -7199,8 +7954,21 @@ async function renderRoom(list, sub) {
     return;
   }
   sub.innerHTML = `รหัสห้อง <b class="roomcode">${state.room}</b> · ส่งรหัสนี้ให้เพื่อน<br>${todayChallenge().icon} = คะแนนท้าทายวันนี้`;
-  const rows = await rpc('room_board', { p_room: state.room, p_date: todayKey() });
-  rows.forEach((r) => list.append(boardRow(r, `💵${Number(r.earned).toLocaleString()}<br><small>${todayChallenge().icon}${Number(r.score).toLocaleString()}</small>`, r.nickname === cloud.nickname && r.earned === state.earned)));
+  let rows;
+  try {
+    rows = await rpc('room_board', { p_room: state.room, p_date: todayKey(), p_week: weekKey() });
+  } catch {
+    rows = await rpc('room_board', { p_room: state.room, p_date: todayKey() }); // before the weekly upgrade
+  }
+  const weekly = rows.some((r) => r.week !== undefined);
+  if (weekly && rows.length) {
+    const best = [...rows].sort((a, b) => b.week - a.week)[0];
+    if (best.week > 0) sub.innerHTML += `<br>🏆 แชมป์สัปดาห์นี้: <b>${escapeHtml(best.nickname)}</b> (💵${Number(best.week).toLocaleString()})`;
+  }
+  rows.forEach((r) => list.append(boardRow(r, `💵${Number(r.earned).toLocaleString()}<br><small>${todayChallenge().icon}${Number(r.score).toLocaleString()}${weekly ? ` · 📆${Number(r.week).toLocaleString()}` : ''}</small>`, r.nickname === cloud.nickname && r.earned === state.earned)));
+  const gift = emEl('button', 'btn', '🎁 ส่งของขวัญให้ทั้งห้อง (วันละครั้ง)');
+  gift.addEventListener('click', sendRoomGift);
+  list.append(gift);
   const share = emEl('button', 'btn ghost', '📋 คัดลอกคำชวนเพื่อน');
   share.addEventListener('click', async () => {
     const text = `มาแข่งเปิดโรงพยาบาลกัน! เล่นที่ ${location.origin}${location.pathname} แล้วเข้าห้องเพื่อนด้วยรหัส ${state.room}`;
@@ -7235,7 +8003,10 @@ document.getElementById('boardclose').addEventListener('click', () => {
 });
 
 renderCloud();
-cloudSync();
+cloudSync().then(claimGifts);
+setInterval(() => {
+  if (running) claimGifts();
+}, 5 * 60 * 1000);
 setInterval(() => {
   if (running) cloudPush();
 }, 30000);
@@ -7256,6 +8027,33 @@ document.addEventListener('visibilitychange', () => {
 const autoBtn = document.getElementById('autobtn');
 const autoBadge = document.getElementById('autobadge');
 autoBtn.addEventListener('click', () => setAuto(!auto.on));
+for (const b of document.querySelectorAll('#uptabs button')) {
+  b.addEventListener('click', () => {
+    upTab = b.dataset.tab;
+    renderUpgrades();
+  });
+}
+document.getElementById('sharebtn').addEventListener('click', shareHospital);
+document.getElementById('menushare').addEventListener('click', () => {
+  menu.style.display = 'none';
+  running = true;
+  shareHospital();
+});
+const dnBtn = document.getElementById('daynightbtn');
+dnBtn.textContent = `🌗 กลางวัน-กลางคืนตามเวลาจริง: ${dayNightOn ? 'เปิด' : 'ปิด'}`;
+dnBtn.addEventListener('click', () => {
+  dayNightOn = !dayNightOn;
+  try {
+    localStorage.setItem('drquest-daynight', dayNightOn ? 'on' : 'off');
+  } catch {
+    // ignore
+  }
+  dnBtn.textContent = `🌗 กลางวัน-กลางคืนตามเวลาจริง: ${dayNightOn ? 'เปิด' : 'ปิด'}`;
+  dayBase.f = -1;
+  updateDayNight();
+});
+// Works offline once loaded: cache the game files
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 upBtn.addEventListener('click', () => {
   renderUpgrades();
   upPanel.style.display = 'flex';
@@ -7299,4 +8097,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
