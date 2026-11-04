@@ -729,11 +729,20 @@ function signTex(text, bg) {
     roundRect(g, 8, 8, 496, 96, 18);
     g.stroke();
     g.fillStyle = '#ffffff';
-    g.font = '600 52px Mitr, sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText(text, 256, 60);
+    fitText(g, text, 256, 60, 470, 52, 600);
   });
+}
+// Write text centred at (x, y), shrinking the font until it fits maxW, so long names never get cut off
+function fitText(g, text, x, y, maxW, size, weight = 700) {
+  let px = size;
+  g.font = `${weight} ${px}px Mitr, sans-serif`;
+  while (px > 18 && g.measureText(text).width > maxW) {
+    px -= 2;
+    g.font = `${weight} ${px}px Mitr, sans-serif`;
+  }
+  g.fillText(text, x, y);
 }
 
 const deptRugs = {};
@@ -7151,7 +7160,7 @@ function makeCampusTile(lot) {
     g.fillText(lot.icon, 128, 92);
     g.font = '700 40px Mitr, sans-serif';
     g.fillStyle = '#ffffff';
-    g.fillText(`💵${(lot.price - paid).toLocaleString()}`, 128, 190);
+    fitText(g, `💵${(lot.price - paid).toLocaleString()}`, 128, 190, 228, 40);
     tex.needsUpdate = true;
   };
   draw();
@@ -7456,26 +7465,35 @@ function makeHireTile(S, at) {
   const t = { at, mesh, paid: 0, draw: null };
   t.draw = () => {
     const g = c.getContext('2d');
-    g.fillStyle = '#2b2d42';
+    g.fillStyle = '#134e4a';
     g.fillRect(0, 0, 256, 256);
-    g.fillStyle = '#3fbf5f';
+    g.fillStyle = '#14b8a6';
     g.fillRect(0, 256 - (256 * t.paid) / S.hire, 256, (256 * t.paid) / S.hire);
-    g.font = '80px sans-serif';
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 10;
+    g.setLineDash([22, 14]);
+    g.strokeRect(10, 10, 236, 236);
+    g.setLineDash([]);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillText('🧑‍⚕️', 128, 90);
-    g.font = '700 38px Mitr, sans-serif';
-    g.fillStyle = '#fff';
-    g.fillText(`จ้าง 💵${(S.hire - t.paid).toLocaleString()}`, 128, 190);
+    g.font = '72px sans-serif';
+    g.fillText('🧑‍⚕️', 128, 74);
+    g.fillStyle = '#ffffff';
+    fitText(g, 'จ้างเจ้าหน้าที่', 128, 150, 216, 34, 600);
+    fitText(g, `💵${(S.hire - t.paid).toLocaleString()}`, 128, 200, 216, 42);
     tex.needsUpdate = true;
   };
+  // A label over the tile saying who you'd be hiring
+  t.label = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.66), new THREE.MeshBasicMaterial({ toneMapped: false, map: signTex(`🧑‍⚕️ จ้าง: ${S.name}`, '#0f766e'), side: THREE.DoubleSide, transparent: true }));
+  t.label.position.set(at.x, 1.7, at.z - 0.6);
+  scene.add(t.label);
   t.draw();
   return t;
 }
 function hireStation(it, S, animate) {
   S.staffed = true;
   if (S.tile) {
-    scene.remove(S.tile.mesh);
+    scene.remove(S.tile.mesh, S.tile.label);
     S.tile = null;
   }
   const staffer = campusPerson(staffKind(S.staff));
@@ -8151,7 +8169,7 @@ function makeBaseTile(u, at, label, color = '#3a4520') {
     g.fillText(u.icon, 128, 92);
     g.font = '700 40px Mitr, sans-serif';
     g.fillStyle = '#ffffff';
-    g.fillText(`💵${(price - paid).toLocaleString()}`, 128, 190);
+    fitText(g, `💵${(price - paid).toLocaleString()}`, 128, 190, 228, 40);
     tex.needsUpdate = true;
   };
   return t;
