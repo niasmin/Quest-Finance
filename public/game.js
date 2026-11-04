@@ -201,6 +201,10 @@ Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, n
 sun.shadow.bias = -0.0005;
 scene.add(sun);
 
+renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.needsUpdate = true;
+let shadowTick = false;
+
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -737,7 +741,7 @@ function route(from, to) {
       if (Math.abs(from.x - CAMPUS_X) > 0.7) return campusRoute(from, v(CAMPUS_X, from.z));
       return v(CAMPUS_X, 16.2);
     }
-    if (inDistrict(from)) return route(from, v(DIST_ROAD_X, 14.6));
+    if (inDistrict(from)) return route(from, v(roadOf(from.x), ROAD_Z - 1.2));
     if (from.z <= FLOOR.z1 && from.x > FLOOR.x0) return route(from, GATE_OUT);
     // Already at the foot of the avenue: walk straight in
     if (Math.abs(from.x - CAMPUS_X) < 0.7) return v(CAMPUS_X, 14.4);
@@ -754,8 +758,12 @@ function route(from, to) {
   }
   if (inDistrict(from) && !inDistrict(to)) {
     const rx = roadOf(from.x);
-    return Math.abs(from.x - rx) > 0.6 ? v(rx, from.z) : v(rx, 14.6);
+    // Step clear of the district (its edge is at ROAD_Z - 1.8) so the next leg can take over
+    return Math.abs(from.x - rx) > 0.6 ? v(rx, from.z) : v(rx, ROAD_Z - 1.2);
   }
+  // Just out of the district on the front sidewalk: walk east along it past the district's corner
+  // first, or a straight line to the gate dips back into the district and turns around
+  if (from.x < FLOOR.x0 - 1.2 && from.z >= ROAD_Z - 1.8 && !inDistrict(to)) return v(FLOOR.x0 - 0.8, ROAD_Z - 1.2);
   const outside = (p) => p.z > FLOOR.z1;
   // Going in or out: pass through the gate in two steps so nobody walks into the south wall
   if (outside(to) !== outside(from)) {
@@ -824,7 +832,6 @@ function makeItem(type) {
     const p = PRODUCTS[type];
     m = new THREE.Mesh(itemGeo, [p.color, p.color, p.top, p.color, p.color, p.color].map(mat));
   }
-  m.castShadow = true;
   m.userData.type = type;
   return m;
 }
@@ -2491,12 +2498,15 @@ function updateElevator(dt) {
     return true;
   }
   const near = flatDist(pos, ELEVATOR) < 0.7;
-  if (!near) lift.armed = true; // step off before the next ride
+  // With the roof built there are three stops: AUTO knows where it's going, a player picks
+  const autoDriving = autoBadge.classList.contains('show');
+  // Step off before the next ride. AUTO that just arrived and now needs another floor
+  // never steps off the pad, so its new destination re-arms the lift.
+  const autoWants = autoDriving && auto.task?.at === ELEVATOR && auto.task.ride !== undefined && auto.task.ride !== player.floor;
+  if (!near || autoWants) lift.armed = true;
   // Only a player who stops on the pad rides; walking across it does nothing
   const still = Math.hypot(input.x, input.z) < 0.08;
   lift.wait = near && lift.armed && still ? lift.wait + dt : 0;
-  // With the roof built there are three stops: AUTO knows where it's going, a player picks
-  const autoDriving = autoBadge.classList.contains('show');
   const manyStops = liftStops().length > 2;
   showLiftPicker(manyStops && near && lift.armed && !autoDriving);
   if (lift.wait > 0.5 && (!manyStops || autoDriving)) {
@@ -2515,7 +2525,6 @@ function makeFloor2Item(type) {
   if (type === 'raw') m = new THREE.Mesh(rawGeo, [0xd9b382, 0xd9b382, 0xf3e2c0, 0xd9b382, 0xd9b382, 0xd9b382].map(mat));
   else if (type === 'bowl') m = new THREE.Mesh(bowlGeo, [mat(0xffffff), mat(0xf5a623), mat(0xffffff)]);
   else m = new THREE.Mesh(ivGeo, [0x9fd8ff, 0x9fd8ff, 0xffffff, 0x9fd8ff, 0x9fd8ff, 0x9fd8ff].map(mat));
-  m.castShadow = true;
   m.userData.type = type;
   m.userData.f2 = true;
   return m;
@@ -3357,7 +3366,7 @@ const evChips = document.getElementById('evchips');
 let evHtml = '';
 function updateEventHud() {
   const cooling = Math.max(0, ((state.style.rushAt || 0) - Date.now()) / 1000);
-  rushBtn.style.display = running && tutorialDone() && state.step >= 3 && !ev.rush ? 'flex' : 'none';
+  rushBtn.style.display = running && tutorialDone() && topStep() >= 5 && !ev.rush ? 'flex' : 'none';
   if (rushBtn.style.display === 'flex') tip('rush');
   rushBtn.disabled = cooling > 0;
   const label = cooling > 0 ? `⏳ ${fmtClock(cooling)}` : 'เร่งด่วน';
@@ -4515,7 +4524,7 @@ const EMPIRE_TIERS = [
   { id: 'province', icon: '🏞️', name: 'จังหวัด', title: 'หมอประจำจังหวัด', cost: 60000, branches: 1, base: 15000 },
   { id: 'region', icon: '🗾', name: 'ภูมิภาค', title: 'หมอใหญ่ประจำภาค', cost: 600000, branches: 2, base: 150000 },
   { id: 'country', icon: '🗺️', name: 'ประเทศ', title: 'หมอแห่งชาติ', cost: 6000000, branches: 3, base: 1500000 },
-  { id: 'world', icon: '🌏', name: 'โลก', title: 'หมอแห่งโลก', cost: 60000000, branches: 4, base: 15000000 },
+  { id: 'world', icon: '🌏', name: 'โลก', title: 'หมอแห่งโลก', cost: 40000000, branches: 4, base: 9000000 },
 ];
 // Places on each bigger map. The first is home: what the previous tier built. x/y are % of the map.
 const EMPIRE_NODES = [
@@ -4680,7 +4689,8 @@ function renderEmpire() {
   const title = EMPIRE_TIERS[e.tier];
   document.getElementById('emtitle').innerHTML = `${title.icon} อาณาจักรของคุณ<br><small>👑 ${title.title} · ภาษี +${empireRate().toLocaleString()}/วินาที</small>`;
   emTabs.innerHTML = '';
-  const tabs = [['branches', '🏥', 'สาขา'], ...EMPIRE_TIERS.map((t, i) => [i, i > e.tier ? '🔒' : t.icon, t.name]), ['prestige', '⭐', 'เกิดใหม่']];
+  const tabs = [['branches', '🏥', 'สาขา'], ...EMPIRE_TIERS.map((t, i) => [i, i > e.tier ? '🔒' : t.icon, t.name]).filter(([i]) => i <= e.tier + 1)];
+  if (e.tier >= 1 || prs().runs > 0 || starsToGain() >= 1) tabs.push(['prestige', '⭐', 'เกิดใหม่']);
   for (const [id, icon, name] of tabs) {
     const b = document.createElement('button');
     b.innerHTML = `${icon}<br><small>${name}</small>`;
@@ -5759,6 +5769,7 @@ function doPrestige() {
     current: 0, branches: [{ step: headstart, rating: 3.5 }], branch: 0, step: headstart,
     style: state.style, challenge: state.challenge, room: state.room, tips: state.tips, week: state.week,
     stats: state.stats, achievements: state.achievements, cards: state.cards, cardPulls: state.cardPulls, quiz: state.quiz,
+    conquests: state.conquests, conquestRun: state.conquestRun,
     prestige: { ...p, stars: p.stars + gain, total: p.total + gain, runs: p.runs + 1, base: state.earned },
     empire: defaultEmpire(), research: { done: [], cur: null }, savedAt: data.savedAt,
   });
@@ -6236,6 +6247,7 @@ const ACHIEVEMENTS = [
   { id: 'medal10', icon: '🎖️', name: 'เหรียญกล้าหาญ 10 เหรียญ', ok: () => (state.base?.medals || 0) >= 10, reward: 50000 },
   { id: 'defend5', icon: '🛡️', name: 'ป้องกันฐาน 5 ครั้ง', ok: () => (stats().defenses || 0) >= 5, reward: 40000 },
   { id: 'general5', icon: '⭐', name: 'ได้นายพล 5 ดาว', ok: () => (state.base?.generals || []).some((g) => g.stars === 5), reward: 80000 },
+  { id: 'conquer', icon: '👑', name: 'พิชิตโลก', ok: () => conquered(), reward: 1000000 },
   { id: 'decor', icon: '🎨', name: 'ตกแต่งครบทุกอย่าง', ok: () => DECOR.every((d) => ownsStyle(d.id)), reward: 50000 },
 ];
 let achTimer = 0;
@@ -6320,6 +6332,7 @@ async function makeShareCard() {
   player.group.position.set(-3, 0, 2);
   setZoom(2.4);
   updateCamera(0, true);
+  renderer.shadowMap.needsUpdate = true;
   renderer.render(scene, camera);
   const shot = await loadImage(renderer.domElement.toDataURL('image/jpeg', 0.92));
   player.group.position.copy(saved.pos);
@@ -7142,6 +7155,9 @@ function interiorPerSecond() {
 // powers missions and defends the base from drone raids. Generals boost a whole branch.
 const BASE_GATE = v(20, -29.5);
 const BASE_OPEN_STEP = 24;
+// The base is shared by every branch: open once any branch has its first 24 departments
+// (and this one has reached the campus avenue that leads there)
+const baseOpen = () => state.step >= CAMPUS_OPEN_STEP && topStep() >= BASE_OPEN_STEP;
 const inBase = (p) => p.z < -28.6 && p.x > -14 && p.x < 50;
 const BASE_UNLOCKS = [
   { id: 'hq', icon: '🏛️', name: 'กองบัญชาการค่ายทหาร', price: 50000, at: v(22.6, -33) },
@@ -7616,7 +7632,7 @@ function buildBase() {
 }
 function updateBase(dt) {
   if (!BASE.built) return;
-  const open = state.step >= BASE_OPEN_STEP;
+  const open = baseOpen();
   if (open && !BASE.tile && B().step < BASE_UNLOCKS.length) {
     showBaseTile();
     tip('base');
@@ -7725,6 +7741,8 @@ function updateFlight(dt) {
     player.group.position.copy(BASE_UNLOCKS[7].at);
     player.group.visible = true;
     BASE.flight = null;
+    BASE.opened = true; // landed on the jet's ring: step off before the next flight
+    BASE.stand = 0;
     updateCamera(0, true);
   }
 }
@@ -7951,7 +7969,7 @@ function baseRoute(from, to) {
   return to;
 }
 function baseTask() {
-  if (state.step < BASE_OPEN_STEP) return null;
+  if (!baseOpen()) return null;
   if (BASE.defense) {
     const d = nearestDrone();
     if (d) return { at: v(d.m.position.x, Math.min(-30, d.m.position.z)), keep: () => BASE.drones.includes(d) };
@@ -7962,6 +7980,221 @@ function baseTask() {
 }
 function basePerSecond() {
   return militaryPower() * 0.4 * priceMult();
+}
+
+// ---------- story: Dr. Quest's journey, from one small clinic to conquering the world ----------
+// Nine chapters, each a few goals. Finishing a chapter pays a reward and tells the next part
+// of the story; the guide arrow and dock buttons point at whatever the current goal needs.
+const topStep = () => Math.max(state.step, ...state.branches.map((b) => b?.step || 0));
+const campusCount = () => Math.max(campus.owned.length, ...state.branches.map((b) => b?.campus?.owned?.length || 0));
+const baseStep = () => state.base?.step || 0;
+const has = (id) => topStep() > UNLOCKS.findIndex((u) => u.id === id);
+const STORY = [
+  { icon: '🩺', name: 'คลินิกเล็ก ๆ', story: 'Dr. Quest ใช้เงินเก็บก้อนสุดท้ายเปิดคลินิกเล็ก ๆ ริมถนน ชาวบ้านต่อคิวรอหมอใจดีคนนี้อยู่แล้ว!', reward: 300,
+    goals: [
+      { text: 'เรียนรู้การรักษาคนไข้ (บทสอน)', ok: () => tutorialDone() },
+      { text: 'เปิดห้องฉีดวัคซีน 💉', ok: () => has('vaccine') },
+      { text: 'เปิดห้องเอกซเรย์ 🩻', ok: () => has('xray') },
+    ] },
+  { icon: '🏥', name: 'โรงพยาบาลของชุมชน', story: 'ข่าวลือว่ามีหมอเก่งมาเปิดคลินิกแพร่ไปทั่ว คนไข้มาจากหมู่บ้านข้าง ๆ คลินิกต้องโตเป็นโรงพยาบาลแล้ว!', reward: 2000,
+    goals: [
+      { text: 'รถพยาบาลรับคนไข้ 🚑', ok: () => has('ambulance') },
+      { text: 'ห้องผ่าตัดพร้อมศัลยแพทย์ 🫀', ok: () => has('surgeon') },
+      { text: 'รักษาคนไข้ครบ 100 คน', ok: () => (stats().served || 0) >= 100, n: () => `${Math.min(100, stats().served || 0)}/100` },
+    ] },
+  { icon: '🛗', name: 'ขึ้นชั้นสองและวิทยาเขต', story: 'ที่ดินข้าง ๆ ว่างอยู่ และผู้ป่วยต้องนอนพัก Dr. Quest ตัดสินใจสร้างชั้นสองและซื้อที่ดินฝั่งตะวันออกทำวิทยาเขตสุขภาพ', reward: 8000,
+    goals: [
+      { text: 'ลิฟต์ขึ้นชั้น 2 🛗', ok: () => has('elevator') },
+      { text: 'หอผู้ป่วยใน 🛏️', ok: () => has('ward') },
+      { text: 'ซื้ออาคารแรกในวิทยาเขต (ทางขวาของ รพ.)', ok: () => campusCount() >= 1, at: () => (campusOpen() && state.step >= CAMPUS_OPEN_STEP ? CAMPUS_LOTS[0].front : null) },
+    ] },
+  { icon: '🏙️', name: 'เมืองหมอ', story: 'รอบโรงพยาบาลเริ่มมีบ้านเรือน ร้านค้า และโรงเรียนแพทย์ Dr. Quest กลายเป็นผู้สร้างเมืองแห่งสุขภาพ', reward: 20000,
+    goals: [
+      { text: 'สร้างอาคารแรกในเมือง (กด 🌏 อาณาจักร)', ok: () => builtPlots() >= 1, btn: 'branchbtn' },
+      { text: 'โรงพยาบาลครบ 24 แผนกแรก', ok: () => topStep() >= CORE_STEPS },
+      { text: 'เมืองมี 4 อาคาร', ok: () => builtPlots() >= 4, btn: 'branchbtn', n: () => `${Math.min(4, builtPlots())}/4` },
+    ] },
+  { icon: '🎖️', name: 'ค่ายทหารปกป้องเมือง', story: 'เมืองรุ่งเรืองจนมีภัยคุกคาม! กองทัพขอให้ Dr. Quest สร้างค่ายทหารทางเหนือของวิทยาเขต พร้อมเปิดโรงพยาบาลสาขาที่สอง', reward: 50000,
+    goals: [
+      { text: 'สร้างกองบัญชาการค่ายทหาร 🏛️', ok: () => baseStep() >= 1, at: () => (baseOpen() && baseStep() < 1 ? BASE_UNLOCKS[0].at : null) },
+      { text: 'บ้านพักทหาร 🏠', ok: () => baseStep() >= 3, at: () => (baseOpen() && baseStep() < 3 ? BASE_UNLOCKS[baseStep()].at : null) },
+      { text: 'เปิดโรงพยาบาลสาขา 2 (🌏 → สาขา)', ok: () => state.branches.length >= 2, btn: 'branchbtn' },
+    ] },
+  { icon: '🏞️', name: 'หมอประจำจังหวัด', story: 'ผู้ว่าฯ เชิญ Dr. Quest ดูแลทั้งจังหวัด! เติมเมืองให้ครบ แล้วยกระดับเป็นจังหวัดแห่งสุขภาพ', reward: 150000,
+    goals: [
+      { text: 'เมืองครบ 8 แปลง', ok: () => builtPlots() >= 8, btn: 'branchbtn', n: () => `${Math.min(8, builtPlots())}/8` },
+      { text: 'ยกระดับเป็นจังหวัด 🏞️', ok: () => emp().tier >= 1, btn: 'branchbtn' },
+      { text: 'ดาดฟ้าและลานเฮลิคอปเตอร์ 🚁', ok: () => has('roof') },
+    ] },
+  { icon: '🗾', name: 'หมอใหญ่ประจำภาค', story: 'ภัยธรรมชาติและโรคระบาดเกิดหลายจังหวัดพร้อมกัน ต้องมีกองทัพเรือและโรงพยาบาลหลายชั้นรับมือ', reward: 1500000,
+    goals: [
+      { text: 'ท่าเรือกองทัพเรือ ⚓', ok: () => baseStep() >= 6, at: () => (baseOpen() && baseStep() >= 3 && baseStep() < 6 ? BASE_UNLOCKS[baseStep()].at : null) },
+      { text: 'ชั้น 3 เปิดบริการ 🧠', ok: () => has('floor3') },
+      { text: 'ยกระดับเป็นภูมิภาค 🗾', ok: () => emp().tier >= 2, btn: 'branchbtn' },
+    ] },
+  { icon: '🗺️', name: 'หมอแห่งชาติ', story: 'ทั้งประเทศรู้จัก Dr. Quest แล้ว! สร้างโรงพยาบาลให้ครบทุกชั้น และกองทัพที่มีทั้งฐานบินและเครื่องบินรบส่วนตัว', reward: 15000000,
+    goals: [
+      { text: 'ค่ายทหารครบทุกอาคาร ✈️🛩️', ok: () => baseStep() >= BASE_UNLOCKS.length, at: () => (baseOpen() && baseStep() >= 6 && baseStep() < BASE_UNLOCKS.length ? BASE_UNLOCKS[baseStep()].at : null) },
+      { text: 'โรงพยาบาลครบทุกชั้นทุกแผนก 🏢', ok: () => topStep() >= UNLOCKS.length },
+      { text: 'ยกระดับเป็นประเทศ 🗺️', ok: () => emp().tier >= 3, btn: 'branchbtn' },
+    ] },
+  { icon: '🌏', name: 'พิชิตโลก', story: 'โลกทั้งใบรอหมอคนนี้อยู่ ทุกทวีปต้องการโรงพยาบาลของ Dr. Quest — นี่คือบทสุดท้าย!', reward: 0,
+    goals: [
+      { text: 'ยกระดับเป็นโลก 🌏', ok: () => emp().tier >= 4, btn: 'branchbtn' },
+      { text: 'พัฒนาทุกทวีปบนแผนที่โลกอย่างน้อย Lv.1', ok: () => emp().tier >= 4 && tierFilled(4), btn: 'branchbtn', n: () => (emp().tier >= 4 ? `${nodeLevels(4).filter((l) => l > 0).length}/${nodeLevels(4).length}` : '') },
+    ] },
+];
+const defaultStory = () => ({ ch: 0 });
+const story = () => {
+  if (!state.story) state.story = defaultStory();
+  return state.story;
+};
+const storyDone = () => story().ch >= STORY.length;
+const curChapter = () => STORY[story().ch];
+const curGoal = () => curChapter()?.goals.find((g) => !g.ok());
+const conquered = () => (state.conquests || 0) > 0;
+
+// Where the arrow should point for the current goal (only when nothing more urgent is going on)
+function storyTarget() {
+  if (storyDone() || player.floor !== 0) return null;
+  return curGoal()?.at?.() || null;
+}
+
+// Anonymous milestones (chapter reached, minutes played) so we can see where players stop.
+// Only a random per-browser id is sent: no save, name or device key.
+function logProgress(kind) {
+  if (CLOUD_OFF) return;
+  let anon = '';
+  try {
+    anon = localStorage.getItem('drquest-anon') || '';
+    if (!anon) {
+      anon = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('drquest-anon', anon);
+    }
+  } catch {
+    return;
+  }
+  rpc('log_progress', { p_anon: anon, p_kind: kind, p_minutes: Math.round((stats().play || 0) / 60) }).catch(() => {});
+}
+
+const questEl = document.getElementById('quest');
+let questHtml = '';
+let storyTimer = 0;
+let storyBtn = null;
+function updateStory(dt) {
+  stats().play = (stats().play || 0) + dt;
+  storyTimer -= dt;
+  if (storyTimer > 0) return;
+  storyTimer = 0.5;
+  const s = story();
+  // Saves from before the story skip the chapters they already finished, without rewards
+  if (s.catchup) {
+    while (!storyDone() && curChapter().goals.every((g) => g.ok())) s.ch++;
+    delete s.catchup;
+  }
+  if (!storyDone() && curChapter().goals.every((g) => g.ok())) {
+    const done = curChapter();
+    s.ch++;
+    if (done.reward) addMoney(done.reward, false);
+    sfxUnlock();
+    logProgress(`ch${s.ch + 1}`);
+    if (!storyDone()) {
+      const next = curChapter();
+      toast(`📖 <b>จบบทที่ ${s.ch}: ${done.name}</b>${done.reward ? ` · รางวัล 💵${done.reward.toLocaleString()}` : ''}<br>${next.icon} บทที่ ${s.ch + 1}: <b>${next.name}</b><br><small>${next.story}</small>`, 7000);
+    }
+    save();
+  }
+  if (storyDone() && (state.conquestRun ?? -1) !== prs().runs) {
+    state.conquestRun = prs().runs;
+    state.conquests = (state.conquests || 0) + 1;
+    logProgress(`conquer${state.conquests}`);
+    save();
+    showEnding();
+  }
+  // Point a dock button at the goal when it lives in a panel
+  const g = storyDone() ? null : curGoal();
+  const btn = tutorialDone() && g?.btn ? document.getElementById(g.btn) : null;
+  if (btn !== storyBtn) {
+    storyBtn?.classList.remove('questing');
+    btn?.classList.add('questing');
+    storyBtn = btn;
+  }
+  let html = '';
+  if (!tutorialDone()) html = '';
+  else if (storyDone()) html = `👑 พิชิตโลกแล้ว${state.conquests > 1 ? ` ×${state.conquests}` : ''}`;
+  else {
+    const ch = curChapter();
+    const n = ch.goals.filter((x) => x.ok()).length;
+    html = `${ch.icon} บท ${s.ch + 1}/${STORY.length} · ${g ? g.text.replace(/\s*\(.*\)$/, '') : ''}${g?.n ? ` ${g.n()}` : ''} <span class="qn">${n}/${ch.goals.length}</span>`;
+  }
+  if (html !== questHtml) {
+    questHtml = html;
+    questEl.innerHTML = html;
+    questEl.style.display = html ? 'block' : 'none';
+  }
+}
+
+const storyEl = document.getElementById('storypanel');
+function openStory() {
+  const box = storyEl.querySelector('.box');
+  const s = story();
+  box.innerHTML = `<h3>📖 เส้นทางของ Dr. Quest</h3><p class="sub">${storyDone() ? '👑 คุณพิชิตโลกแล้ว!' : `บทที่ ${s.ch + 1} จาก ${STORY.length}`}</p>`;
+  STORY.forEach((ch, i) => {
+    const done = i < s.ch;
+    const cur = i === s.ch;
+    const el = emEl('div', `chap${done ? ' done' : ''}${cur ? ' cur' : ''}${i > s.ch ? ' locked' : ''}`);
+    let inner = `<b>${done ? '✅' : i > s.ch ? '🔒' : ch.icon} บทที่ ${i + 1}: ${i > s.ch ? '???' : ch.name}</b>`;
+    if (i <= s.ch) inner += `<small class="st">${ch.story}</small>`;
+    if (cur) inner += ch.goals.map((g) => `<div class="goal${g.ok() ? ' ok' : ''}">${g.ok() ? '✅' : '⬜'} ${g.text}${g.n && !g.ok() ? ` <small>${g.n()}</small>` : ''}</div>`).join('');
+    if (i <= s.ch && ch.reward) inner += `<small class="rw">รางวัล 💵${ch.reward.toLocaleString()}</small>`;
+    el.innerHTML = inner;
+    box.append(el);
+  });
+  if (conquered()) box.append(emButton('🎬 ดูฉากจบอีกครั้ง', false, () => { storyEl.style.display = 'none'; showEnding(); }));
+  box.append(emButton('ปิด', false, () => { storyEl.style.display = 'none'; }));
+  box.lastChild.classList.add('ghost');
+  storyEl.style.display = 'flex';
+}
+questEl.addEventListener('click', openStory);
+
+// ---------- the ending: the whole world is built ----------
+const endEl = document.getElementById('ending');
+const fmtHours = (sec) => {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return h ? `${h} ชม. ${m} นาที` : `${m} นาที`;
+};
+function showEnding() {
+  const st = stats();
+  const gain = starsToGain();
+  const box = endEl.querySelector('.box');
+  box.innerHTML = `<div class="crown">👑</div><h2>พิชิตโลกแล้ว!</h2>
+    <p class="lead">จากคลินิกเล็ก ๆ ริมถนน วันนี้ Dr. Quest ดูแลสุขภาพคนทั้งโลก<br>ขอบคุณที่สร้างอาณาจักรแห่งการรักษามาด้วยกัน</p>
+    <div class="estats">
+      <div><b>${fmtHours(st.play || 0)}</b><small>เวลาที่เล่น</small></div>
+      <div><b>💵${Math.floor(state.earned).toLocaleString()}</b><small>รายได้สะสม</small></div>
+      <div><b>${(st.served || 0).toLocaleString()}</b><small>คนไข้ที่รักษา</small></div>
+      <div><b>${state.branches.length}</b><small>สาขา</small></div>
+      <div><b>💪${militaryPower().toLocaleString()}</b><small>แสนยานุภาพ</small></div>
+      <div><b>🏅${(state.achievements || []).length}/${ACHIEVEMENTS.length}</b><small>ความสำเร็จ</small></div>
+    </div>
+    <p class="title">ตำแหน่งใหม่บนตารางอันดับ: <b>👑 จักรพรรดิแพทย์โลก</b>${state.conquests > 1 ? ` ×${state.conquests}` : ''}</p>
+    <div class="credits"><div class="roll">
+      <b>Dr. Quest World</b><br><br>
+      <small>ออกแบบเกมและไอเดีย</small><br>ทีม Dr. Quest<br><br>
+      <small>พัฒนาเกม</small><br>Claude Code<br><br>
+      <small>ภาพวิทยาเขต</small><br>Healthcare-Simulator-Starter<br><br>
+      <small>เครื่องยนต์สามมิติ</small><br>three.js<br><br>
+      <small>ขอบคุณเป็นพิเศษ</small><br>คุณหมอ พยาบาล และเจ้าหน้าที่ทุกคน<br>ที่ดูแลพวกเราในชีวิตจริง 💚<br><br>
+      <b>ขอบคุณที่เล่นจนจบ!</b>
+    </div></div>`;
+  box.append(emButton(gain >= 1 ? `⭐ เกิดใหม่ รับ ${gain} ดาว (เริ่มเส้นทางใหม่ เก่งกว่าเดิม)` : '⭐ เกิดใหม่', gain < 1, () => { endEl.style.display = 'none'; doPrestige(); }));
+  box.append(emButton('🌏 เล่นต่อในโลกนี้', false, () => { endEl.style.display = 'none'; }));
+  box.lastChild.classList.add('ghost');
+  endEl.style.display = 'flex';
+  toastEl.classList.remove('show');
+  sfxUnlock();
+  for (let i = 0; i < 6; i++) setTimeout(() => burst(player.group.position), i * 350);
 }
 
 // ---------- player actions ----------
@@ -8428,6 +8661,8 @@ function guideTarget() {
   if (basket.pile) piles.push(basket.pile);
   piles.push(...outdoorPiles());
   if (tile && state.money >= tile.u.price - state.paid) return tile.u.floor ? ELEVATOR : tile.u.at;
+  const quest = storyTarget();
+  if (quest) return quest;
   if (stack.count > 0) {
     for (const line of Object.values(LINES)) if (line.active && stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) return line.drop;
   }
@@ -8499,7 +8734,14 @@ const upList = document.getElementById('uplist');
 const upBtn = document.getElementById('upbtn');
 function renderUpgrades() {
   upList.innerHTML = '';
-  for (const b of document.querySelectorAll('#uptabs button')) b.classList.toggle('on', b.dataset.tab === upTab);
+  // Cards open with floor 2, research once the first 24 departments are built
+  const tabOpen = { up: true, cards: topStep() >= CAMPUS_OPEN_STEP || state.cards.length > 0, research: topStep() >= CORE_STEPS || state.research.done.length > 0 };
+  if (!tabOpen[upTab]) upTab = 'up';
+  for (const b of document.querySelectorAll('#uptabs button')) {
+    b.classList.toggle('on', b.dataset.tab === upTab);
+    b.style.display = tabOpen[b.dataset.tab] ? '' : 'none';
+  }
+  document.getElementById('uptabs').style.display = tabOpen.cards ? '' : 'none';
   if (upTab === 'cards') return renderCards();
   if (upTab === 'research') return renderResearch();
   for (const u of UPGRADES) {
@@ -8903,7 +9145,21 @@ const MUSIC_STYLE = {
   jungle: { wave: 'square', shift: -3, tempo: 1.05, drum: true },
   night: { wave: 'triangle', shift: -5, tempo: 0.9, minor: true, vol: 1.4 },
   desert: { wave: 'sawtooth', shift: -2, tempo: 0.95, minor: true, flat2: true, vol: 0.7 },
+  // Zones outside the hospital have their own take on the tune
+  base: { wave: 'square', shift: -5, tempo: 1.18, drum: true, march: true, vol: 0.9 },
+  campus: { wave: 'triangle', shift: 5, tempo: 0.92, vol: 1.5 },
+  care: { wave: 'sine', shift: 12, tempo: 0.8, vol: 1.9 },
+  district: { wave: 'square', shift: 7, tempo: 1.06, vol: 0.9 },
 };
+// The tune follows the player: base, campus (and inside its centres), the city district, or the branch's own style
+function musicStyle() {
+  const p = player.group.position;
+  if (inBase(p)) return MUSIC_STYLE.base;
+  if (inInterior(p)) return MUSIC_STYLE.care;
+  if (inCampus(p)) return MUSIC_STYLE.campus;
+  if (inDistrict(p)) return MUSIC_STYLE.district;
+  return MUSIC_STYLE[themeOf(state.branch).id] || MUSIC_STYLE.city;
+}
 function styledNote(n, st) {
   const pc = ((n % 12) + 12) % 12;
   // Minor: flatten the 3rd, 6th and 7th of C major; desert also flattens the 2nd
@@ -8916,7 +9172,7 @@ function startMusic() {
   setInterval(() => {
     if (!audio || audio.state !== 'running') return;
     // Schedule a little ahead so timing stays tight
-    const st = MUSIC_STYLE[themeOf(state.branch).id] || MUSIC_STYLE.city;
+    const st = musicStyle();
     const step = STEP / st.tempo;
     while (musicTime < audio.currentTime + 0.15) {
       const note = MELODY[musicStep % MELODY.length];
@@ -8926,6 +9182,7 @@ function startMusic() {
         tone(midi(styledNote(musicStep % 4 === 0 ? root : root + 12, { ...st, shift: Math.min(st.shift, 0) })), step * 1.6, 'triangle', 0.05, musicTime);
       }
       if (st.drum && musicStep % 4 === 2) tone(110, 0.08, 'square', 0.03, musicTime);
+      if (st.march && musicStep % 4 === 0) tone(70, 0.1, 'square', 0.035, musicTime); // marching bass drum
       musicTime += step;
       musicStep++;
     }
@@ -8987,6 +9244,7 @@ function saveData() {
     challenge: state.challenge, room: state.room, tips: state.tips,
     prestige: state.prestige, cards: state.cards, cardPulls: state.cardPulls, research: state.research,
     stats: state.stats, achievements: state.achievements, quiz: state.quiz, week: state.week,
+    story: state.story, conquests: state.conquests || 0, conquestRun: state.conquestRun ?? -1,
     base: { ...state.base, cash: BASE.pile?.amount || 0 },
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
@@ -9063,6 +9321,9 @@ function load() {
   state.achievements = Array.isArray(data.achievements) ? data.achievements : [];
   state.quiz = data.quiz || null;
   state.week = data.week || null;
+  state.story = data.story ? { ...defaultStory(), ...data.story } : { ch: 0, catchup: true };
+  state.conquests = data.conquests || 0;
+  state.conquestRun = data.conquestRun ?? -1;
   state.base = { ...defaultBase(), ...(data.base || {}) };
   state.base.units = { ...defaultBase().units, ...(state.base.units || {}) };
   while (state.empire.plots.length < CITY_PLOTS + 4 * (state.empire.land || 0)) state.empire.plots.push(null);
@@ -9202,6 +9463,7 @@ function frame(now) {
     updateAmbulance(dt);
     updateTile(dt);
     updateEvents(dt);
+    updateStory(dt);
     updateGuide();
     saveTimer += dt;
     if (saveTimer > 5) {
@@ -9240,7 +9502,12 @@ function frame(now) {
     if (upPanel.style.display === 'flex' && upTab === 'research' && state.research.cur) renderUpgrades();
   }
   if (mapView.active) renderMapView(dt);
-  else renderer.render(scene, camera);
+  else {
+    // The shadow pass is most of the frame on phones: redraw it every other frame
+    shadowTick = !shadowTick;
+    renderer.shadowMap.needsUpdate = shadowTick;
+    renderer.render(scene, camera);
+  }
   requestAnimationFrame(frame);
 }
 
@@ -9535,7 +9802,8 @@ document.getElementById('namebtn').addEventListener('click', askName);
 
 const board = document.getElementById('board');
 let boardTab = 'all';
-const titleOf = (tier) => EMPIRE_TIERS[Math.max(0, Math.min(4, tier || 0))];
+const EMPEROR = { icon: '👑', title: 'จักรพรรดิแพทย์โลก' };
+const titleOf = (tier) => (tier >= 5 ? EMPEROR : EMPIRE_TIERS[Math.max(0, Math.min(4, tier || 0))]);
 function boardRow(r, right, me) {
   const row = document.createElement('div');
   row.className = 'boardrow' + (me ? ' me' : '');
@@ -9735,4 +10003,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };

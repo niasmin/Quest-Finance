@@ -85,6 +85,39 @@
   .dockbtn.on .dl { text-shadow: none; }
   .dockbtn.fresh { animation: popin .5s ease-out; }
   .dockbtn.fresh::before { content: 'ใหม่!'; position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: #ff5c5c; color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 8px; white-space: nowrap; }
+  #quest { display: none; max-width: min(240px, 58vw); font-size: 12.5px; line-height: 1.3; padding: 5px 10px; cursor: pointer; pointer-events: auto; white-space: normal; border: 2px solid rgba(255,209,102,.7); }
+  #quest .qn { display: inline-block; background: #ffd166; color: #3a2a00; border-radius: 8px; padding: 0 6px; font-weight: 800; font-size: 11px; margin-left: 3px; }
+  .dockbtn.questing { box-shadow: 0 0 0 3px #ffd166, 0 0 16px rgba(255,209,102,.9); animation: questglow 1.4s ease-in-out infinite; }
+  @keyframes questglow { 50% { box-shadow: 0 0 0 3px #ffd166, 0 0 4px rgba(255,209,102,.3); } }
+  #storypanel { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 13; }
+  #storypanel .box { background: #fffaf0; color: #1d2433; border-radius: 22px; padding: 18px; width: min(390px, 92vw); max-height: 88dvh; overflow-y: auto; border: 4px solid #e0a83a; }
+  #storypanel h3 { margin: 0 0 2px; text-align: center; }
+  #storypanel .sub { text-align: center; color: #6b7790; font-size: 13px; margin: 0 0 8px; }
+  #storypanel .btn { display: block; width: 100%; margin-top: 8px; }
+  .chap { border-radius: 14px; padding: 9px 11px; margin: 6px 0; background: #f1ece0; font-size: 14px; }
+  .chap.done { background: #e3f5e1; }
+  .chap.cur { background: #fff1c9; border: 2px solid #ffd166; }
+  .chap.locked { opacity: .55; }
+  .chap .st { display: block; color: #5a6274; margin: 3px 0; }
+  .chap .rw { display: block; color: #a06a00; font-weight: 700; }
+  .chap .goal { margin: 3px 0 0; font-size: 13.5px; }
+  .chap .goal.ok { color: #2f8a3a; }
+  #ending { position: fixed; inset: 0; background: radial-gradient(circle at 50% 30%, rgba(60,40,0,.75), rgba(0,0,10,.92)); display: none; align-items: center; justify-content: center; z-index: 20; }
+  #ending .box { color: #fff; text-align: center; width: min(400px, 92vw); max-height: 94dvh; overflow-y: auto; padding: 10px 6px; }
+  #ending .crown { font-size: 64px; animation: titlebob 2s ease-in-out infinite; }
+  #ending h2 { margin: 0; font-size: 32px; color: #ffd166; text-shadow: 0 3px 0 #8a5a00, 0 0 24px rgba(255,209,102,.6); }
+  #ending .lead { color: #f1e6c8; font-size: 14.5px; }
+  #ending .estats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+  #ending .estats div { background: rgba(255,255,255,.1); border-radius: 12px; padding: 7px 4px; }
+  #ending .estats b { display: block; font-size: 14px; color: #ffe08a; word-break: break-all; }
+  #ending .estats small { color: #cfd8e8; font-size: 11px; }
+  #ending .title { font-size: 14px; }
+  #ending .title b { color: #ffd166; }
+  #ending .credits { height: 150px; overflow: hidden; position: relative; margin: 8px 0; -webkit-mask-image: linear-gradient(transparent, #000 20%, #000 80%, transparent); mask-image: linear-gradient(transparent, #000 20%, #000 80%, transparent); }
+  #ending .roll { animation: roll 22s linear infinite; font-size: 14px; color: #f6efe0; }
+  #ending .roll small { color: #ffd166; }
+  @keyframes roll { from { transform: translateY(150px); } to { transform: translateY(-100%); } }
+  #ending .btn { display: block; width: 100%; margin-top: 8px; }
   @keyframes popin { 0% { transform: scale(.2); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
 
   /* Tutorial card */
@@ -283,6 +316,7 @@
     <div id="money" class="pill"><span class="ico">💵</span><span id="moneyval">0</span></div>
     <div id="bag" class="pill">🎒 0/10</div>
     <div id="rating" class="pill">⭐ 3.0</div>
+    <div id="quest" class="pill"></div>
     <div id="saved" class="pill"></div>
   </div>
   <div id="right">
@@ -294,6 +328,8 @@
 </div>
 <div id="toast"></div>
 <div id="military"><div class="box"></div></div>
+<div id="storypanel"><div class="box"></div></div>
+<div id="ending"><div class="box"></div></div>
 <div id="quiz"><div class="box"></div></div>
 <div id="share"><div class="box"></div></div>
 <div id="mapview"><div id="mvtouch"></div><div id="mvlabels"></div><div class="mvtop"><b id="mvtitle"></b><button id="mvclose" class="btn ghost">✕ ปิด</button></div><div id="mvsheet"></div></div>
