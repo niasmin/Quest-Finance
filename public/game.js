@@ -383,7 +383,8 @@ const themeOf = (i) => BRANCH_THEMES[(i || 0) % BRANCH_THEMES.length];
 function sceneryBlocked(x, z) {
   return (x > -10.5 && x < 10.5 && z > -15.5 && z < 14.7) || (z > ROAD_Z - 2.4 && z < ROAD_Z + 2.4)
     || (x > 8.8 && x < 19.5 && z > -12.5 && z < 2.5) || (x > -12 && x < 20 && z > 18.5 && z < 28.5)
-    || (x > -43.5 && x < -10.5 && z > -25 && z < 15.5); // the city district west of the hospital
+    || (x > -43.5 && x < -10.5 && z > -25 && z < 15.5) // the city district west of the hospital
+    || (x > 18.5 && x < 49 && z > -28 && z < 15.6) || (x > 20 && x < 49 && z > 18.5 && z < 29.5); // the campus and its town
 }
 const leafGeo = new THREE.IcosahedronGeometry(1, 0);
 const flatMat = (color) => new THREE.MeshLambertMaterial({ color, flatShading: true });
@@ -515,7 +516,7 @@ function applyBranchTheme() {
   for (let i = 0; i < (LITE ? 30 : 90); i++) {
     const x = -32 + rnd() * 64;
     const z = -26 + rnd() * 56;
-    if (sceneryBlocked(x, z) || (th.sea && x > 21)) continue;
+    if (sceneryBlocked(x, z) || (th.sea && x > 50)) continue;
     const t = TREES[th.tree]();
     t.position.set(x, 0, z);
     t.scale.multiplyScalar(0.9 + rnd() * 0.6);
@@ -526,10 +527,10 @@ function applyBranchTheme() {
   if (th.sea) {
     const sea = new THREE.Mesh(new THREE.PlaneGeometry(60, 160), new THREE.MeshLambertMaterial({ color: 0x3fa9e0 }));
     sea.rotation.x = -Math.PI / 2;
-    sea.position.set(52, 0.03, 0);
+    sea.position.set(82, 0.03, 0);
     const foam = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 160), mat(0xffffff));
     foam.rotation.x = -Math.PI / 2;
-    foam.position.set(22.4, 0.04, 0);
+    foam.position.set(52.4, 0.04, 0);
     sceneryGroup.add(sea, foam);
     weather.sea = foam;
   }
@@ -560,7 +561,7 @@ function setWeather(kind) {
   scene.add(weather.points);
 }
 function updateWeather(dt) {
-  if (weather.sea) weather.sea.position.x = 22.4 + Math.sin(performance.now() / 900) * 0.35;
+  if (weather.sea) weather.sea.position.x = 52.4 + Math.sin(performance.now() / 900) * 0.35;
   if (!weather.points) return;
   const p = weather.points.geometry.attributes.position;
   const fall = weather.kind === 'snow' ? 2.2 : 16;
@@ -700,7 +701,7 @@ let trashLid = null;
 
 // Next point to walk toward on the way to `to`: through a door or along the hallway,
 // so walkers never cut through partition walls
-const inWing = (p) => p.x > WING.x0 - 0.1 && p.z > WING.z0 && p.z < WING.z1;
+const inWing = (p) => p.x > WING.x0 - 0.1 && p.x < WING.x1 + 0.3 && p.z > WING.z0 && p.z < WING.z1;
 const wingRow = (z) => (z < WING_BOUNDS[0] ? WING_ROWS.eye : z < WING_BOUNDS[1] ? WING_ROWS.physio : WING_ROWS.lab);
 function districtRoute(from, to) {
   if (flatDist(from, to) < 2.6) return to;
@@ -712,6 +713,21 @@ function districtRoute(from, to) {
   return to;
 }
 function route(from, to) {
+  // Campus east of the hospital: in by the main road and up the campus avenue
+  if (inCampus(to) || inCampus(from)) {
+    if (inCampus(to) && inCampus(from)) return campusRoute(from, to);
+    if (inCampus(from)) {
+      if (Math.abs(from.x - CAMPUS_X) > 0.7) return campusRoute(from, v(CAMPUS_X, from.z));
+      return v(CAMPUS_X, 16.2);
+    }
+    if (inDistrict(from)) return route(from, v(DIST_ROAD_X, 14.6));
+    if (from.z <= FLOOR.z1 && from.x > FLOOR.x0) return route(from, GATE_OUT);
+    // Already at the foot of the avenue: walk straight in
+    if (Math.abs(from.x - CAMPUS_X) < 0.7) return v(CAMPUS_X, 14.4);
+    // Otherwise step out onto the road edge first, then along it to the avenue
+    if (from.z < 15.8) return v(from.x, 16.2);
+    return v(CAMPUS_X, 16.2);
+  }
   if (inDistrict(to)) {
     if (inDistrict(from)) return districtRoute(from, to);
     // Out through the front gate, along the front sidewalk, then up the district road
@@ -3047,6 +3063,7 @@ const TIPS = {
   wing: '💡 <b>อาคารใหม่</b> เข้าทางประตูที่ผนังทางเดินฝั่งขวา',
   outdoor: '💡 <b>ฝั่งตรงข้ามถนน</b> เดินออกประตูหน้า แล้วข้ามถนนไปเก็บค่าจอดรถ',
   boss: '💡 <b>เชื้อโรคยักษ์!</b> แค่ยืนใกล้ ๆ หมอยิงยาใส่เอง<br>ถ้าเปิด AUTO หมอจะวิ่งไปเอง',
+  campus: '💡 <b>วิทยาเขต Healthcare Empire</b> เปิดแล้ว!<br>เดินออกประตูหน้า ไปทางขวาตามถนนวิทยาเขต แล้วยืนบนป้ายราคาเพื่อซื้อตึก',
   special: '💡 <b>เคสพิเศษ</b> (เสื้อม่วง ⭐) ต้องไปหลายห้องตามลำดับ<br>ดูเส้นทางที่มุมขวาบน',
 };
 const tipQueue = [];
@@ -3769,7 +3786,7 @@ const OUT = {
   cars: [], walkers: [], visitors: [], kioskQueue: [], carTimer: 3, walkTimer: 1, kioskTimer: 0,
   parkingCash: null, kioskCash: null, parkCash: null,
 };
-const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash, KT.cash].filter(Boolean);
+const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash, KT.cash, ...campusPiles()].filter(Boolean);
 const kioskSlot = (i) => v(KIOSK.x - i * 0.95, 19.75);
 
 function stripeLine(x, z, w, d) {
@@ -6373,6 +6390,315 @@ function updateExtras(dt) {
   updateAchievements(dt);
 }
 
+// ---------- Healthcare Empire campus: the art of the Healthcare-Simulator-Starter project,
+// laid out east of the hospital like its world map. Buildings are bought by standing on
+// their price tiles; each then fills a cash pile. Cars and townsfolk bring it to life.
+const CAMPUS_X = 20; // the campus avenue, running north from the main road
+const CAMPUS_STREETS = [-9, 4]; // cross streets heading east from the avenue
+const campusSprites = { info: null, tex: new Map() };
+fetch('campus/sprites.json').then((r) => r.json()).then((j) => { campusSprites.info = j; }).catch(() => {});
+const campusLoader = new THREE.TextureLoader();
+function campusTex(name) {
+  if (!campusSprites.tex.has(name)) {
+    const t = campusLoader.load(`campus/${name}.webp`);
+    t.colorSpace = THREE.SRGBColorSpace;
+    campusSprites.tex.set(name, t);
+  }
+  return campusSprites.tex.get(name);
+}
+// A billboard of one sprite, `w` world units wide, standing at its base
+function campusSprite(name, w, base = 0.28) {
+  const m = new THREE.SpriteMaterial({ map: campusTex(name), transparent: true, alphaTest: 0.04, depthWrite: false });
+  const s = new THREE.Sprite(m);
+  const size = campusSprites.info?.[name];
+  const aspect = size ? size[1] / size[0] : 0.6;
+  s.scale.set(w, w * aspect, 1);
+  s.center.set(0.5, base);
+  s.userData.sprite = name;
+  // Fix the height once the size table arrives (first load)
+  if (!size) {
+    const fix = () => {
+      const sz = campusSprites.info?.[name];
+      if (sz) s.scale.set(w, (w * sz[1]) / sz[0], 1);
+      else setTimeout(fix, 300);
+    };
+    setTimeout(fix, 300);
+  }
+  return s;
+}
+const CAMPUS_LOTS = [
+  { id: 'homecare', icon: '🏠', name: 'Home Care ดูแลถึงบ้าน', sprite: 'b_homecare_office_4x3', at: v(27, 10), w: 8.5, front: v(27, 5.3), price: 15000, rate: 30, foot: [6, 4] },
+  { id: 'derma', icon: '💊', name: 'CM.Derma+ ผลิตภัณฑ์ผิว', sprite: 'b_pharmacy_2x2', extra: ['b_storage_room_2x2', 2.2, 0], at: v(36, 10.5), w: 5.8, front: v(36, 5.3), price: 25000, rate: 50, foot: [4, 3.4] },
+  { id: 'park', icon: '🌳', name: 'Community Park สวนชุมชน', sprite: 'dc_gazebo', at: v(44, 10.5), w: 4, front: v(44, 5.3), price: 20000, rate: 20, park: true, foot: [2.6, 2.6] },
+  { id: 'tranquila', icon: '🌿', name: 'Tranquila บ้านพักผู้สูงวัย', sprite: 'b_villa_3x3', extra: ['dc_thai_house', -3.6, 1.0, 3], at: v(42, -2.6), w: 8, front: v(42, 2.9), price: 40000, rate: 75, foot: [6, 4.2] },
+  { id: 'cmnh', icon: '🏡', name: 'CMNH ศูนย์ดูแลผู้สูงอายุ', sprite: 'b_ward_5x6', at: v(29, -2.4), w: 12, front: v(29, 2.9), price: 90000, rate: 150, foot: [9, 5.5] },
+  { id: 'phc', icon: '🎓', name: 'PHC ศูนย์พัฒนาบุคลากร', sprite: 'b_training_room_2x3', extra: ['b_staff_room_2x3', 3.0, 0.5], at: v(42, -17.5), w: 6.5, front: v(42, -10.2), price: 60000, rate: 100, foot: [5, 3.6] },
+  { id: 'neuro', icon: '🧠', name: 'Neuro Hospital รพ.ประสาท', sprite: 'b_neuro_clinic_4x3', extra: ['b_stroke_unit_4x3', 6.5, -1.0, 9], at: v(28, -17.5), w: 9.5, front: v(30, -10.2), price: 150000, rate: 240, foot: [12, 4.6] },
+];
+const CAMPUS_OPEN_STEP = 16; // the elevator stage
+const campus = { built: false, owned: [], paid: {}, cash: {}, piles: {}, tiles: {}, cars: [], folk: [], carTimer: 2, tipShown: false };
+const campusOpen = () => state.step >= CAMPUS_OPEN_STEP;
+const campusPiles = () => Object.values(campus.piles);
+const inCampus = (p) => p.x > CAMPUS_X - 1.4 && p.z < ROAD_Z - 1.6;
+
+function campusGround() {
+  const g = new THREE.Group();
+  const lawn = new THREE.Mesh(new THREE.PlaneGeometry(29, 42), mat(0x9bd67a));
+  lawn.rotation.x = -Math.PI / 2;
+  lawn.position.set(33.5, 0.012, -5.5);
+  lawn.receiveShadow = true;
+  g.add(lawn);
+  const road = (x, z, w, d) => {
+    const r = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(0x55606e));
+    r.rotation.x = -Math.PI / 2;
+    r.position.set(x, 0.022, z);
+    r.receiveShadow = true;
+    g.add(r);
+  };
+  road(CAMPUS_X, -5, 2.6, 42);
+  for (const z of CAMPUS_STREETS) road(33.5, z, 27, 2.4);
+  for (let z = -24; z < 15; z += 3) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 1.3), mat(0xffffff));
+    dash.rotation.x = -Math.PI / 2;
+    dash.position.set(CAMPUS_X, 0.03, z);
+    g.add(dash);
+  }
+  // Gate sign over the avenue
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 0.85), new THREE.MeshBasicMaterial({ map: signTex('🏥 Healthcare Empire Campus', '#14b8a6'), side: THREE.DoubleSide }));
+  sign.position.set(CAMPUS_X, 3.3, 14.6);
+  g.add(sign);
+  for (const dx of [-2.4, 2.4]) {
+    const post = box(0.24, 3.5, 0.24, 0xffffff);
+    post.position.set(CAMPUS_X + dx, 1.75, 14.6);
+    g.add(post);
+  }
+  scene.add(g);
+  // Street furniture and town buildings from the starter's art
+  const put = (name, x, z, w, base) => {
+    const s = campusSprite(name, w, base);
+    s.position.set(x, 0, z);
+    scene.add(s);
+    return s;
+  };
+  for (let z = -22; z <= 12; z += 6) put('st3_lamp', CAMPUS_X - 1.7, z, 0.9, 0.05);
+  put('st3_busstop', CAMPUS_X - 1.9, 9, 2.2, 0.08);
+  put('st3_spirit', 46.5, -24, 1.4, 0.08);
+  [[24, -24.5, 'dc_tree'], [46, -12, 'dc_tree2'], [23, -6, 'dc_sakura'], [46, 1.5, 'dc_tree'], [23.5, 7, 'dc_tree2'], [47, 7.8, 'dc_sakura'], [32, 14.4, 'dc_hedge'], [40, 14.4, 'dc_hedge'], [24, 14.3, 'dc_planter']]
+    .forEach(([x, z, n]) => put(n, x, z, n.includes('hedge') ? 3 : 2.2, 0.12));
+  // A little town strip across the main road
+  [['tw_temple', 25, 21.5, 6], ['tw_cafe', 32, 21, 4.4], ['tw_shop_1', 38, 21.5, 4.2], ['tw_shop_2', 43, 21.5, 4.2], ['tw_store', 26, 26.5, 4.2], ['tw_house_a1', 33, 26.5, 4], ['tw_house_b1', 39, 26.5, 4], ['tw_house_a2', 45, 26.5, 4]]
+    .forEach(([n, x, z, w]) => {
+      put(n, x, z, w, 0.18);
+      addCollider(x, z, w * 0.6, w * 0.4);
+    });
+}
+
+function buildCampus() {
+  if (campus.built) return;
+  campus.built = true;
+  campusGround();
+  for (const lot of CAMPUS_LOTS) {
+    campus.piles[lot.id] = new MoneyPile(lot.front.clone().add(v(1.6, 0)));
+    if (campus.owned.includes(lot.id)) buildCampusLot(lot, false);
+    else makeCampusTile(lot);
+  }
+  for (const [id, amt] of Object.entries(campus.cash)) campus.piles[id]?.add(amt);
+}
+function buildCampusLot(lot, animate) {
+  // Sprites go in a group: the pop-in animation scales the group, not the sprites' own sizes
+  const g = new THREE.Group();
+  g.position.copy(lot.at);
+  g.add(campusSprite(lot.sprite, lot.w));
+  if (lot.extra) {
+    const [name, dx, dz, w] = lot.extra;
+    const e = campusSprite(name, w || lot.w * 0.85);
+    e.position.set(dx, 0, dz);
+    g.add(e);
+  }
+  if (lot.park) {
+    [['dc_fountain', -1.8, -1.4, 2.2], ['dc_flowers', 1.6, 1.0, 2], ['dc_sala3d', 2.4, -1.6, 2.2], ['dc_umbrella', -2.6, 1.2, 1.6]].forEach(([n, dx, dz, w]) => {
+      const d = campusSprite(n, w, 0.15);
+      d.position.set(dx, 0, dz);
+      g.add(d);
+    });
+  }
+  scene.add(g);
+  addCollider(lot.at.x, lot.at.z, lot.foot[0], lot.foot[1]);
+  if (animate) {
+    popIn(g);
+    burst(lot.at);
+  }
+}
+function makeCampusTile(lot) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 2.2), [mat(0x0f766e), mat(0x0f766e), new THREE.MeshBasicMaterial({ map: tex }), mat(0x0f766e), mat(0x0f766e), mat(0x0f766e)]);
+  mesh.position.set(lot.front.x, 0.06, lot.front.z);
+  scene.add(mesh);
+  const draw = () => {
+    const g = c.getContext('2d');
+    const paid = campus.paid[lot.id] || 0;
+    g.fillStyle = '#134e4a';
+    g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#14b8a6';
+    g.fillRect(0, 256 - (256 * paid) / lot.price, 256, (256 * paid) / lot.price);
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 10;
+    g.setLineDash([22, 14]);
+    g.strokeRect(10, 10, 236, 236);
+    g.font = '86px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(lot.icon, 128, 92);
+    g.font = '700 40px Mitr, sans-serif';
+    g.fillStyle = '#ffffff';
+    g.fillText(`💵${(lot.price - paid).toLocaleString()}`, 128, 190);
+    tex.needsUpdate = true;
+  };
+  draw();
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 0.75), new THREE.MeshBasicMaterial({ map: signTex(`${lot.icon} ${lot.name}`, '#0f766e'), side: THREE.DoubleSide, transparent: true }));
+  label.position.set(lot.front.x, 2.0, lot.front.z - 1.3);
+  scene.add(label);
+  mesh.visible = label.visible = false;
+  campus.tiles[lot.id] = { mesh, label, draw, lot, last: -1 };
+}
+function updateCampus(dt) {
+  if (!campus.built) return;
+  const open = campusOpen();
+  if (open && !campus.tipShown) {
+    campus.tipShown = true;
+    tip('campus');
+  }
+  // Price tiles: stand on one to pay toward it
+  for (const t of Object.values(campus.tiles)) {
+    t.mesh.visible = t.label.visible = open;
+    if (!open || player.floor !== 0 || lift.riding || flatDist(player.group.position, t.lot.front) > 1.1 || state.money <= 0) continue;
+    const lot = t.lot;
+    const left = lot.price - (campus.paid[lot.id] || 0);
+    const pay = Math.min(state.money, left, Math.max(1, Math.ceil(lot.price * dt * 0.8)));
+    state.money -= pay;
+    campus.paid[lot.id] = (campus.paid[lot.id] || 0) + pay;
+    if (Math.floor(performance.now() / 80) !== t.last) {
+      t.last = Math.floor(performance.now() / 80);
+      t.draw();
+      sfxTick();
+    }
+    if (campus.paid[lot.id] >= lot.price) {
+      scene.remove(t.mesh, t.label);
+      delete campus.tiles[lot.id];
+      campus.owned.push(lot.id);
+      buildCampusLot(lot, true);
+      sfxUnlock();
+      toast(`${lot.icon} <b>เปิด ${lot.name}!</b><br>รายได้ +${Math.round(lot.rate * priceMult() * 60).toLocaleString()}/นาที ไปเก็บที่กองเงินหน้าตึก`, 4000);
+      save();
+    }
+  }
+  // Owned buildings earn into their cash piles
+  campus.tick = (campus.tick || 0) + dt;
+  if (campus.tick >= 3) {
+    for (const id of campus.owned) {
+      const lot = CAMPUS_LOTS.find((l) => l.id === id);
+      const amt = Math.round(lot.rate * priceMult() * campus.tick);
+      if (amt > 0) {
+        campus.piles[id].add(amt);
+        missionProgress('earn', amt);
+      }
+    }
+    campus.tick = 0;
+  }
+  updateCampusLife(dt);
+}
+// Cars up and down the avenue; townsfolk strolling between the buildings
+const CAR_SPRITES = ['sedan_blue', 'sedan_red', 'sedan_teal', 'sedan_white', 'pickup_black', 'pickup_silver', 'tuktuk', 'songthaew', 'moto', 'ambulance'];
+const FOLK_SPRITES = ['nurse', 'doctor', 'caregiver', 'elder_f', 'elder_m', 'wheelchair', 'pt', 'ot', 'pharmacist', 'kid', 'jogger', 'student', 'resident', 'security', 'nutritionist'];
+function updateCampusLife(dt) {
+  campus.carTimer -= dt;
+  if (campus.carTimer <= 0 && campus.cars.length < 5) {
+    campus.carTimer = rand(3, 6);
+    const north = Math.random() < 0.5;
+    const kind = pick(CAR_SPRITES);
+    const s = campusSprite(`car3_${kind}_${north ? 'n' : 's'}`, kind === 'moto' ? 1.4 : kind === 'songthaew' ? 3.4 : 3, 0.12);
+    s.position.set(CAMPUS_X + (north ? 0.65 : -0.65), 0, north ? 17 : -26);
+    scene.add(s);
+    campus.cars.push({ s, north, speed: rand(4, 6.5) });
+  }
+  for (let i = campus.cars.length - 1; i >= 0; i--) {
+    const c = campus.cars[i];
+    c.s.position.z += (c.north ? -1 : 1) * c.speed * dt;
+    if (c.s.position.z < -27 || c.s.position.z > 18) {
+      scene.remove(c.s);
+      campus.cars.splice(i, 1);
+    }
+  }
+  const want = Math.min(10, 3 + campus.owned.length);
+  while (campus.folk.length < want) {
+    const kind = pick(FOLK_SPRITES);
+    const s = campusSprite(`ch3_${kind}_s`, 0.8, 0.04);
+    const start = pick(CAMPUS_LOTS).front.clone().add(v(rand(-2, 2), rand(-0.5, 0.5)));
+    s.position.copy(start);
+    scene.add(s);
+    campus.folk.push({ s, kind, target: null, wait: rand(0, 3), dir: 's' });
+  }
+  for (const f of campus.folk) {
+    if (!f.target) {
+      f.wait -= dt;
+      if (f.wait <= 0) f.target = pick(CAMPUS_LOTS).front.clone().add(v(rand(-2.5, 2.5), rand(-0.4, 0.4)));
+      continue;
+    }
+    const pos = f.s.position;
+    const way = route(pos, f.target);
+    const dx = way.x - pos.x;
+    const dz = way.z - pos.z;
+    const d = Math.hypot(dx, dz);
+    const step = Math.min(d, 1.4 * dt);
+    if (d > 0.01) {
+      pos.x += (dx / d) * step;
+      pos.z += (dz / d) * step;
+    }
+    // Face away from the camera when walking north, toward it when walking south
+    const dir = dz < -0.01 ? 'n' : 's';
+    if (dir !== f.dir && Math.abs(dz) > Math.abs(dx) * 0.3) {
+      f.dir = dir;
+      f.s.material.map = campusTex(`ch3_${f.kind}_${dir}`);
+    }
+    pos.y = Math.abs(Math.sin(performance.now() / 160 + f.s.id)) * 0.05;
+    if (flatDist(pos, f.target) < 0.1) {
+      f.target = null;
+      f.wait = rand(2, 6);
+    }
+  }
+}
+// Walking inside the campus: avenue to the right street, then along it
+function campusRoute(from, to) {
+  if (flatDist(from, to) < 1) return to;
+  const streetOf = (z) => (z < -2.5 ? CAMPUS_STREETS[0] : CAMPUS_STREETS[1]);
+  const onAvenue = Math.abs(from.x - CAMPUS_X) < 0.7;
+  const ts = streetOf(to.z);
+  if (Math.abs(from.z - ts) < 1.6 && Math.abs(to.z - ts) < 1.6) return to;
+  if (!onAvenue) {
+    const fs = streetOf(from.z);
+    return Math.abs(from.z - fs) < 1.6 ? v(CAMPUS_X, from.z) : v(from.x, fs);
+  }
+  if (Math.abs(from.z - ts) > 0.4) return v(CAMPUS_X, ts);
+  return to;
+}
+// What the campus earns while you're away (staff run it)
+function campusPerSecond() {
+  return campus.owned.reduce((a, id) => a + (CAMPUS_LOTS.find((l) => l.id === id)?.rate || 0), 0) * priceMult();
+}
+function campusSnapshot() {
+  return { owned: campus.owned, paid: campus.paid, cash: Object.fromEntries(Object.entries(campus.piles).map(([k, p]) => [k, p.amount])) };
+}
+// AUTO: buy the next campus building it can afford outright
+function campusTask() {
+  if (!campusOpen()) return null;
+  const lot = CAMPUS_LOTS.find((l) => !campus.owned.includes(l.id) && state.money >= l.price - (campus.paid[l.id] || 0));
+  return lot ? { at: lot.front, keep: () => !campus.owned.includes(lot.id) && state.money > 0 } : null;
+}
+
 // ---------- player actions ----------
 let actTimer = 0;
 function playerActions(dt) {
@@ -6594,6 +6920,9 @@ function autoTasks() {
     // Upstairs tiles: ride the elevator first
     if (t.u.floor) tasks.push({ at: ELEVATOR, ride: t.u.floor, keep: () => player.floor === 0 });
     else tasks.push({ at: t.u.at, keep: () => tile === t && state.money > 0 });
+  } else {
+    const ct = campusTask();
+    if (ct) tasks.push(ct);
   }
   for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
     if (stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX) {
@@ -6750,7 +7079,7 @@ function idleIncome(seconds) {
   rooms.forEach((room) => {
     if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), staffMult() / room.time) * room.price * priceMult();
   });
-  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond();
+  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond() + campusPerSecond();
   const t = Math.min(seconds, OFFLINE_CAP);
   return { amount: Math.floor(perSecond * t * offlineRate()), perHour: Math.round(perSecond * 3600 * offlineRate()), seconds: t };
 }
@@ -7367,6 +7696,7 @@ function branchSnapshot() {
     step: state.step, paid: state.paid, upgrades: state.upgrades, rating: state.rating, savedAt: Date.now(),
     idleRate: idleIncome(3600).perHour / 3600,
     f2: floor2Snapshot(),
+    campus: campusSnapshot(),
     out: { parking: OUT.parkingCash?.amount || 0, kiosk: OUT.kioskCash?.amount || 0, park: OUT.parkCash?.amount || 0 },
     piles: Object.fromEntries(Object.values(LINES).filter((l) => l.active).map((l) => [l.id, { pile: l.pile.count, shelf: l.shelf.count, cash: l.cash.amount }])),
     roomCash: Object.fromEntries(Object.values(ROOMS).filter((r) => r.active).map((r) => [r.id, r.cash.amount])),
@@ -7478,6 +7808,11 @@ function load() {
   }
   for (const [id, amount] of Object.entries(br.roomCash || {})) if (ROOMS[id]?.active) ROOMS[id].cash.add(amount);
   restoreFloor2(br.f2);
+  if (br.campus) {
+    campus.owned = br.campus.owned || [];
+    campus.paid = br.campus.paid || {};
+    campus.cash = br.campus.cash || {};
+  }
   if (br.out) {
     OUT.parkingCash?.add(br.out.parking || 0);
     OUT.kioskCash?.add(br.out.kiosk || 0);
@@ -7558,6 +7893,7 @@ function frame(now) {
     tickEmpire(dt);
     updateDistrict(dt);
     updateCollectors(dt);
+    updateCampus(dt);
     updateExtras(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
@@ -7618,6 +7954,7 @@ applyTheme();
 applyOutfit();
 buildDistrict();
 buildKrathong();
+buildCampus();
 spawnCrew();
 syncCollectors();
 showNextTile();
@@ -8097,4 +8434,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
