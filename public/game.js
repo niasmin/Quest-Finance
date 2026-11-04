@@ -333,6 +333,24 @@ function roundRect(g, x, y, w, h, r) {
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 const flatDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+// Money in short form: full digits under 100,000, then K, M, B and T (245.6K · 216.33M · 1.41B)
+const fmt = (value) => {
+  const n = Math.round(Number(value) || 0);
+  const a = Math.abs(n);
+  if (a < 1e5) return n.toLocaleString();
+  const units = [[1e3, 'K'], [1e6, 'M'], [1e9, 'B'], [1e12, 'T']];
+  let k = units.length - 1;
+  while (k > 0 && a < units[k][0]) k--;
+  let x = n / units[k][0];
+  let txt = Math.abs(x) >= 100 ? x.toFixed(1) : x.toFixed(2);
+  // 999,999 rounds to "1000.0K": move up a unit instead
+  if (Math.abs(Number(txt)) >= 1000 && k < units.length - 1) {
+    k++;
+    x = n / units[k][0];
+    txt = x.toFixed(2);
+  }
+  return txt.replace(/\.?0+$/, '') + units[k][1];
+};
 const tmpV = new THREE.Vector3();
 
 // ---------- world ----------
@@ -2364,7 +2382,7 @@ function makeTile(u) {
     g.fillStyle = '#fff';
     g.fillText(u.icon, 128, 88);
     g.font = '700 46px Mitr, sans-serif';
-    g.fillText(`💵${u.price - state.paid}`, 128, 172);
+    fitText(g, `💵${fmt(u.price - state.paid)}`, 128, 172, 228, 46);
     g.font = '600 24px Mitr, sans-serif';
     g.fillText(u.label, 128, 222);
     tex.needsUpdate = true;
@@ -3057,7 +3075,7 @@ function updateBasket(dt) {
     basket.y = Math.max(0.3, basket.y - dt * 3);
     if (basket.y <= 0.3) {
       basket.pile.add(basket.load);
-      floatText(BASKET_AT, `💰 +${basket.load.toLocaleString()} จากชั้น 2`, '#8be08f');
+      floatText(BASKET_AT, `💰 +${fmt(basket.load)} จากชั้น 2`, '#8be08f');
       basket.load = 0;
       basket.state = 'up';
     }
@@ -3263,7 +3281,7 @@ function updateRush(dt) {
     sfxUnlock();
     burst(player.group.position);
   }
-  toast(`🚨 จบชั่วโมงเร่งด่วน ${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)}<br>รักษา ${r.served} คน${bonus ? ` · โบนัส <b>+${bonus.toLocaleString()}</b>` : ' · ยังไม่ได้โบนัส ลองใหม่นะ'}`, 5000);
+  toast(`🚨 จบชั่วโมงเร่งด่วน ${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)}<br>รักษา ${r.served} คน${bonus ? ` · โบนัส <b>+${fmt(bonus)}</b>` : ' · ยังไม่ได้โบนัส ลองใหม่นะ'}`, 5000);
   save();
 }
 
@@ -3380,7 +3398,7 @@ function defeatBoss(b) {
   state.style.bossKills = (state.style.bossKills || 0) + 1;
   missionProgress('boss', 1);
   sfxUnlock();
-  floatText(player.group.position, `🦠 +${reward.toLocaleString()}`, '#8be08f');
+  floatText(player.group.position, `🦠 +${fmt(reward)}`, '#8be08f');
   // Rare drop: guaranteed the first time, then a 40% chance until the set is complete
   const missing = RARE_ORDER.filter((id) => !ownsStyle(id));
   if (missing.length && (state.style.bossKills === 1 || Math.random() < 0.4)) {
@@ -3390,7 +3408,7 @@ function defeatBoss(b) {
     toast(`💎 <b>ได้ของหายาก!</b><br>${it.icon} ${it.name}<br><small>ไปใช้ได้ที่ 🎨 ตกแต่ง</small>`, 5500);
     styleBtn.classList.add('ready');
   } else {
-    toast(`🎉 กำจัดเชื้อโรคยักษ์สำเร็จ! <b>+${reward.toLocaleString()}</b>`);
+    toast(`🎉 กำจัดเชื้อโรคยักษ์สำเร็จ! <b>+${fmt(reward)}</b>`);
   }
   save();
 }
@@ -3446,7 +3464,7 @@ function spawnSpecial() {
   ev.special = { p, chain, t: 45 + 35 * len, bonus };
   tone(660, 0.15, 'triangle', 0.06);
   tip('special');
-  toast(`⭐ <b>เคสพิเศษ!</b> ${chain.map(serviceIcon).join(' → ')}<br>รักษาให้ครบทันเวลา รับทิป 💵${bonus.toLocaleString()}`, 4000);
+  toast(`⭐ <b>เคสพิเศษ!</b> ${chain.map(serviceIcon).join(' → ')}<br>รักษาให้ครบทันเวลา รับทิป 💵${fmt(bonus)}`, 4000);
   return true;
 }
 function specialDone(p) {
@@ -3458,8 +3476,8 @@ function specialDone(p) {
   missionProgress('special', 1);
   burst(p.person.group.position);
   sfxUnlock();
-  floatText(p.person.group.position, `⭐ +${s.bonus.toLocaleString()}`, '#e0b3ff');
-  toast(`⭐ เคสพิเศษสำเร็จ! ทิป <b>+${s.bonus.toLocaleString()}</b>`);
+  floatText(p.person.group.position, `⭐ +${fmt(s.bonus)}`, '#e0b3ff');
+  toast(`⭐ เคสพิเศษสำเร็จ! ทิป <b>+${fmt(s.bonus)}</b>`);
 }
 function updateSpecial(dt) {
   const s = ev.special;
@@ -3860,7 +3878,7 @@ function renderStyle() {
       styleRow({
         icon: d.icon, name: d.name, owned,
         sub: `ความสบาย +${d.comfort}${d.rare ? ' · 💎 ของหายาก' : ''}`,
-        label: owned ? 'มีแล้ว ✓' : d.rare ? '🦠 ได้จากบอส' : `💵${d.price.toLocaleString()}`,
+        label: owned ? 'มีแล้ว ✓' : d.rare ? '🦠 ได้จากบอส' : `💵${fmt(d.price)}`,
         disabled: owned || d.rare || state.money < d.price,
         onClick: () => { buyStyle(d); renderStyle(); },
       });
@@ -3874,7 +3892,7 @@ function renderStyle() {
       styleRow({
         icon: t.icon, name: t.name, owned,
         sub: owned ? 'กดเพื่อเปลี่ยนสีพื้นทุกห้อง' : 'เปลี่ยนสีพื้นทุกห้อง',
-        label: using ? 'ใช้อยู่' : owned ? 'ใช้' : `💵${t.price.toLocaleString()}`,
+        label: using ? 'ใช้อยู่' : owned ? 'ใช้' : `💵${fmt(t.price)}`,
         disabled: using || (!owned && state.money < t.price),
         onClick: () => {
           if (!owned) buyStyle(t);
@@ -3893,7 +3911,7 @@ function renderStyle() {
       styleRow({
         icon: o.icon, name: o.name, owned,
         sub: o.perk ? `💎 ${o.perk}` : 'ชุดสวย ๆ ไว้อวดเพื่อน',
-        label: using ? 'ใส่อยู่' : owned ? 'ใส่' : o.event ? '🏮 อีเวนต์' : o.rare ? '🦠 ได้จากบอส' : `💵${o.price.toLocaleString()}`,
+        label: using ? 'ใส่อยู่' : owned ? 'ใส่' : o.event ? '🏮 อีเวนต์' : o.rare ? '🦠 ได้จากบอส' : `💵${fmt(o.price)}`,
         disabled: using || (!owned && (o.rare || state.money < o.price)),
         onClick: () => {
           if (!owned) buyStyle(o);
@@ -4725,7 +4743,7 @@ function advanceCheck() {
   const reqs = [
     { ok: tierFilled(e.tier), text: e.tier === 0 ? `สร้างครบ ${CITY_PLOTS} แปลงในเมือง` : `พัฒนาทุกที่บนแผนที่${EMPIRE_TIERS[e.tier].name}อย่างน้อย Lv.1` },
     { ok: state.branches.length >= next.branches, text: `มีโรงพยาบาล ${next.branches} สาขาขึ้นไป (ตอนนี้ ${state.branches.length})` },
-    { ok: state.money >= next.cost, text: `เงิน 💵${next.cost.toLocaleString()}` },
+    { ok: state.money >= next.cost, text: `เงิน 💵${fmt(next.cost)}` },
   ];
   return { next, reqs, ok: reqs.every((r) => r.ok) };
 }
@@ -4754,7 +4772,7 @@ function tickEmpire(dt) {
   }
   tickEmpire.t = (tickEmpire.t || 0) + dt;
   if (tickEmpire.t > 20 && empireShown > 0) {
-    floatText(player.group.position, `🌏 +${empireShown.toLocaleString()} ภาษีอาณาจักร`, '#ffe08a');
+    floatText(player.group.position, `🌏 +${fmt(empireShown)} ภาษีอาณาจักร`, '#ffe08a');
     empireShown = 0;
     tickEmpire.t = 0;
   }
@@ -4808,7 +4826,7 @@ function renderEmpire() {
   const e = emp();
   if (empireTab !== 'branches' && empireTab > e.tier) empireTab = e.tier;
   const title = EMPIRE_TIERS[e.tier];
-  document.getElementById('emtitle').innerHTML = `${title.icon} อาณาจักรของคุณ<br><small>👑 ${title.title} · ภาษี +${empireRate().toLocaleString()}/วินาที</small>`;
+  document.getElementById('emtitle').innerHTML = `${title.icon} อาณาจักรของคุณ<br><small>👑 ${title.title} · ภาษี +${fmt(empireRate())}/วินาที</small>`;
   emTabs.innerHTML = '';
   const tabs = [['branches', '🏥', 'สาขา'], ...EMPIRE_TIERS.map((t, i) => [i, i > e.tier ? '🔒' : t.icon, t.name]).filter(([i]) => i <= e.tier + 1)];
   if (e.tier >= 1 || prs().runs > 0 || starsToGain() >= 1) tabs.push(['prestige', '⭐', 'เกิดใหม่']);
@@ -4875,7 +4893,7 @@ function renderCity() {
   emPage.append(go);
   const landCost = LAND_COSTS[e.land || 0];
   if (landCost !== undefined) {
-    const land = emButton(`🗺️ ซื้อที่ดินเพิ่ม +4 แปลง · 💵${landCost.toLocaleString()}`, state.money < landCost, buyLand);
+    const land = emButton(`🗺️ ซื้อที่ดินเพิ่ม +4 แปลง · 💵${fmt(landCost)}`, state.money < landCost, buyLand);
     land.classList.add('emgo');
     emPage.append(land);
   }
@@ -4888,14 +4906,14 @@ function renderCity() {
   if (!p) {
     for (const b of CITY_BUILDINGS) {
       const row = emEl('div', 'uprow', `<div class="upico">${b.icon}</div><div class="upinfo"><b>${b.name}</b><br><small>${b.desc(1)}</small></div>`);
-      row.append(emButton(`💵${cost.toLocaleString()}`, state.money < cost, () => buildPlot(empireSel, b.id)));
+      row.append(emButton(`💵${fmt(cost)}`, state.money < cost, () => buildPlot(empireSel, b.id)));
       emPage.append(row);
     }
   } else {
     const b = CITY_BUILDINGS.find((x) => x.id === p.type);
     const maxed = p.lvl >= PLACE_MAX;
     const row = emEl('div', 'uprow', `<div class="upico">${b.icon}</div><div class="upinfo"><b>${b.name}</b> <span class="lv">Lv.${p.lvl}/${PLACE_MAX}</span><br><small>${b.desc(p.lvl)}${maxed ? '' : ` → Lv.${p.lvl + 1}: ${b.desc(p.lvl + 1)}`}</small></div>`);
-    row.append(emButton(maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`, maxed || state.money < cost, () => buildPlot(empireSel, p.type)));
+    row.append(emButton(maxed ? 'สูงสุด' : `💵${fmt(cost)}`, maxed || state.money < cost, () => buildPlot(empireSel, p.type)));
     emPage.append(row);
   }
 }
@@ -4938,8 +4956,8 @@ function renderTierMap(t) {
   const l = levels[empireSel - 1];
   const maxed = l >= PLACE_MAX;
   const cost = maxed ? 0 : nodeCost(t, empireSel, l);
-  const row = emEl('div', 'uprow', `<div class="upico">${n.icon}</div><div class="upinfo"><b>${n.name}</b> <span class="lv">Lv.${l}/${PLACE_MAX}</span><br><small>ภาษี +${nodeRate(t, empireSel, l).toLocaleString()}/วินาที${maxed ? '' : ` → +${nodeRate(t, empireSel, l + 1).toLocaleString()}/วินาที`}</small></div>`);
-  row.append(emButton(maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`, maxed || state.money < cost, () => upgradeNode(t, empireSel)));
+  const row = emEl('div', 'uprow', `<div class="upico">${n.icon}</div><div class="upinfo"><b>${n.name}</b> <span class="lv">Lv.${l}/${PLACE_MAX}</span><br><small>ภาษี +${fmt(nodeRate(t, empireSel, l))}/วินาที${maxed ? '' : ` → +${fmt(nodeRate(t, empireSel, l + 1))}/วินาที`}</small></div>`);
+  row.append(emButton(maxed ? 'สูงสุด' : `💵${fmt(cost)}`, maxed || state.money < cost, () => upgradeNode(t, empireSel)));
   emPage.append(row);
 }
 function renderAdvance() {
@@ -4950,7 +4968,7 @@ function renderAdvance() {
   } else {
     card.innerHTML = `<b>${adv.next.icon} ยกระดับเป็น${adv.next.name}</b><br><small>ตำแหน่ง: ${adv.next.title} · รายได้ทุกสาขา +10% · เปิดแผนที่ใหม่</small><br>`
       + adv.reqs.map((r) => `<small>${r.ok ? '✅' : '⬜'} ${r.text}</small>`).join('<br>');
-    card.append(document.createElement('br'), emButton(`ยกระดับ · 💵${adv.next.cost.toLocaleString()}`, !adv.ok, advanceTier));
+    card.append(document.createElement('br'), emButton(`ยกระดับ · 💵${fmt(adv.next.cost)}`, !adv.ok, advanceTier));
   }
   emPage.append(card);
 }
@@ -5537,7 +5555,7 @@ function renderMapSheet() {
   const t = mapView.tier;
   mvSheet.innerHTML = '';
   if (!mapView.sel) {
-    mvSheet.innerHTML = `<small>ลากเพื่อหมุน · บีบหรือเลื่อนเพื่อซูม · แตะที่บนแผนที่เพื่อพัฒนา<br>ภาษีรวม +${empireRate().toLocaleString()}/วินาที</small>`;
+    mvSheet.innerHTML = `<small>ลากเพื่อหมุน · บีบหรือเลื่อนเพื่อซูม · แตะที่บนแผนที่เพื่อพัฒนา<br>ภาษีรวม +${fmt(empireRate())}/วินาที</small>`;
     return;
   }
   const i = mapView.sel;
@@ -5545,8 +5563,8 @@ function renderMapSheet() {
   const l = nodeLevels(t)[i - 1];
   const maxed = l >= PLACE_MAX;
   const cost = maxed ? 0 : nodeCost(t, i, l);
-  const row = emEl('div', 'uprow', `<div class="upico">${n.icon}</div><div class="upinfo"><b>${n.name}</b> <span class="lv">Lv.${l}/${PLACE_MAX}</span><br><small>ภาษี +${nodeRate(t, i, l).toLocaleString()}/วินาที${maxed ? '' : ` → +${nodeRate(t, i, l + 1).toLocaleString()}/วินาที`}</small></div>`);
-  row.append(emButton(maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`, maxed || state.money < cost, () => {
+  const row = emEl('div', 'uprow', `<div class="upico">${n.icon}</div><div class="upinfo"><b>${n.name}</b> <span class="lv">Lv.${l}/${PLACE_MAX}</span><br><small>ภาษี +${fmt(nodeRate(t, i, l))}/วินาที${maxed ? '' : ` → +${fmt(nodeRate(t, i, l + 1))}/วินาที`}</small></div>`);
+  row.append(emButton(maxed ? 'สูงสุด' : `💵${fmt(cost)}`, maxed || state.money < cost, () => {
     upgradeNode(t, i);
     branchPanel.style.display = 'none';
     buildMapScene(t);
@@ -5871,7 +5889,7 @@ const PERKS = [
   { id: 'income', icon: '💵', name: 'รายได้ทุกสาขา', desc: (l) => `+${25 * l}%`, max: 20, cost: 1 },
   { id: 'tax', icon: '🏛️', name: 'ภาษีอาณาจักร', desc: (l) => `+${25 * l}%`, max: 10, cost: 1 },
   { id: 'speed', icon: '⚡', name: 'พนักงานและเครื่องผลิต', desc: (l) => `เร็ว +${10 * l}%`, max: 10, cost: 2 },
-  { id: 'startcash', icon: '💼', name: 'เงินตั้งต้นรอบใหม่', desc: (l) => `💵${(5000 * l * l).toLocaleString()}`, max: 10, cost: 1 },
+  { id: 'startcash', icon: '💼', name: 'เงินตั้งต้นรอบใหม่', desc: (l) => `💵${fmt((5000 * l * l))}`, max: 10, cost: 1 },
   { id: 'headstart', icon: '🚀', name: 'เริ่มรอบใหม่ที่ขั้น', desc: (l) => `ขั้น ${3 * l}`, max: 4, cost: 3 },
 ];
 const prs = () => state.prestige || defaultPrestige();
@@ -5912,7 +5930,7 @@ function renderPrestige() {
   const p = prs();
   const gain = starsToGain();
   const card = emEl('div', 'branchcard', `<b>⭐ เกิดใหม่ (Prestige)</b><br><small>ดาวที่มี: <b>${p.stars}</b> · ได้มาทั้งหมด ${p.total} · เกิดใหม่แล้ว ${p.runs} ครั้ง<br>`
-    + `รายได้รอบนี้ 💵${Math.floor(runEarned()).toLocaleString()} → ได้ <b>⭐ ${gain}</b> ดาวถ้าเกิดใหม่ตอนนี้${gain < 1 ? '<br>(หาเงินรอบนี้ให้ถึง 400,000 ก่อน)' : ''}</small><br>`);
+    + `รายได้รอบนี้ 💵${fmt(Math.floor(runEarned()))} → ได้ <b>⭐ ${gain}</b> ดาวถ้าเกิดใหม่ตอนนี้${gain < 1 ? '<br>(หาเงินรอบนี้ให้ถึง 400,000 ก่อน)' : ''}</small><br>`);
   card.append(emButton(`🔄 เกิดใหม่ รับ ⭐ ${gain}`, gain < 1, doPrestige));
   emPage.append(card);
   emPage.append(emEl('p', 'emhint', 'ใช้ดาวซื้อโบนัสถาวร (ติดตัวทุกรอบ)'));
@@ -5976,7 +5994,7 @@ function pullCard() {
 function renderCards() {
   const cost = cardCost();
   const top = emEl('div', 'branchcard', `<b>🃏 สุ่มการ์ดหมอ</b><br><small>หมอแต่ละใบทำให้แผนกหนึ่งทำงานเร็วขึ้น ⭐ ยิ่งมากยิ่งเก่ง ได้ซ้ำจะเลเวลอัป<br>โอกาส: ⭐50% ⭐⭐30% ⭐⭐⭐13% ⭐⭐⭐⭐5% ⭐⭐⭐⭐⭐2%</small><br>`);
-  top.append(emButton(`สุ่ม 1 ใบ · 💵${cost.toLocaleString()}`, state.money < cost, pullCard));
+  top.append(emButton(`สุ่ม 1 ใบ · 💵${fmt(cost)}`, state.money < cost, pullCard));
   upList.append(top);
   const cards = [...(state.cards || [])].sort((a, b) => b.stars - a.stars || b.lvl - a.lvl);
   if (!cards.length) upList.append(emEl('p', 'emhint', 'ยังไม่มีการ์ด ลองสุ่มดูสิ!'));
@@ -6038,7 +6056,7 @@ function renderResearch() {
   for (const r of RESEARCH) {
     const done = researched(r.id);
     const row = emEl('div', 'uprow', `<div class="upico">${r.icon}</div><div class="upinfo"><b>${r.name}</b><br><small>${r.desc} · ใช้เวลา ${formatDuration(r.time) || `${r.time} วินาที`}</small></div>`);
-    row.append(emButton(done ? 'สำเร็จ ✓' : `💵${r.cost.toLocaleString()}`, done || Boolean(R.cur) || state.money < r.cost, () => startResearch(r)));
+    row.append(emButton(done ? 'สำเร็จ ✓' : `💵${fmt(r.cost)}`, done || Boolean(R.cur) || state.money < r.cost, () => startResearch(r)));
     upList.append(row);
   }
 }
@@ -6077,7 +6095,7 @@ function endEpidemic(win) {
     stats().epidemics = (stats().epidemics || 0) + 1;
     burst(player.group.position);
     sfxUnlock();
-    toast(`💉 <b>หยุดโรคระบาดได้!</b> โบนัส +${bonus.toLocaleString()}`, 4000);
+    toast(`💉 <b>หยุดโรคระบาดได้!</b> โบนัส +${fmt(bonus)}`, 4000);
   } else {
     changeRating(-0.3);
     toast('😷 โรคระบาดลุกลาม ⭐ ลดลง ครั้งหน้ารีบไปฉีดวัคซีนนะ', 4000);
@@ -6345,7 +6363,7 @@ function answerQuiz(idx, k) {
   }
   save();
   const box = quizEl.querySelector('.box');
-  box.innerHTML = `<h3>${ok ? '✅ ถูกต้อง!' : '❌ ยังไม่ถูก'}</h3><p class="qtext">คำตอบ: <b>${choices[ans]}</b><br><small>${why}</small>${ok ? `<br><b class="qgain">+💵${quizReward().toLocaleString()}</b>` : ''}</p>`;
+  box.innerHTML = `<h3>${ok ? '✅ ถูกต้อง!' : '❌ ยังไม่ถูก'}</h3><p class="qtext">คำตอบ: <b>${choices[ans]}</b><br><small>${why}</small>${ok ? `<br><b class="qgain">+💵${fmt(quizReward())}</b>` : ''}</p>`;
   const next = emEl('button', 'btn', q.done.length < QUIZ_PER_DAY ? 'ข้อต่อไป ▶' : 'ดูผล');
   next.addEventListener('click', openQuiz);
   box.append(next);
@@ -6396,7 +6414,7 @@ function updateAchievements(dt) {
     state.achievements.push(a.id);
     addMoney(a.reward, false);
     sfxUnlock();
-    toast(`🏅 <b>ความสำเร็จใหม่!</b><br>${a.icon} ${a.name}<br><small>รางวัล 💵${a.reward.toLocaleString()}</small>`, 4500);
+    toast(`🏅 <b>ความสำเร็จใหม่!</b><br>${a.icon} ${a.name}<br><small>รางวัล 💵${fmt(a.reward)}</small>`, 4500);
     save();
     break; // one at a time
   }
@@ -6443,7 +6461,7 @@ async function claimGifts() {
     addMoney(each * rows.length, false);
     sfxUnlock();
     const names = [...new Set(rows.map((r) => r.from_name))].slice(0, 3).map(escapeHtml).join(', ');
-    toast(`🎁 <b>ได้ของขวัญ ${rows.length} ชิ้น!</b><br>จาก ${names}<br><b>+${(each * rows.length).toLocaleString()}</b>`, 5000);
+    toast(`🎁 <b>ได้ของขวัญ ${rows.length} ชิ้น!</b><br>จาก ${names}<br><b>+${fmt((each * rows.length))}</b>`, 5000);
     save();
   } catch {
     // Not available yet: try again later
@@ -6514,7 +6532,7 @@ async function makeShareCard() {
   g.fillText(name || 'โรงพยาบาลของฉัน', W / 2, 1000);
   g.font = '500 40px Mitr, sans-serif';
   g.fillText(`${t.icon} ${t.title} · ${state.branches.length} สาขา · ⭐ ${state.rating.toFixed(1)}`, W / 2, 1065);
-  g.fillText(`💵 รายได้สะสม ${Math.floor(state.earned).toLocaleString()} · 🏅 ${(state.achievements || []).length} ความสำเร็จ`, W / 2, 1125);
+  g.fillText(`💵 รายได้สะสม ${fmt(Math.floor(state.earned))} · 🏅 ${(state.achievements || []).length} ความสำเร็จ`, W / 2, 1125);
   g.fillStyle = '#ffd166';
   roundRect(g, 140, 1185, W - 280, 100, 50);
   g.fill();
@@ -7160,7 +7178,7 @@ function makeCampusTile(lot) {
     g.fillText(lot.icon, 128, 92);
     g.font = '700 40px Mitr, sans-serif';
     g.fillStyle = '#ffffff';
-    fitText(g, `💵${(lot.price - paid).toLocaleString()}`, 128, 190, 228, 40);
+    fitText(g, `💵${fmt((lot.price - paid))}`, 128, 190, 228, 40);
     tex.needsUpdate = true;
   };
   draw();
@@ -7197,7 +7215,7 @@ function updateCampus(dt) {
       campus.owned.push(lot.id);
       buildCampusLot(lot, true);
       sfxUnlock();
-      toast(`${lot.icon} <b>เปิด ${lot.name}!</b><br>รายได้ +${Math.round(lot.rate * priceMult() * 60).toLocaleString()}/นาที ไปเก็บที่กองเงินหน้าตึก`, 4000);
+      toast(`${lot.icon} <b>เปิด ${lot.name}!</b><br>รายได้ +${fmt(Math.round(lot.rate * priceMult() * 60))}/นาที ไปเก็บที่กองเงินหน้าตึก`, 4000);
       save();
     }
   }
@@ -7480,7 +7498,7 @@ function makeHireTile(S, at) {
     g.fillText('🧑‍⚕️', 128, 74);
     g.fillStyle = '#ffffff';
     fitText(g, 'จ้างเจ้าหน้าที่', 128, 150, 216, 34, 600);
-    fitText(g, `💵${(S.hire - t.paid).toLocaleString()}`, 128, 200, 216, 42);
+    fitText(g, `💵${fmt((S.hire - t.paid))}`, 128, 200, 216, 42);
     tex.needsUpdate = true;
   };
   // A label over the tile saying who you'd be hiring
@@ -8169,7 +8187,7 @@ function makeBaseTile(u, at, label, color = '#3a4520') {
     g.fillText(u.icon, 128, 92);
     g.font = '700 40px Mitr, sans-serif';
     g.fillStyle = '#ffffff';
-    fitText(g, `💵${(price - paid).toLocaleString()}`, 128, 190, 228, 40);
+    fitText(g, `💵${fmt((price - paid))}`, 128, 190, 228, 40);
     tex.needsUpdate = true;
   };
   return t;
@@ -8402,7 +8420,7 @@ function updateMissions(dt) {
     stats().missions = (stats().missions || 0) + 1;
     burst(player.group.position);
     sfxUnlock();
-    toast(`🎖️ <b>ภารกิจสำเร็จ!</b> ${m.icon} ${m.name}<br>รางวัล +${m.reward.toLocaleString()} · เหรียญกล้าหาญ 🏅`, 5000);
+    toast(`🎖️ <b>ภารกิจสำเร็จ!</b> ${m.icon} ${m.name}<br>รางวัล +${fmt(m.reward)} · เหรียญกล้าหาญ 🏅`, 5000);
   } else {
     // Some units come back needing repairs
     for (const k of Object.keys(UNIT_TYPES)) B().units[k] = Math.floor((B().units[k] || 0) * 0.8);
@@ -8502,7 +8520,7 @@ function endDefense(win) {
     B().medals++;
     stats().defenses = (stats().defenses || 0) + 1;
     sfxUnlock();
-    toast(`🏆 <b>ป้องกันฐานสำเร็จ!</b> ยิงโดรน ${D.killed} ลำ<br>รางวัล +${reward.toLocaleString()} · เหรียญกล้าหาญ 🏅`, 5000);
+    toast(`🏆 <b>ป้องกันฐานสำเร็จ!</b> ยิงโดรน ${D.killed} ลำ<br>รางวัล +${fmt(reward)} · เหรียญกล้าหาญ 🏅`, 5000);
   } else {
     if (BASE.pile) BASE.pile.amount = Math.floor(BASE.pile.amount / 2), BASE.pile.sync();
     toast('💥 ฐานถูกโจมตี งบประมาณหายไปครึ่งหนึ่ง ฝึกกองทัพให้แข็งแกร่งขึ้นนะ', 4500);
@@ -8523,7 +8541,7 @@ function openMilitary() {
 }
 function renderMilitary() {
   const box = milEl.querySelector('.box');
-  box.innerHTML = `<h3>🎖️ กองบัญชาการ</h3><p class="sub">💪 แสนยานุภาพ <b>${militaryPower().toLocaleString()}</b> · 🏅 เหรียญ ${B().medals} · งบประมาณ +${Math.round(militaryPower() * 0.4 * priceMult()).toLocaleString()}/วินาที</p>`;
+  box.innerHTML = `<h3>🎖️ กองบัญชาการ</h3><p class="sub">💪 แสนยานุภาพ <b>${fmt(militaryPower())}</b> · 🏅 เหรียญ ${B().medals} · งบประมาณ +${fmt(Math.round(militaryPower() * 0.4 * priceMult()))}/วินาที</p>`;
   for (const [k, t] of Object.entries(UNIT_TYPES)) {
     const built = baseHas(t.from);
     const S = BASE.stations[t.from];
@@ -8531,7 +8549,7 @@ function renderMilitary() {
   }
   // Mission
   const m = BASE.mission;
-  const mc = emEl('div', 'branchcard', m ? `<b>🚨 ${m.icon} ${m.name}</b><br><small>${m.deploy ? `กำลังปฏิบัติภารกิจ… ${Math.ceil(m.deploy)} วินาที` : `โอกาสสำเร็จ ${Math.round(missionChance(m) * 100)}% · รางวัล 💵${m.reward.toLocaleString()}`}</small><br>` : '<small>ยังไม่มีเหตุฉุกเฉิน · เดี๋ยวจะมีภารกิจเข้ามา</small>');
+  const mc = emEl('div', 'branchcard', m ? `<b>🚨 ${m.icon} ${m.name}</b><br><small>${m.deploy ? `กำลังปฏิบัติภารกิจ… ${Math.ceil(m.deploy)} วินาที` : `โอกาสสำเร็จ ${Math.round(missionChance(m) * 100)}% · รางวัล 💵${fmt(m.reward)}`}</small><br>` : '<small>ยังไม่มีเหตุฉุกเฉิน · เดี๋ยวจะมีภารกิจเข้ามา</small>');
   if (m && !m.deploy) mc.append(emButton('🪖 ส่งกำลัง', !baseHas('barracks'), dispatchMission));
   box.append(mc);
   const dc = emEl('div', 'branchcard', `<b>🛡️ ซ้อมป้องกันฐาน (โหมดพิเศษ)</b><br><small>โดรนบุกฐาน ยิงให้หมดก่อนถึงกองบัญชาการ ชนะได้รางวัลและเหรียญ</small><br>`);
@@ -8540,7 +8558,7 @@ function renderMilitary() {
   // Generals
   const cost = recruitCost();
   const gc = emEl('div', 'branchcard', `<b>🎖️ แต่งตั้งนายพล</b><br><small>นายพลแต่ละคนเพิ่มพลังและความเร็วฝึกของเหล่าทัพ +5% ต่อดาว</small><br>`);
-  gc.append(emButton(`แต่งตั้ง · 💵${cost.toLocaleString()}`, state.money < cost, recruitGeneral));
+  gc.append(emButton(`แต่งตั้ง · 💵${fmt(cost)}`, state.money < cost, recruitGeneral));
   box.append(gc);
   for (const g of [...B().generals].sort((a, b) => b.stars - a.stars)) {
     box.append(emEl('div', 'uprow', `<div class="upico">${{ army: '🪖', navy: '⚓', air: '✈️' }[g.branch]}</div><div class="upinfo"><b>${GEN_RANK[g.branch]}${g.name}</b><br><small>${'⭐'.repeat(g.stars)} · ${{ army: 'กองทัพบก', navy: 'กองทัพเรือ', air: 'กองทัพอากาศ' }[g.branch]} +${g.stars * 5}%</small></div>`));
@@ -8705,7 +8723,7 @@ function updateStory(dt) {
     logProgress(`ch${s.ch + 1}`);
     if (!storyDone()) {
       const next = curChapter();
-      toast(`📖 <b>จบบทที่ ${s.ch}: ${done.name}</b>${done.reward ? ` · รางวัล 💵${done.reward.toLocaleString()}` : ''}<br>${next.icon} บทที่ ${s.ch + 1}: <b>${next.name}</b><br><small>${next.story}</small>`, 7000);
+      toast(`📖 <b>จบบทที่ ${s.ch}: ${done.name}</b>${done.reward ? ` · รางวัล 💵${fmt(done.reward)}` : ''}<br>${next.icon} บทที่ ${s.ch + 1}: <b>${next.name}</b><br><small>${next.story}</small>`, 7000);
     }
     save();
   }
@@ -8751,7 +8769,7 @@ function openStory() {
     let inner = `<b>${done ? '✅' : i > s.ch ? '🔒' : ch.icon} บทที่ ${i + 1}: ${i > s.ch ? '???' : ch.name}</b>`;
     if (i <= s.ch) inner += `<small class="st">${ch.story}</small>`;
     if (cur) inner += ch.goals.map((g) => `<div class="goal${g.ok() ? ' ok' : ''}">${g.ok() ? '✅' : '⬜'} ${g.text}${g.n && !g.ok() ? ` <small>${g.n()}</small>` : ''}</div>`).join('');
-    if (i <= s.ch && ch.reward) inner += `<small class="rw">รางวัล 💵${ch.reward.toLocaleString()}</small>`;
+    if (i <= s.ch && ch.reward) inner += `<small class="rw">รางวัล 💵${fmt(ch.reward)}</small>`;
     el.innerHTML = inner;
     box.append(el);
   });
@@ -8777,10 +8795,10 @@ function showEnding() {
     <p class="lead">จากคลินิกเล็ก ๆ ริมถนน วันนี้ Dr. Quest ดูแลสุขภาพคนทั้งโลก<br>ขอบคุณที่สร้างอาณาจักรแห่งการรักษามาด้วยกัน</p>
     <div class="estats">
       <div><b>${fmtHours(st.play || 0)}</b><small>เวลาที่เล่น</small></div>
-      <div><b>💵${Math.floor(state.earned).toLocaleString()}</b><small>รายได้สะสม</small></div>
-      <div><b>${(st.served || 0).toLocaleString()}</b><small>คนไข้ที่รักษา</small></div>
+      <div><b>💵${fmt(Math.floor(state.earned))}</b><small>รายได้สะสม</small></div>
+      <div><b>${fmt((st.served || 0))}</b><small>คนไข้ที่รักษา</small></div>
       <div><b>${state.branches.length}</b><small>สาขา</small></div>
-      <div><b>💪${militaryPower().toLocaleString()}</b><small>แสนยานุภาพ</small></div>
+      <div><b>💪${fmt(militaryPower())}</b><small>แสนยานุภาพ</small></div>
       <div><b>🏅${(state.achievements || []).length}/${ACHIEVEMENTS.length}</b><small>ความสำเร็จ</small></div>
     </div>
     <p class="title">ตำแหน่งใหม่บนตารางอันดับ: <b>👑 จักรพรรดิแพทย์โลก</b>${state.conquests > 1 ? ` ×${state.conquests}` : ''}</p>
@@ -9109,7 +9127,7 @@ function advise() {
   else {
     care.push(`การจราจร${jamText(j).slice(2)} รถพยาบาลมาช้าลง`);
     const next = cityState().lights < 3 ? 'lights' : !cityState().round ? 'round' : !cityState().wide ? 'wide' : null;
-    if (next) todo.push(`สร้าง${TRAFFIC[next].icon} ${TRAFFIC[next].name} (💵${TRAFFIC[next].cost(cityState().lights).toLocaleString()})`);
+    if (next) todo.push(`สร้าง${TRAFFIC[next].icon} ${TRAFFIC[next].name} (💵${fmt(TRAFFIC[next].cost(cityState().lights))})`);
   }
   if (sick === 0 && citizenCount()) good.push('ชาวเมืองทุกคนสุขภาพดี');
   else if (sick > 2) care.push(`มีชาวเมืองป่วย ${sick} คน รอรักษาอยู่`);
@@ -9198,13 +9216,13 @@ function renderCityHub() {
       const lvl = id === 'lights' ? c.lights : c[id] ? 1 : 0;
       const maxed = lvl >= t.max;
       const row = emEl('div', 'uprow', `<div class="upico">${t.icon}</div><div class="upinfo"><b>${t.name}</b> <span class="lv">${lvl}/${t.max}</span><br><small>${t.desc}</small></div>`);
-      row.append(emButton(maxed ? 'สร้างแล้ว' : `💵${t.cost(lvl).toLocaleString()}`, maxed || state.money < t.cost(lvl), () => buyTraffic(id)));
+      row.append(emButton(maxed ? 'สร้างแล้ว' : `💵${fmt(t.cost(lvl))}`, maxed || state.money < t.cost(lvl), () => buyTraffic(id)));
       page.append(row);
     }
     page.append(emEl('p', 'emhint', 'ชั่วโมงเร่งด่วน 07:00–09:00 และ 17:00–19:00 รถจะเยอะเป็นพิเศษ'));
   } else {
     const s = tourismScore();
-    page.append(emEl('div', 'advsec', `<b>✈️ เสน่ห์ของเมือง: ${s} คะแนน</b><br><small>${PATIENT_TYPES.tourist.weight ? `มีนักท่องเที่ยวมารักษาประมาณ ${Math.round(PATIENT_TYPES.tourist.weight)}% ของคนไข้` : 'ยังไม่มีนักท่องเที่ยว (เปิดห้องเอกซเรย์และสร้างเมืองก่อน)'}<br>นักท่องเที่ยวจ่ายค่ารักษา ×3 · มาแล้ว ${c.tourists} คน · รายได้ 💵${Math.round(c.touristCash).toLocaleString()}</small>`));
+    page.append(emEl('div', 'advsec', `<b>✈️ เสน่ห์ของเมือง: ${s} คะแนน</b><br><small>${PATIENT_TYPES.tourist.weight ? `มีนักท่องเที่ยวมารักษาประมาณ ${Math.round(PATIENT_TYPES.tourist.weight)}% ของคนไข้` : 'ยังไม่มีนักท่องเที่ยว (เปิดห้องเอกซเรย์และสร้างเมืองก่อน)'}<br>นักท่องเที่ยวจ่ายค่ารักษา ×3 · มาแล้ว ${c.tourists} คน · รายได้ 💵${fmt(Math.round(c.touristCash))}</small>`));
     const tips = [
       ['🌳', 'สวนสาธารณะในเมือง', cityLevel('garden') * 1.5],
       ['🏪', 'ตลาด', cityLevel('market')],
@@ -10078,11 +10096,11 @@ function offerIdleEarnings(seconds) {
   if (amount > 0) {
     pendingIdle = amount;
     pendingTax = taxes;
-    text.innerHTML = `คุณไม่อยู่ ${formatDuration(seconds)}<br>พนักงานช่วยกันดูแลคนไข้ได้<br><b>💵 ${amount.toLocaleString()}</b>`
-      + (others > 0 ? `<br><small>(รวมสาขาอื่น 💵${others.toLocaleString()})</small>` : '')
-      + (taxes > 0 ? `<br><small>(รวมภาษีอาณาจักร 💵${taxes.toLocaleString()})</small>` : '')
+    text.innerHTML = `คุณไม่อยู่ ${formatDuration(seconds)}<br>พนักงานช่วยกันดูแลคนไข้ได้<br><b>💵 ${fmt(amount)}</b>`
+      + (others > 0 ? `<br><small>(รวมสาขาอื่น 💵${fmt(others)})</small>` : '')
+      + (taxes > 0 ? `<br><small>(รวมภาษีอาณาจักร 💵${fmt(taxes)})</small>` : '')
       + (seconds > counted ? '<br><small>(นับสูงสุด 6 ชั่วโมง)</small>' : '')
-      + `<br><small>รายได้ตอนไม่อยู่ประมาณ ${perHour.toLocaleString()}/ชม.</small>`;
+      + `<br><small>รายได้ตอนไม่อยู่ประมาณ ${fmt(perHour)}/ชม.</small>`;
     document.getElementById('awayok').textContent = 'เก็บเงิน';
   } else {
     pendingIdle = 0;
@@ -10146,6 +10164,8 @@ function updateGuide() {
 // ---------- HUD ----------
 const moneyEl = document.getElementById('moneyval');
 const moneyBox = document.getElementById('money');
+// Tap the money bar for the exact amount
+moneyBox.addEventListener('click', () => toast(`💵 <b>${Math.floor(state.money).toLocaleString()}</b><br><small>รายได้สะสมทั้งหมด ${Math.floor(state.earned).toLocaleString()}</small>`, 2500));
 const bagEl = document.getElementById('bag');
 const goalEl = document.getElementById('goal');
 let shownMoney = 0;
@@ -10166,7 +10186,7 @@ function updateMoney() {
 function tickMoneyDisplay(dt) {
   const diff = state.money - shownMoney;
   shownMoney = Math.abs(diff) < 1 ? state.money : shownMoney + diff * Math.min(1, dt * 12);
-  const txt = Math.round(shownMoney).toLocaleString();
+  const txt = fmt(Math.round(shownMoney));
   if (txt !== moneyEl.textContent) {
     moneyEl.textContent = txt;
     // Long totals shrink so the top-right buttons never get pushed off the screen
@@ -10218,7 +10238,7 @@ function renderUpgrades() {
       <div class="upinfo"><b>${u.name}</b> <span class="lv">Lv.${lvl}/${u.max}</span><br><small>${u.desc(lvl)}${maxed ? '' : ` → ${u.desc(lvl + 1).replace(/^.*?([+−-].*)$/, '$1')}`}</small></div>`;
     const btn = document.createElement('button');
     btn.className = 'btn upbuy';
-    btn.textContent = maxed ? 'สูงสุด' : `💵${cost.toLocaleString()}`;
+    btn.textContent = maxed ? 'สูงสุด' : `💵${fmt(cost)}`;
     btn.disabled = maxed || state.money < cost;
     btn.addEventListener('click', () => buyUpgrade(u));
     row.append(btn);
@@ -10257,7 +10277,7 @@ function updateUpgradeDot() {
 // Three missions a day, picked from the date so they're the same all day
 const MISSIONS = [
   { type: 'serve', icon: '🧑‍⚕️', text: (n) => `รักษาคนไข้ ${n} คน`, targets: [20, 35, 50] },
-  { type: 'earn', icon: '💵', text: (n) => `หาเงินจากคนไข้ ${n.toLocaleString()}`, targets: [400, 800, 1500], scale: true },
+  { type: 'earn', icon: '💵', text: (n) => `หาเงินจากคนไข้ ${fmt(n)}`, targets: [400, 800, 1500], scale: true },
   { type: 'tips', icon: '💖', text: (n) => `ได้ทิป ${n} ครั้ง`, targets: [8, 15, 25] },
   { type: 'emergency', icon: '🚨', text: (n) => `ช่วยคนไข้ฉุกเฉิน ${n} คน`, targets: [3, 5, 8], from: 2 },
   { type: 'vip', icon: '👑', text: (n) => `ดูแลคนไข้ VIP ${n} คน`, targets: [2, 3, 5], from: 4 },
@@ -10330,7 +10350,7 @@ function renderMissions() {
   const c = todayChallenge();
   const card = document.createElement('div');
   card.className = 'branchcard';
-  card.innerHTML = `<b>${c.icon} ${c.text}</b><br><small>คะแนนคุณวันนี้: <b>${Math.floor(state.challenge?.date === todayKey() ? state.challenge.score : 0).toLocaleString()}</b> · แข่งกับทุกคน รีเซ็ตเที่ยงคืน</small><br>`;
+  card.innerHTML = `<b>${c.icon} ${c.text}</b><br><small>คะแนนคุณวันนี้: <b>${fmt(Math.floor(state.challenge?.date === todayKey() ? state.challenge.score : 0))}</b> · แข่งกับทุกคน รีเซ็ตเที่ยงคืน</small><br>`;
   const btn = document.createElement('button');
   btn.className = 'btn upbuy';
   btn.textContent = '📅 ดูอันดับวันนี้';
@@ -10345,7 +10365,7 @@ function renderMissions() {
   const q = quizState();
   const quiz = document.createElement('div');
   quiz.className = 'branchcard';
-  quiz.innerHTML = `<b>🩺 ควิซสุขภาพวันนี้ ${q.done.length}/${QUIZ_PER_DAY}</b><br><small>ตอบถูกข้อละ 💵${quizReward().toLocaleString()} · ได้ความรู้สุขภาพจริง</small><br>`;
+  quiz.innerHTML = `<b>🩺 ควิซสุขภาพวันนี้ ${q.done.length}/${QUIZ_PER_DAY}</b><br><small>ตอบถูกข้อละ 💵${fmt(quizReward())} · ได้ความรู้สุขภาพจริง</small><br>`;
   quiz.append(emButton(q.done.length >= QUIZ_PER_DAY ? 'ตอบครบแล้ว ✓' : '✏️ ตอบควิซ', false, () => { missionPanel.style.display = 'none'; openQuiz(); }));
   missionList.append(quiz);
   for (const m of state.daily.missions) {
@@ -10356,7 +10376,7 @@ function renderMissions() {
     row.innerHTML = `<div class="upico">${def.icon}</div>
       <div class="upinfo"><b>${def.text(m.target)}</b><br>
       <div class="mbar"><div style="width:${(m.progress / m.target) * 100}%"></div></div>
-      <small>${Math.floor(m.progress).toLocaleString()} / ${m.target.toLocaleString()} · รางวัล 💵${m.reward.toLocaleString()}</small></div>`;
+      <small>${fmt(Math.floor(m.progress))} / ${fmt(m.target)} · รางวัล 💵${fmt(m.reward)}</small></div>`;
     const btn = document.createElement('button');
     btn.className = 'btn upbuy';
     btn.textContent = m.claimed ? 'รับแล้ว ✓' : 'รับรางวัล';
@@ -10366,7 +10386,7 @@ function renderMissions() {
       m.claimed = true;
       addMoney(m.reward);
       sfxUnlock();
-      floatText(player.group.position, `+${m.reward.toLocaleString()} 📋`, '#8be08f');
+      floatText(player.group.position, `+${fmt(m.reward)} 📋`, '#8be08f');
       save();
       renderMissions();
     });
@@ -10404,7 +10424,7 @@ function tickOtherBranches(dt) {
   // Show a little "+X from other branches" now and then
   tickOtherBranches.t = (tickOtherBranches.t || 0) + dt;
   if (tickOtherBranches.t > 15 && otherShown > 0) {
-    floatText(player.group.position, `🏥 +${otherShown.toLocaleString()} จากสาขาอื่น`, '#bfe9ff');
+    floatText(player.group.position, `🏥 +${fmt(otherShown)} จากสาขาอื่น`, '#bfe9ff');
     otherShown = 0;
     tickOtherBranches.t = 0;
   }
@@ -10424,7 +10444,7 @@ function renderBranches() {
     const rate = Math.round((b?.idleRate || 0) * 3600);
     row.innerHTML = `<div class="upico" style="color:${BRANCH_COLORS[i % BRANCH_COLORS.length]}">${themeOf(i).icon}</div>
       <div class="upinfo"><b>${branchName(i)}</b> <small>${themeOf(i).name}</small> <span class="lv">รายได้ ×${branchMultOf(i).toFixed(1)}</span><br>
-      <small>⭐ ${(b?.rating ?? 3).toFixed(1)} · ปลดล็อก ${step}/${UNLOCKS.length}${rate ? ` · ตอนไม่อยู่ ~${rate.toLocaleString()}/ชม.` : ''}</small></div>`;
+      <small>⭐ ${(b?.rating ?? 3).toFixed(1)} · ปลดล็อก ${step}/${UNLOCKS.length}${rate ? ` · ตอนไม่อยู่ ~${fmt(rate)}/ชม.` : ''}</small></div>`;
     const btn = document.createElement('button');
     btn.className = 'btn upbuy';
     btn.textContent = here ? 'อยู่ที่นี่' : 'ไปสาขานี้';
@@ -10441,7 +10461,7 @@ function renderBranches() {
     card.innerHTML = `<b>🏗️ เปิด${branchName(next)} ${themeOf(next).icon} ${themeOf(next).name}</b><br><small>รายได้ ×${branchMultOf(next).toFixed(1)} · สาขาเดิมยังอยู่และหาเงินต่อ</small>`;
     const btn = document.createElement('button');
     btn.className = 'btn';
-    btn.textContent = `เปิดสาขา · 💵${cost.toLocaleString()}`;
+    btn.textContent = `เปิดสาขา · 💵${fmt(cost)}`;
     btn.disabled = state.money < cost;
     btn.addEventListener('click', openBranch);
     card.append(btn);
@@ -10465,7 +10485,7 @@ function openBranch() {
   const cost = newBranchCost();
   const next = state.branches.length;
   if (!canOpenBranch() || state.money < cost) return;
-  if (!confirm(`เปิด${branchName(next)} ${themeOf(next).icon} ${themeOf(next).name} ราคา 💵${cost.toLocaleString()}?\n\nสาขาใหม่เริ่มสร้างตั้งแต่ต้น แต่รายได้ ×${branchMultOf(next).toFixed(1)} และสาขาเดิมยังอยู่ หาเงินต่อให้ และกลับไปดูได้ตลอด`)) return;
+  if (!confirm(`เปิด${branchName(next)} ${themeOf(next).icon} ${themeOf(next).name} ราคา 💵${fmt(cost)}?\n\nสาขาใหม่เริ่มสร้างตั้งแต่ต้น แต่รายได้ ×${branchMultOf(next).toFixed(1)} และสาขาเดิมยังอยู่ หาเงินต่อให้ และกลับไปดูได้ตลอด`)) return;
   state.money -= cost;
   const data = saveData();
   data.branches.push(null);
@@ -11131,7 +11151,7 @@ document.getElementById('loadcode').addEventListener('click', () => {
     alert('โค้ดเซฟไม่ถูกต้อง');
     return;
   }
-  if (!confirm(`โหลดเซฟนี้? (เงิน ${data.money.toLocaleString()} · ปลดล็อก ${data.step} ขั้น) ความคืบหน้าปัจจุบันจะถูกแทนที่`)) return;
+  if (!confirm(`โหลดเซฟนี้? (เงิน ${fmt(data.money)} · ปลดล็อก ${data.step} ขั้น) ความคืบหน้าปัจจุบันจะถูกแทนที่`)) return;
   replaceSave(data);
 });
 window.addEventListener('pagehide', () => {
@@ -11312,13 +11332,13 @@ async function renderBoard() {
     if (boardTab === 'all') {
       sub.textContent = 'จัดอันดับจากรายได้สะสมจากคนไข้ (ไม่นับภาษีอาณาจักร)';
       const rows = await rpc('leaderboard2', { p_limit: 30 });
-      rows.forEach((r) => list.append(boardRow(r, `💵${Number(r.earned).toLocaleString()}`, r.nickname === cloud.nickname && r.earned === state.earned)));
+      rows.forEach((r) => list.append(boardRow(r, `💵${fmt(Number(r.earned))}`, r.nickname === cloud.nickname && r.earned === state.earned)));
       if (!rows.length) list.textContent = 'ยังไม่มีใครในกระดาน';
     } else if (boardTab === 'daily') {
       const c = todayChallenge();
-      sub.innerHTML = `${c.icon} ${c.text}<br>คะแนนคุณวันนี้: <b>${Math.floor(state.challenge.score).toLocaleString()}</b> · รีเซ็ตเที่ยงคืน`;
+      sub.innerHTML = `${c.icon} ${c.text}<br>คะแนนคุณวันนี้: <b>${fmt(Math.floor(state.challenge.score))}</b> · รีเซ็ตเที่ยงคืน`;
       const rows = await rpc('daily_board', { p_date: todayKey(), p_limit: 30 });
-      rows.forEach((r) => list.append(boardRow(r, `${c.icon}${Number(r.score).toLocaleString()}`, r.nickname === cloud.nickname && r.score === Math.floor(state.challenge.score))));
+      rows.forEach((r) => list.append(boardRow(r, `${c.icon}${fmt(Number(r.score))}`, r.nickname === cloud.nickname && r.score === Math.floor(state.challenge.score))));
       if (!rows.length) list.textContent = 'วันนี้ยังไม่มีใครทำคะแนน เป็นคนแรกเลย!';
     } else {
       renderRoom(list, sub);
@@ -11358,9 +11378,9 @@ async function renderRoom(list, sub) {
   const weekly = rows.some((r) => r.week !== undefined);
   if (weekly && rows.length) {
     const best = [...rows].sort((a, b) => b.week - a.week)[0];
-    if (best.week > 0) sub.innerHTML += `<br>🏆 แชมป์สัปดาห์นี้: <b>${escapeHtml(best.nickname)}</b> (💵${Number(best.week).toLocaleString()})`;
+    if (best.week > 0) sub.innerHTML += `<br>🏆 แชมป์สัปดาห์นี้: <b>${escapeHtml(best.nickname)}</b> (💵${fmt(Number(best.week))})`;
   }
-  rows.forEach((r) => list.append(boardRow(r, `💵${Number(r.earned).toLocaleString()}<br><small>${todayChallenge().icon}${Number(r.score).toLocaleString()}${weekly ? ` · 📆${Number(r.week).toLocaleString()}` : ''}</small>`, r.nickname === cloud.nickname && r.earned === state.earned)));
+  rows.forEach((r) => list.append(boardRow(r, `💵${fmt(Number(r.earned))}<br><small>${todayChallenge().icon}${fmt(Number(r.score))}${weekly ? ` · 📆${fmt(Number(r.week))}` : ''}</small>`, r.nickname === cloud.nickname && r.earned === state.earned)));
   const gift = emEl('button', 'btn', '🎁 ส่งของขวัญให้ทั้งห้อง (วันละครั้ง)');
   gift.addEventListener('click', sendRoomGift);
   list.append(gift);
@@ -11485,7 +11505,7 @@ document.getElementById('awayok').addEventListener('click', () => {
     addMoney(pendingIdle - pendingTax);
     addMoney(pendingTax, false);
     pendingTax = 0;
-    floatText(player.group.position, `+${pendingIdle.toLocaleString()}`, '#8be08f');
+    floatText(player.group.position, `+${fmt(pendingIdle)}`, '#8be08f');
     sfxUnlock();
     pendingIdle = 0;
     save();
@@ -11493,4 +11513,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
