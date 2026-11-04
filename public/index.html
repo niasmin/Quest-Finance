@@ -3,17 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>Dr. Quest โรงพยาบาลป่วน</title>
-<meta name="description" content="เกมไทคูนโรงพยาบาล 3D เดินเก็บยา จ่ายให้คนไข้ จ้างพยาบาล ขยายโรงพยาบาล เล่นฟรีบนเว็บและมือถือ">
+<title>Dr. Quest World</title>
+<meta name="description" content="เกมไทคูน 3D สร้างโรงพยาบาล ขยายเมือง วิทยาเขต ค่ายทหาร สู่อาณาจักรโลก เล่นฟรีบนเว็บและมือถือ">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#4caf50">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Dr. Quest">
+<meta name="apple-mobile-web-app-title" content="Dr. Quest World">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Dr. Quest โรงพยาบาลป่วน">
-<meta property="og:description" content="เกมไทคูนโรงพยาบาล 3D เดินเก็บยา จ่ายให้คนไข้ จ้างพยาบาล ขยายโรงพยาบาล เล่นฟรีบนเว็บและมือถือ">
+<meta property="og:title" content="Dr. Quest World">
+<meta property="og:description" content="เกมไทคูน 3D สร้างโรงพยาบาล ขยายเมือง วิทยาเขต ค่ายทหาร สู่อาณาจักรโลก เล่นฟรีบนเว็บและมือถือ">
 <meta property="og:image" content="https://niasmin.github.io/Quest-Finance/og-image.png">
 <meta property="og:url" content="https://niasmin.github.io/Quest-Finance/">
 <meta name="twitter:card" content="summary_large_image">
@@ -101,11 +101,19 @@
 
   .float { position: fixed; pointer-events: none; font-weight: 700; font-size: 20px; text-shadow: 0 2px 0 rgba(0,0,0,.45), 0 0 6px rgba(0,0,0,.25); transform: translate(-50%, -50%); white-space: nowrap; }
 
-  #start { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px;
-    background: radial-gradient(circle at 50% 35%, rgba(255,255,255,.25), rgba(0,0,0,0) 60%), linear-gradient(180deg, #63c7ff, #2f9e57); text-align: center; z-index: 10; }
-  #start img { width: min(92vw, 520px); image-rendering: pixelated; filter: drop-shadow(0 6px 0 rgba(0,0,0,.2)); }
-  #start h2 { margin: 0; font-size: clamp(22px, 6vw, 32px); text-shadow: 0 3px 0 rgba(0,0,0,.3); }
-  #start p { margin: 0; max-width: 420px; font-size: 16px; line-height: 1.6; text-shadow: 0 2px 0 rgba(0,0,0,.25); }
+  /* Title screen: the live 3D world circles behind a glassy card */
+  #start { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; z-index: 10;
+    background: radial-gradient(ellipse at 50% 40%, rgba(12,20,40,.05), rgba(12,20,40,.55) 75%), linear-gradient(180deg, rgba(10,18,40,.55) 0%, rgba(10,18,40,0) 30%, rgba(10,18,40,0) 60%, rgba(10,18,40,.75) 100%); }
+  #start img { width: min(94vw, 560px); image-rendering: pixelated; filter: drop-shadow(0 8px 0 rgba(0,0,0,.25)) drop-shadow(0 0 24px rgba(255,209,102,.35)); animation: titlebob 3.2s ease-in-out infinite; }
+  @keyframes titlebob { 50% { transform: translateY(-6px); } }
+  #start .tagline { margin: 0; max-width: 460px; font-size: clamp(15px, 4vw, 18px); line-height: 1.55; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+  #start .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 480px; }
+  #start .chips span { background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 4px 10px; font-size: 13px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  #start .startcard { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px 18px; border-radius: 22px; background: rgba(15,25,50,.45); border: 1px solid rgba(255,255,255,.25);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+  #start #startbtn { font-size: 24px; padding: 14px 46px; animation: pulsebtn 1.6s ease-in-out infinite; }
+  @keyframes pulsebtn { 50% { transform: scale(1.05); box-shadow: 0 6px 0 #b86b00, 0 0 22px rgba(255,209,102,.8); } }
+  #start .foot { margin: 0; font-size: 13px; opacity: .85; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
   .btn { border: none; border-radius: 18px; padding: 14px 34px; font: inherit; font-size: 22px; font-weight: 700; color: #3b2400; background: linear-gradient(180deg, #ffe08a, #f5a623); box-shadow: 0 6px 0 #b86b00; cursor: pointer; pointer-events: auto; }
   .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #b86b00; }
 
@@ -314,11 +322,16 @@
 <div id="joy"><div id="knob"></div></div>
 
 <div id="start">
-  <img src="logo.png" alt="Dr. Quest">
-  <h2>🏥 โรงพยาบาลป่วน</h2>
-  <p>เดินเก็บยาจากเครื่อง เอาไปวางที่เคาน์เตอร์ จ่ายยาให้คนไข้ เก็บเงิน แล้วขยายโรงพยาบาลให้ใหญ่ที่สุด!</p>
-  <input id="startname" maxlength="20" placeholder="✏️ ชื่อหมอของคุณ (โชว์ในตารางอันดับ)" autocomplete="nickname">
-  <button id="startbtn" class="btn">เปิดโรงพยาบาล</button>
+  <img src="logo.png" alt="Dr. Quest World">
+  <p class="tagline">สร้างโรงพยาบาลของคุณ ขยายเป็นเมือง วิทยาเขต ค่ายทหาร<br>จนกลายเป็นอาณาจักรทั่วโลก 🌏</p>
+  <div class="chips">
+    <span>🏥 โรงพยาบาล 5 ชั้น</span><span>🏙️ เมืองหมอ</span><span>🏫 วิทยาเขต</span><span>🎖️ ค่ายทหาร</span><span>🌏 แผนที่โลก</span><span>🤖 AUTO เล่นให้</span>
+  </div>
+  <div class="startcard">
+    <input id="startname" maxlength="20" placeholder="✏️ ชื่อหมอของคุณ" autocomplete="nickname">
+    <button id="startbtn" class="btn">▶ เริ่มเล่น</button>
+  </div>
+  <p class="foot">เล่นฟรีบนเว็บและมือถือ · เซฟบนคลาวด์อัตโนมัติ</p>
 </div>
 
 <div id="menu">
