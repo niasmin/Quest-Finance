@@ -177,9 +177,9 @@
   #emtabs button small { font-size: 10px; }
   #emtabs button.on { background: #ffd166; color: #3b2400; }
   #emtabs button:disabled { opacity: .45; }
-  .citygrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; border-radius: 16px; background: #8a96a8; }
-  .plot { aspect-ratio: 1; border: 2px dashed #cfe8c0; border-radius: 12px; background: #8fd16b; font: inherit; font-size: 32px; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; padding: 2px; }
-  .plot small { font-size: 11px; color: #fff; text-shadow: 0 1px 0 rgba(0,0,0,.4); }
+  .citygrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 10px; border-radius: 16px; background: #8a96a8; }
+  .plot { aspect-ratio: 1; border: 2px dashed #cfe8c0; border-radius: 12px; background: #8fd16b; font: inherit; font-size: 26px; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; padding: 2px; }
+  .plot small { font-size: 10px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; text-shadow: 0 1px 0 rgba(0,0,0,.4); }
   .plot .lv { font-size: 11px; color: #ffd166; text-shadow: 0 1px 0 rgba(0,0,0,.5); }
   .plot.built { border: 2px solid #5fae45; background: #b9e59a; }
   .plot.built small { color: #1d3a12; text-shadow: none; }
@@ -252,7 +252,7 @@
     <div id="saved" class="pill"></div>
   </div>
   <div id="right">
-    <div id="hudicons"><button id="soundbtn" class="hudbtn" aria-label="เสียง">🔊</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
+    <div id="hudicons"><button id="zoombtn" class="hudbtn" aria-label="ซูม">🔍</button><button id="soundbtn" class="hudbtn" aria-label="เสียง">🔊</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
     <button id="homebtn" class="evbtn ready" style="display:none">🏥 กลับ รพ.</button>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
     <div id="evchips"></div>
