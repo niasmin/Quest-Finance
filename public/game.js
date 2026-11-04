@@ -384,6 +384,7 @@ function sceneryBlocked(x, z) {
   return (x > -10.5 && x < 10.5 && z > -15.5 && z < 14.7) || (z > ROAD_Z - 2.4 && z < ROAD_Z + 2.4)
     || (x > 8.8 && x < 19.5 && z > -12.5 && z < 2.5) || (x > -12 && x < 20 && z > 18.5 && z < 28.5)
     || (x > -43.5 && x < -10.5 && z > -25 && z < 15.5) // the city district west of the hospital
+    || (x > -16 && x < 52 && z > -68 && z < -26) // the military base
     || (x > 18.5 && x < 49 && z > -28 && z < 15.6) || (x > 20 && x < 49 && z > 18.5 && z < 29.5); // the campus and its town
 }
 const leafGeo = new THREE.IcosahedronGeometry(1, 0);
@@ -713,6 +714,14 @@ function districtRoute(from, to) {
   return to;
 }
 function route(from, to) {
+  // The military base, north of the campus: in and out by the campus avenue and its main road
+  if (inBase(to) || inBase(from)) {
+    if (inBase(to) && inBase(from)) return baseRoute(from, to);
+    if (inBase(from)) return Math.abs(from.x - 20) > 1.2 ? v(20, from.z) : v(20, -26.5);
+    // The gate corridor at the top of the campus avenue counts as the way in
+    if (Math.abs(from.x - 20) < 1.2 && from.z < -26.8) return v(20, -30.5);
+    return route(from, v(20, -27.5));
+  }
   // Inside a campus centre: same room is a straight walk; otherwise out through the exit, or in through the door
   if (inInterior(from) || inInterior(to)) {
     const a = inInterior(from) ? interiorAt(from) : null;
@@ -3072,6 +3081,7 @@ const TIPS = {
   outdoor: '💡 <b>ฝั่งตรงข้ามถนน</b> เดินออกประตูหน้า แล้วข้ามถนนไปเก็บค่าจอดรถ',
   boss: '💡 <b>เชื้อโรคยักษ์!</b> แค่ยืนใกล้ ๆ หมอยิงยาใส่เอง<br>ถ้าเปิด AUTO หมอจะวิ่งไปเอง',
   interior: '💡 <b>ข้างในศูนย์</b> มีผู้ใช้บริการเข้ามาเอง<br>ยืนวงเขียวเพื่อให้บริการ หรือยืนบนป้าย 🧑‍⚕️ เพื่อจ้างเจ้าหน้าที่ · ออกที่วงเหลือง 🚪',
+  base: '💡 <b>🎖️ ค่ายทหาร</b> เปิดแล้ว! ขึ้นถนนวิทยาเขตไปทางเหนือสุด<br>ยืนบนป้ายเพื่อสร้าง · ยืนวงเขียวเพื่อฝึกทหาร · วงเหลืองคือกองบัญชาการ',
   campus: '💡 <b>วิทยาเขต Healthcare Empire</b> เปิดแล้ว!<br>เดินออกประตูหน้า ไปทางขวาตามถนนวิทยาเขต แล้วยืนบนป้ายราคาเพื่อซื้อตึก',
   special: '💡 <b>เคสพิเศษ</b> (เสื้อม่วง ⭐) ต้องไปหลายห้องตามลำดับ<br>ดูเส้นทางที่มุมขวาบน',
 };
@@ -3356,6 +3366,8 @@ function updateEventHud() {
   let html = '';
   if (ev.rush) html += `<div class="chip rush">🚨 ${fmtClock(ev.rush.t)} · ${ev.rush.served}/${ev.rush.target} คน</div>`;
   if (ev.boss) html += `<div class="chip boss">🦠 ${Math.max(0, ev.boss.hp)}/${ev.boss.max} · ${fmtClock(ev.boss.t)}</div>`;
+  if (BASE.defense) html += `<div class="chip boss">🛡️ โดรน ${BASE.drones.length + BASE.defense.left} · ฐาน ❤️${BASE.defense.hp}</div>`;
+  if (BASE.mission && !BASE.mission.deploy) html += `<div class="chip rush">🚨 ${BASE.mission.icon} ภารกิจรอส่งกำลัง</div>`;
   if (ev.special) {
     const s = ev.special;
     const route = s.chain.map((k, i) => (i < s.p.stage ? '✅' : serviceIcon(k))).join('→');
@@ -3795,7 +3807,7 @@ const OUT = {
   cars: [], walkers: [], visitors: [], kioskQueue: [], carTimer: 3, walkTimer: 1, kioskTimer: 0,
   parkingCash: null, kioskCash: null, parkCash: null,
 };
-const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash, KT.cash, ...campusPiles()].filter(Boolean);
+const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash, KT.cash, BASE.pile, ...campusPiles()].filter(Boolean);
 const kioskSlot = (i) => v(KIOSK.x - i * 0.95, 19.75);
 
 function stripeLine(x, z, w, d) {
@@ -6221,6 +6233,9 @@ const ACHIEVEMENTS = [
   { id: 'epidemic5', icon: '💉', name: 'หยุดโรคระบาด 5 ครั้ง', ok: () => (stats().epidemics || 0) >= 5, reward: 30000 },
   { id: 'prestige1', icon: '🔄', name: 'เกิดใหม่ครั้งแรก', ok: () => prs().runs >= 1, reward: 10000 },
   { id: 'krathong', icon: '🏮', name: 'ขายกระทง 30 ใบ', ok: () => (stats().krathong || 0) >= 30, reward: 15000 },
+  { id: 'medal10', icon: '🎖️', name: 'เหรียญกล้าหาญ 10 เหรียญ', ok: () => (state.base?.medals || 0) >= 10, reward: 50000 },
+  { id: 'defend5', icon: '🛡️', name: 'ป้องกันฐาน 5 ครั้ง', ok: () => (stats().defenses || 0) >= 5, reward: 40000 },
+  { id: 'general5', icon: '⭐', name: 'ได้นายพล 5 ดาว', ok: () => (state.base?.generals || []).some((g) => g.stars === 5), reward: 80000 },
   { id: 'decor', icon: '🎨', name: 'ตกแต่งครบทุกอย่าง', ok: () => DECOR.every((d) => ownsStyle(d.id)), reward: 50000 },
 ];
 let achTimer = 0;
@@ -6448,7 +6463,7 @@ const CAMPUS_OPEN_STEP = 16; // the elevator stage
 const campus = { built: false, owned: [], paid: {}, cash: {}, piles: {}, tiles: {}, cars: [], folk: [], carTimer: 2, tipShown: false };
 const campusOpen = () => state.step >= CAMPUS_OPEN_STEP;
 const campusPiles = () => Object.values(campus.piles);
-const inCampus = (p) => p.x > CAMPUS_X - 1.4 && p.x < 60 && p.z < ROAD_Z - 1.6;
+const inCampus = (p) => p.x > CAMPUS_X - 1.4 && p.x < 60 && p.z < ROAD_Z - 1.6 && p.z > -28.6;
 
 function campusGround() {
   const g = new THREE.Group();
@@ -6691,6 +6706,8 @@ function updateCampusLife(dt) {
 // Walking inside the campus: avenue to the right street, then along it
 function campusRoute(from, to) {
   if (flatDist(from, to) < 1) return to;
+  // Both on the avenue: straight along it
+  if (Math.abs(from.x - CAMPUS_X) < 0.7 && Math.abs(to.x - CAMPUS_X) < 0.7) return to;
   const streetOf = (z) => (z < -2.5 ? CAMPUS_STREETS[0] : CAMPUS_STREETS[1]);
   const onAvenue = Math.abs(from.x - CAMPUS_X) < 0.7;
   const ts = streetOf(to.z);
@@ -7105,8 +7122,8 @@ function interiorTask() {
   const since = interiorPick.since;
   const stillMine = () => interiorPick && interiorPick.since === since && now - since < 20000;
   if (inside === it.lot.id) return { at: S.opW, keep: () => stillMine() && performance.now() - since < 20000 && waitingAt(S) };
-  if (inside) return { at: INT[inside].exit, keep: () => Boolean(inside) };
-  return { at: doorOf(it.lot), keep: () => !inside && performance.now() - since < 20000 };
+  // Head for the other centre's door: the route leads out through this exit on the way
+  return { at: doorOf(it.lot), keep: () => inside !== it.lot.id && performance.now() - since < 20000 };
 }
 function interiorPerSecond() {
   let rate = 0;
@@ -7117,6 +7134,834 @@ function interiorPerSecond() {
     }
   }
   return rate * 0.5;
+}
+
+// ---------- military base: north of the campus, reached up the campus avenue ----------
+// Bought one stage at a time like the hospital. Buildings train units while someone stands in
+// their ring or a commander is hired; units add up to military power, which pays a budget,
+// powers missions and defends the base from drone raids. Generals boost a whole branch.
+const BASE_GATE = v(20, -29.5);
+const BASE_OPEN_STEP = 24;
+const inBase = (p) => p.z < -28.6 && p.x > -14 && p.x < 50;
+const BASE_UNLOCKS = [
+  { id: 'hq', icon: '🏛️', name: 'กองบัญชาการค่ายทหาร', price: 50000, at: v(22.6, -33) },
+  { id: 'barracks', icon: '🪖', name: 'ค่ายทหารบก', price: 70000, at: v(22.6, -42) },
+  { id: 'housing', icon: '🏠', name: 'บ้านพักทหาร', price: 60000, at: v(17.4, -34) },
+  { id: 'armored', icon: '🚙', name: 'โรงรถหุ้มเกราะ', price: 120000, at: v(22.6, -51) },
+  { id: 'tanks', icon: '🛡️', name: 'กองพันรถถัง', price: 200000, at: v(22.6, -59) },
+  { id: 'navy', icon: '⚓', name: 'ท่าเรือกองทัพเรือ', price: 300000, at: v(17.4, -44) },
+  { id: 'airforce', icon: '✈️', name: 'ฐานบินกองทัพอากาศ', price: 450000, at: v(17.4, -53) },
+  { id: 'privatejet', icon: '🛩️', name: 'เครื่องบินรบส่วนตัว', price: 600000, at: v(17.4, -61) },
+];
+// Units each training building turns out
+const UNIT_TYPES = {
+  inf: { icon: '🪖', name: 'ทหารบก', from: 'barracks', time: 3, power: 1, branch: 'army' },
+  arm: { icon: '🚙', name: 'รถหุ้มเกราะ', from: 'armored', time: 8, power: 5, branch: 'army', cap: 6 },
+  tank: { icon: '🛡️', name: 'รถถัง', from: 'tanks', time: 12, power: 10, branch: 'army', cap: 6 },
+  ship: { icon: '🚢', name: 'เรือรบ + ทหารเรือ', from: 'navy', time: 18, power: 20, branch: 'navy', cap: 4 },
+  jet: { icon: '✈️', name: 'เครื่องบินรบ + ทหารอากาศ', from: 'airforce', time: 15, power: 15, branch: 'air', cap: 6 },
+};
+const infCap = () => (baseHas('housing') ? 24 : 8);
+const unitCap = (k) => (k === 'inf' ? infCap() : UNIT_TYPES[k].cap);
+const defaultBase = () => ({ step: 0, paid: 0, units: { inf: 0, arm: 0, tank: 0, ship: 0, jet: 0 }, hired: [], generals: [], recruits: 0, medals: 0, hp: 10 });
+const B = () => state.base;
+const baseHas = (id) => BASE_UNLOCKS.findIndex((u) => u.id === id) < (B()?.step || 0);
+const GEN_FIRST = ['สายฟ้า', 'เหล็กกล้า', 'พยัคฆ์', 'อินทรี', 'มังกร', 'คลื่นทอง', 'เหยี่ยวเพชร', 'สิงห์ทอง', 'ภูผา', 'พายุ', 'ดาวเหนือ', 'เกราะเพชร'];
+const GEN_RANK = { army: 'พลเอก', navy: 'พลเรือเอก', air: 'พลอากาศเอก' };
+const branchBonus = (br) => 1 + (B()?.generals || []).filter((g) => g.branch === br).reduce((a, g) => a + g.stars * 0.05, 0);
+function militaryPower() {
+  const b = B();
+  if (!b) return 0;
+  let p = 0;
+  for (const [k, t] of Object.entries(UNIT_TYPES)) p += (b.units[k] || 0) * t.power * branchBonus(t.branch);
+  if (baseHas('privatejet')) p += 30;
+  return Math.round(p);
+}
+const recruitCost = () => Math.round((20000 * 1.5 ** Math.min(B().recruits, 30)) / 100) * 100;
+
+const BASE = { built: false, tile: null, stations: {}, unitMeshes: { inf: [], arm: [], tank: [], ship: [], jet: [] }, generals: [], pile: null, budgetT: 0, stand: 0, opened: false, flight: null, drones: [], defense: null, mission: null, missionTimer: 60, raidTimer: rand(360, 540), shots: [] };
+
+// --- models ---
+const OLIVE = 0x556b2f;
+function soldierModel(branch = 'army') {
+  const look = { army: { shirt: OLIVE, pants: 0x4b5320 }, navy: { shirt: 0xffffff, pants: 0xf4f4f0 }, air: { shirt: 0x5b7db1, pants: 0x3d5a80 } }[branch];
+  const p = makePerson({ ...look, skin: pick(SKIN), hair: 0x1f1f1f });
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(branch === 'army' ? 0x4b5320 : branch === 'navy' ? 0xffffff : 0x3d5a80));
+  helmet.position.y = 1.55;
+  p.body.add(helmet);
+  return p;
+}
+function generalModel(branch) {
+  const p = makePerson({ shirt: branch === 'navy' ? 0xffffff : branch === 'air' ? 0x5b7db1 : 0x3b5323, pants: branch === 'navy' ? 0xf4f4f0 : 0x2f3e1f, hair: 0x1f1f1f });
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.28, 0.16, 14), mat(branch === 'navy' ? 0xffffff : 0x2f3e1f));
+  cap.position.y = 1.78;
+  const peak = box(0.32, 0.04, 0.16, 0x111111, { shadow: false });
+  peak.position.set(0, 1.71, 0.24);
+  const badge = box(0.12, 0.08, 0.02, 0xffd166, { shadow: false });
+  badge.position.set(0, 1.8, 0.29);
+  p.body.add(cap, peak, badge);
+  for (let i = 0; i < 3; i++) {
+    const medal = box(0.06, 0.06, 0.02, [0xe5484d, 0xffd166, 0x3d8bfd][i], { shadow: false });
+    medal.position.set(-0.12 + i * 0.07, 1.12, 0.28);
+    p.body.add(medal);
+  }
+  return p;
+}
+function tankModel() {
+  const g = new THREE.Group();
+  const hull = box(1.6, 0.6, 2.5, OLIVE);
+  hull.position.y = 0.55;
+  g.add(hull);
+  for (const s of [-0.85, 0.85]) {
+    const track = box(0.35, 0.5, 2.7, 0x2b2d42);
+    track.position.set(s, 0.3, 0);
+    g.add(track);
+  }
+  const turret = new THREE.Group();
+  const top = box(1.0, 0.45, 1.2, 0x4b5320);
+  top.position.y = 1.05;
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.8, 10), mat(0x3a4520));
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 1.1, 1.3);
+  turret.add(top, barrel);
+  g.add(turret);
+  g.userData.turret = turret;
+  return g;
+}
+function armoredModel() {
+  const g = new THREE.Group();
+  const body = box(1.4, 0.9, 2.5, 0x6b7a3a);
+  body.position.y = 0.85;
+  const nose = box(1.4, 0.5, 0.6, 0x6b7a3a);
+  nose.position.set(0, 0.65, 1.4);
+  nose.rotation.x = -0.5;
+  const gun = box(0.4, 0.3, 0.5, 0x3a4520);
+  gun.position.set(0, 1.45, 0.2);
+  g.add(body, nose, gun);
+  for (const z of [-0.85, 0, 0.85]) {
+    for (const s of [-0.75, 0.75]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.25, 12), mat(0x1d2433));
+      w.rotation.z = Math.PI / 2;
+      w.position.set(s, 0.35, z);
+      g.add(w);
+    }
+  }
+  return g;
+}
+function jetModel(color = 0x8d99ae) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.36, 3.4, 10), mat(color));
+  body.rotation.x = Math.PI / 2;
+  body.position.y = 0.7;
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 10), mat(color));
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, 0.7, 2.1);
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), mat(0x7fc8f8));
+  canopy.scale.set(1, 0.8, 1.8);
+  canopy.position.set(0, 0.95, 1.0);
+  const wing = box(3.4, 0.06, 1.3, color);
+  wing.position.set(0, 0.65, -0.1);
+  const tailW = box(1.4, 0.05, 0.6, color);
+  tailW.position.set(0, 0.7, -1.5);
+  const fin = box(0.06, 0.8, 0.7, color);
+  fin.position.set(0, 1.1, -1.4);
+  g.add(body, nose, canopy, wing, tailW, fin);
+  for (const s of [-1.2, 1.2]) {
+    const gear = box(0.06, 0.4, 0.06, 0x1d2433);
+    gear.position.set(s * 0.3, 0.25, 0);
+    g.add(gear);
+  }
+  return g;
+}
+function shipModel() {
+  const g = new THREE.Group();
+  const hull = box(1.5, 0.7, 4.6, 0x8d99ae);
+  hull.position.y = 0.2;
+  const bow = new THREE.Mesh(new THREE.ConeGeometry(0.75, 1.2, 4), mat(0x8d99ae));
+  bow.rotation.x = Math.PI / 2;
+  bow.rotation.y = Math.PI / 4;
+  bow.position.set(0, 0.2, 2.8);
+  const deck = box(1.0, 0.7, 1.6, 0xdfe6ee);
+  deck.position.set(0, 0.9, -0.6);
+  const bridge = box(0.8, 0.5, 0.8, 0xdfe6ee);
+  bridge.position.set(0, 1.5, -0.6);
+  const mast = box(0.08, 1.2, 0.08, 0x2b2d42);
+  mast.position.set(0, 2.2, -0.7);
+  const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.9, 8), mat(0x2b2d42));
+  gun.rotation.x = Math.PI / 2;
+  gun.position.set(0, 0.8, 1.5);
+  g.add(hull, bow, deck, bridge, mast, gun);
+  return g;
+}
+function droneModel() {
+  const g = new THREE.Group();
+  const core = box(0.6, 0.25, 0.6, 0xe5484d);
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd166 }));
+  eye.position.set(0, -0.1, 0.3);
+  g.add(core, eye);
+  for (const [x, z] of [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]]) {
+    const arm = box(0.08, 0.06, 0.08, 0x2b2d42);
+    arm.position.set(x, 0.05, z);
+    const rotor = box(0.5, 0.02, 0.08, 0x111111, { shadow: false });
+    rotor.position.set(x, 0.12, z);
+    g.add(arm, rotor);
+    g.userData.rotors = (g.userData.rotors || []).concat(rotor);
+  }
+  return g;
+}
+
+// --- ground and buildings ---
+function baseGround() {
+  const g = new THREE.Group();
+  const yard = new THREE.Mesh(new THREE.PlaneGeometry(62, 36), mat(0xb5a77a));
+  yard.rotation.x = -Math.PI / 2;
+  yard.position.set(18, 0.011, -47);
+  yard.receiveShadow = true;
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 40), mat(0x55606e));
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(20, 0.022, -44.5);
+  g.add(yard, road);
+  // Fence posts around the yard, a gate with the sign
+  for (let x = -12; x <= 48; x += 2) {
+    if (Math.abs(x - 20) < 2.5) continue;
+    const post = box(0.12, 1.2, 0.12, 0x6b7a3a);
+    post.position.set(x, 0.6, -29.2);
+    g.add(post);
+  }
+  const rail = box(60, 0.08, 0.08, 0x6b7a3a);
+  rail.position.set(18, 1.0, -29.2);
+  g.add(rail);
+  for (const dx of [-2.2, 2.2]) {
+    const post = box(0.4, 3.6, 0.4, 0x3a4520);
+    post.position.set(20 + dx, 1.8, -29.3);
+    g.add(post);
+  }
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5, 0.9), new THREE.MeshBasicMaterial({ map: signTex('🎖️ ค่ายทหาร', '#3a4520'), side: THREE.DoubleSide }));
+  sign.position.set(20, 3.4, -29.3);
+  g.add(sign);
+  scene.add(g);
+  // Road from the campus avenue's north end up to the gate
+  const link = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 4), mat(0x55606e));
+  link.rotation.x = -Math.PI / 2;
+  link.position.set(20, 0.021, -27.5);
+  scene.add(link);
+}
+function buildingBox(x, z, w, h, d, wall, roof) {
+  const g = new THREE.Group();
+  const b = box(w, h, d, wall);
+  b.position.y = h / 2;
+  const r = box(w + 0.3, 0.25, d + 0.3, roof);
+  r.position.y = h + 0.12;
+  g.add(b, r);
+  for (let i = 0; i < Math.floor(w / 1.6); i++) {
+    const win = box(0.6, 0.5, 0.05, 0x7fc8f8, { shadow: false });
+    win.position.set(-w / 2 + 0.9 + i * 1.6, h * 0.6, d / 2 + 0.03);
+    g.add(win);
+  }
+  g.position.set(x, 0, z);
+  scene.add(g);
+  addCollider(x, z, w, d);
+  return g;
+}
+function hangar(x, z, w, d, color) {
+  const g = new THREE.Group();
+  const shell = new THREE.Mesh(new THREE.CylinderGeometry(w / 2, w / 2, d, 20, 1, false, 0, Math.PI), mat(color));
+  shell.rotation.z = Math.PI / 2;
+  shell.rotation.y = Math.PI / 2;
+  shell.position.y = 0;
+  shell.castShadow = true;
+  g.add(shell);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  addCollider(x, z, w, d);
+  return g;
+}
+function flagPole(x, z) {
+  const pole = box(0.1, 5, 0.1, 0xdfe6ee);
+  pole.position.set(x, 2.5, z);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9), new THREE.MeshBasicMaterial({ map: canvasTexture(84, 54, (c) => {
+    const cols = ['#e5484d', '#ffffff', '#1d3a8a', '#ffffff', '#e5484d'];
+    const hs = [9, 9, 18, 9, 9];
+    let y = 0;
+    cols.forEach((col, i) => { c.fillStyle = col; c.fillRect(0, y, 84, hs[i]); y += hs[i]; });
+  }), side: THREE.DoubleSide }));
+  flag.position.set(x + 0.75, 4.5, z);
+  scene.add(pole, flag);
+  decorAnims.push((t) => { flag.rotation.y = Math.sin(t * 2) * 0.15; });
+}
+const BASE_BUILD = {
+  hq() {
+    buildingBox(31, -33.5, 9, 3.2, 5, 0xf3ead8, 0x3a4520);
+    flagPole(24.6, -36.5);
+    BASE.pile = BASE.pile || new MoneyPile(v(22.6, -35.4));
+  },
+  barracks() {
+    buildingBox(30.5, -42.5, 8, 2.4, 5, 0xc9c19a, 0x4b5320);
+    // Parade ground beside it
+    const pg = new THREE.Mesh(new THREE.PlaneGeometry(10, 8), mat(0x8d99ae));
+    pg.rotation.x = -Math.PI / 2;
+    pg.position.set(41, 0.02, -41.5);
+    scene.add(pg);
+  },
+  housing() {
+    for (const [x, z] of [[6, -32.5], [11, -32.5], [6, -37], [11, -37]]) {
+      const h = roofHouse(2.6, 1.6, 2.4, 0xf3ead8, 0x3a4520);
+      h.position.set(x, 0, z);
+      scene.add(h);
+      addCollider(x, z, 2.6, 2.4);
+    }
+  },
+  armored() {
+    buildingBox(30.5, -51.5, 7, 2.6, 5, 0x8d99ae, 0x3a4520);
+  },
+  tanks() {
+    const g = new THREE.Group();
+    const roof = box(8, 0.2, 5, 0x3a4520);
+    roof.position.y = 3;
+    g.add(roof);
+    for (const [x, z] of [[-3.8, -2.3], [3.8, -2.3], [-3.8, 2.3], [3.8, 2.3]]) {
+      const p = box(0.25, 3, 0.25, 0x6b7a3a);
+      p.position.set(x, 1.5, z);
+      g.add(p);
+    }
+    g.position.set(30.5, 0, -59.5);
+    scene.add(g);
+  },
+  navy() {
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(13, 8), new THREE.MeshLambertMaterial({ color: 0x2f7ec2 }));
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(4, 0.03, -44);
+    const pier = box(13, 0.3, 1, 0xa0703c);
+    pier.position.set(4, 0.15, -39.5);
+    scene.add(water, pier);
+    addCollider(4, -44.5, 13, 7);
+    buildingBox(-8.5, -40.5, 4, 2.4, 3, 0xffffff, 0x1d3a8a);
+  },
+  airforce() {
+    const runway = new THREE.Mesh(new THREE.PlaneGeometry(26, 3.2), mat(0x3d4552));
+    runway.rotation.x = -Math.PI / 2;
+    runway.position.set(2, 0.025, -56.5);
+    scene.add(runway);
+    for (let x = -10; x < 14; x += 2.5) {
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.2), mat(0xffffff));
+      d.rotation.x = -Math.PI / 2;
+      d.position.set(x, 0.03, -56.5);
+      scene.add(d);
+    }
+    hangar(-6, -61.5, 6, 5, 0x8d99ae);
+    const tower = box(1.4, 4.5, 1.4, 0xf3ead8);
+    tower.position.set(-10.5, 2.25, -51.5);
+    const cab = box(2, 1, 2, 0x7fc8f8);
+    cab.position.set(-10.5, 5, -51.5);
+    scene.add(tower, cab);
+    addCollider(-10.5, -51.5, 1.4, 1.4);
+  },
+  privatejet() {
+    hangar(9, -62, 6, 5, 0xffd166);
+    BASE.myJet = jetModel(0xffd166);
+    BASE.myJet.position.set(9, 0, -58.6);
+    scene.add(BASE.myJet);
+  },
+};
+// Where each unit type parks or stands
+function unitSpot(k, i) {
+  switch (k) {
+    case 'inf': return v(37 + (i % 6) * 1.6, -38 - Math.floor(i / 6) * 1.5);
+    case 'arm': return v(37.5 + (i % 3) * 3, -49.5 - Math.floor(i / 3) * 3.4);
+    case 'tank': return v(37.5 + (i % 3) * 3, -57.5 - Math.floor(i / 3) * 3.4);
+    case 'ship': return v(-0.5 + (i % 4) * 3, -44.8);
+    case 'jet': return v(-8 + i * 3.6, -59.3);
+    default: return v(0, 0);
+  }
+}
+function syncUnits(animate = false) {
+  for (const k of Object.keys(UNIT_TYPES)) {
+    const want = B().units[k] || 0;
+    const list = BASE.unitMeshes[k];
+    while (list.length < want) {
+      const i = list.length;
+      let m;
+      if (k === 'inf') m = soldierModel('army');
+      else if (k === 'arm') m = { group: armoredModel() };
+      else if (k === 'tank') m = { group: tankModel() };
+      else if (k === 'ship') {
+        m = { group: shipModel() };
+        // a sailor on the pier for each ship
+        const sailor = soldierModel('navy');
+        sailor.group.position.set(-0.5 + (i % 4) * 3, 0, -39.5);
+        scene.add(sailor.group);
+      } else {
+        m = { group: jetModel() };
+        const pilot = soldierModel('air');
+        pilot.group.position.set(-8 + i * 3.6 + 1.6, 0, -57.8);
+        scene.add(pilot.group);
+      }
+      const at = unitSpot(k, i);
+      m.group.position.set(at.x, k === 'ship' ? 0.05 : 0, at.z);
+      if (k === 'ship') m.group.rotation.y = Math.PI / 2;
+      if (k === 'jet') m.group.rotation.y = Math.PI / 2;
+      scene.add(m.group);
+      list.push(m);
+      if (animate) popIn(m.group);
+    }
+    while (list.length > want) scene.remove(list.pop().group);
+  }
+}
+function syncGenerals() {
+  const gens = B().generals;
+  while (BASE.generals.length < Math.min(gens.length, 6)) {
+    const g = gens[BASE.generals.length];
+    const p = generalModel(g.branch);
+    p.group.position.set(26 + BASE.generals.length * 1.1, 0, -30.6);
+    scene.add(p.group);
+    BASE.generals.push(p);
+  }
+}
+
+// --- unlock tiles and training stations ---
+function makeBaseTile(u, at, label, color = '#3a4520') {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 2.2), [mat(0x3a4520), mat(0x3a4520), new THREE.MeshBasicMaterial({ map: tex }), mat(0x3a4520), mat(0x3a4520), mat(0x3a4520)]);
+  mesh.position.set(at.x, 0.06, at.z);
+  scene.add(mesh);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 0.7), new THREE.MeshBasicMaterial({ map: signTex(label, color), side: THREE.DoubleSide }));
+  sign.position.set(at.x, 2.0, at.z - 1.3);
+  scene.add(sign);
+  const t = { u, at, mesh, sign, paid: 0 };
+  t.draw = (paid, price) => {
+    const g = c.getContext('2d');
+    g.fillStyle = '#2f3e1f';
+    g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#6b8e23';
+    g.fillRect(0, 256 - (256 * paid) / price, 256, (256 * paid) / price);
+    g.strokeStyle = '#ffd166';
+    g.lineWidth = 10;
+    g.setLineDash([22, 14]);
+    g.strokeRect(10, 10, 236, 236);
+    g.font = '86px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(u.icon, 128, 92);
+    g.font = '700 40px Mitr, sans-serif';
+    g.fillStyle = '#ffffff';
+    g.fillText(`💵${(price - paid).toLocaleString()}`, 128, 190);
+    tex.needsUpdate = true;
+  };
+  return t;
+}
+function showBaseTile() {
+  if (BASE.tile) {
+    scene.remove(BASE.tile.mesh, BASE.tile.sign);
+    BASE.tile = null;
+  }
+  const u = BASE_UNLOCKS[B().step];
+  if (!u) return;
+  BASE.tile = makeBaseTile(u, u.at, `${u.icon} ${u.name}`);
+  BASE.tile.draw(B().paid, u.price);
+}
+function applyBaseUnlock(id, animate) {
+  BASE_BUILD[id]?.();
+  const type = Object.entries(UNIT_TYPES).find(([, t]) => t.from === id);
+  const u = BASE_UNLOCKS.find((x) => x.id === id);
+  if (type) {
+    const [k] = type;
+    const ring = zoneRing(u.at, 0x3fbf5f);
+    scene.add(ring);
+    const outward = u.at.x > 20 ? 1.9 : -1.9;
+    const S = { k, at: u.at, progress: 0, staffed: B().hired.includes(id), hireAt: v(u.at.x + outward, u.at.z + 2.4), id };
+    BASE.stations[id] = S;
+    if (S.staffed) postCommander(S);
+    else S.hire = makeBaseTile({ icon: '🎖️' }, S.hireAt, `🎖️ จ้างผู้บังคับหน่วย ${UNIT_TYPES[k].icon}`, '#6b4e16');
+    if (S.hire) S.hire.draw(0, commanderCost(k));
+  }
+  if (id === 'hq' || id === 'privatejet') scene.add(zoneRing(u.at, id === 'hq' ? 0xffd166 : 0x7b61ff));
+  if (animate) {
+    burst(u.at.clone().add(v(u.at.x > 20 ? 6 : -6, 0)));
+    sfxUnlock();
+  }
+}
+const commanderCost = (k) => Math.round(UNIT_TYPES[k].power * 6000);
+function postCommander(S) {
+  const p = generalModel(UNIT_TYPES[S.k].branch);
+  p.group.position.copy(S.at).add(v(S.at.x > 20 ? 1.2 : -1.2, -0.8));
+  scene.add(p.group);
+  S.staffed = true;
+  if (S.hire) {
+    scene.remove(S.hire.mesh, S.hire.sign);
+    S.hire = null;
+  }
+}
+function payTile(t, price, dt) {
+  const left = price - t.paid;
+  const pay = Math.min(state.money, left, Math.max(1, Math.ceil(price * dt * 0.8)));
+  state.money -= pay;
+  t.paid += pay;
+  t.draw(t.paid, price);
+  sfxTick();
+  return t.paid >= price;
+}
+
+function buildBase() {
+  if (BASE.built) return;
+  BASE.built = true;
+  baseGround();
+  for (let i = 0; i < B().step; i++) applyBaseUnlock(BASE_UNLOCKS[i].id, false);
+  syncUnits();
+  syncGenerals();
+  if (B().cash && BASE.pile) BASE.pile.add(B().cash);
+}
+function updateBase(dt) {
+  if (!BASE.built) return;
+  const open = state.step >= BASE_OPEN_STEP;
+  if (open && !BASE.tile && B().step < BASE_UNLOCKS.length) {
+    showBaseTile();
+    tip('base');
+  }
+  if (BASE.tile) BASE.tile.mesh.visible = BASE.tile.sign.visible = open;
+  const pos = player.group.position;
+  const onFloor = player.floor === 0 && !lift.riding;
+  // Unlock tile
+  const t = BASE.tile;
+  if (open && t && onFloor && flatDist(pos, t.at) < 1.1 && state.money > 0) {
+    t.paid = B().paid;
+    const u = BASE_UNLOCKS[B().step];
+    const done = payTile(t, u.price, dt);
+    B().paid = t.paid;
+    if (done) {
+      B().step++;
+      B().paid = 0;
+      applyBaseUnlock(u.id, true);
+      toast(`${u.icon} <b>สร้าง${u.name}แล้ว!</b>`, 3000);
+      showBaseTile();
+      save();
+    }
+  }
+  // Training stations
+  for (const S of Object.values(BASE.stations)) {
+    const type = UNIT_TYPES[S.k];
+    const here = onFloor && flatDist(pos, S.at) < ZONE_R;
+    if ((B().units[S.k] || 0) < unitCap(S.k) && (S.staffed || here)) {
+      S.progress += dt * (S.staffed ? staffMult() : 1) * branchBonus(type.branch);
+      if (S.progress >= type.time) {
+        S.progress = 0;
+        B().units[S.k] = (B().units[S.k] || 0) + 1;
+        syncUnits(true);
+        if (here) floatText(pos, `${type.icon} +1`, '#c5e1a5');
+      }
+    }
+    if (S.hire && onFloor && flatDist(pos, S.hireAt) < 1.1 && state.money > 0) {
+      if (payTile(S.hire, commanderCost(S.k), dt)) {
+        B().hired.push(S.id);
+        postCommander(S);
+        sfxUnlock();
+        save();
+      }
+    }
+  }
+  // HQ ring opens the command panel; the private jet ring starts a flight
+  const hq = BASE_UNLOCKS[0].at;
+  const jetAt = BASE_UNLOCKS[7].at;
+  const atHQ = baseHas('hq') && onFloor && flatDist(pos, hq) < ZONE_R && !autoBadge.classList.contains('show');
+  const atJet = baseHas('privatejet') && onFloor && flatDist(pos, jetAt) < ZONE_R && !autoBadge.classList.contains('show');
+  BASE.stand = atHQ || atJet ? BASE.stand + dt : 0;
+  if (!atHQ && !atJet) BASE.opened = false;
+  if (BASE.stand > 0.6 && !BASE.opened) {
+    BASE.opened = true;
+    if (atHQ) openMilitary();
+    else startFlight();
+  }
+  // Budget from military power into the HQ pile
+  if (BASE.pile) {
+    BASE.budgetT += dt;
+    if (BASE.budgetT >= 3) {
+      const amt = Math.round(militaryPower() * 0.4 * BASE.budgetT * priceMult());
+      if (amt > 0) BASE.pile.add(amt);
+      BASE.budgetT = 0;
+    }
+  }
+  // Soldiers drill in place; tank turrets swing
+  const now = performance.now() / 1000;
+  BASE.unitMeshes.inf.forEach((s, i) => animatePerson(s, Math.floor(now + i * 0.1) % 4 < 2, dt));
+  BASE.unitMeshes.tank.forEach((m, i) => { m.group.userData.turret.rotation.y = Math.sin(now * 0.4 + i) * 0.6; });
+  BASE.generals.forEach((g) => animatePerson(g, false, dt));
+  updateMissions(dt);
+  updateDefense(dt);
+  updateFlight(dt);
+}
+
+// --- private jet: a sightseeing flight over the whole map ---
+function startFlight() {
+  if (BASE.flight || !BASE.myJet) return;
+  BASE.flight = { t: 0, from: player.group.position.clone(), zoom: camZoom };
+  setZoom(2.4);
+  player.group.visible = false;
+  toast('🛩️ <b>ขึ้นบินเครื่องบินรบส่วนตัว!</b><br>ชมวิวรอบอาณาจักร', 3000);
+  tone(330, 0.5, 'sawtooth', 0.04);
+}
+function updateFlight(dt) {
+  const f = BASE.flight;
+  if (!f) return;
+  f.t += dt;
+  const jet = BASE.myJet;
+  const T = 16;
+  const k = Math.min(1, f.t / T);
+  // Take off along the runway, loop around the whole world, land
+  const a = k * Math.PI * 2;
+  const h = Math.sin(k * Math.PI) * 26;
+  const x = 9 + Math.sin(a) * 45;
+  const z = -40 + (1 - Math.cos(a)) * 30;
+  jet.position.set(x, Math.max(0, h), z);
+  jet.rotation.y = Math.atan2(Math.cos(a), Math.sin(a));
+  jet.rotation.z = Math.sin(a) * 0.5;
+  player.group.position.set(x, Math.max(0, h), z);
+  if (k >= 1) {
+    setZoom(f.zoom);
+    jet.position.set(9, 0, -58.6);
+    jet.rotation.set(0, 0, 0);
+    player.group.position.copy(BASE_UNLOCKS[7].at);
+    player.group.visible = true;
+    BASE.flight = null;
+    updateCamera(0, true);
+  }
+}
+
+// --- missions: send the army when trouble strikes ---
+const MISSIONS_MIL = [
+  { icon: '🌊', name: 'ช่วยผู้ประสบภัยน้ำท่วม', branch: 'navy', need: 60 },
+  { icon: '🔥', name: 'ดับไฟป่าทางอากาศ', branch: 'air', need: 80 },
+  { icon: '🏔️', name: 'ลาดตระเวนชายแดน', branch: 'army', need: 40 },
+  { icon: '🚁', name: 'อพยพผู้ป่วยทางอากาศ', branch: 'air', need: 100 },
+  { icon: '🚢', name: 'คุ้มกันเรือสินค้า', branch: 'navy', need: 120 },
+  { icon: '🎯', name: 'ซ้อมรบร่วมนานาชาติ', branch: 'army', need: 150 },
+  { icon: '🌋', name: 'ช่วยเหลือภัยพิบัติแผ่นดินไหว', branch: 'army', need: 200 },
+];
+const missionChance = (m) => Math.min(0.95, militaryPower() * branchBonus(m.branch) / m.need);
+function newMission() {
+  const pool = MISSIONS_MIL.filter((m) => m.need <= Math.max(60, militaryPower() * 2.2));
+  const m = { ...pick(pool), deploy: 0 };
+  m.reward = Math.round((m.need * 120 * priceMult()) / 100) * 100;
+  BASE.mission = m;
+  toast(`🚨 <b>เหตุฉุกเฉิน: ${m.icon} ${m.name}</b><br>ไปที่กองบัญชาการ (วงเหลือง) เพื่อส่งกำลัง`, 4500);
+  tone(523, 0.15, 'square', 0.04);
+}
+function dispatchMission() {
+  const m = BASE.mission;
+  if (!m || m.deploy) return;
+  m.deploy = 20;
+  m.chance = missionChance(m);
+  toast(`🪖 ส่งกำลังไป${m.name}แล้ว · โอกาสสำเร็จ ${Math.round(m.chance * 100)}%`);
+  renderMilitary();
+}
+function updateMissions(dt) {
+  if (!baseHas('barracks')) return;
+  const m = BASE.mission;
+  if (!m) {
+    BASE.missionTimer -= dt;
+    if (BASE.missionTimer <= 0) {
+      BASE.missionTimer = rand(150, 240);
+      newMission();
+    }
+    return;
+  }
+  // AUTO sends the troops when the odds are good
+  if (!m.deploy && autoBadge.classList.contains('show') && missionChance(m) >= 0.7) dispatchMission();
+  if (!m.deploy) return;
+  m.deploy -= dt;
+  if (m.deploy > 0) return;
+  BASE.mission = null;
+  if (Math.random() < m.chance) {
+    addMoney(m.reward);
+    B().medals++;
+    stats().missions = (stats().missions || 0) + 1;
+    burst(player.group.position);
+    sfxUnlock();
+    toast(`🎖️ <b>ภารกิจสำเร็จ!</b> ${m.icon} ${m.name}<br>รางวัล +${m.reward.toLocaleString()} · เหรียญกล้าหาญ 🏅`, 5000);
+  } else {
+    // Some units come back needing repairs
+    for (const k of Object.keys(UNIT_TYPES)) B().units[k] = Math.floor((B().units[k] || 0) * 0.8);
+    syncUnits();
+    toast(`😓 ภารกิจ${m.name}ไม่สำเร็จ เสียกำลังพลบางส่วน`, 4000);
+  }
+  save();
+  if (milEl.style.display === 'flex') renderMilitary();
+}
+
+// --- special mode: defend the base from a drone raid ---
+const DEFEND_HQ = v(31, -33.5);
+function startDefense() {
+  if (BASE.defense || !baseHas('barracks')) return;
+  const count = 12 + Math.min(18, Math.floor(militaryPower() / 20));
+  BASE.defense = { left: count, spawn: 0, killed: 0, hp: 10, t: 0 };
+  toast(`🛡️ <b>โหมดพิเศษ: ป้องกันฐาน!</b><br>โดรน ${count} ลำกำลังบุก ยืนใกล้ ๆ เพื่อยิง กองทัพช่วยยิงอัตโนมัติ`, 5000);
+  [440, 330, 440, 330].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'square', 0.04), i * 300));
+}
+function updateDefense(dt) {
+  if (!BASE.defense) {
+    if (baseHas('barracks') && tutorialDone()) {
+      BASE.raidTimer -= dt;
+      if (BASE.raidTimer <= 0) {
+        BASE.raidTimer = rand(420, 600);
+        startDefense();
+      }
+    }
+    return;
+  }
+  const D = BASE.defense;
+  D.t += dt;
+  D.spawn -= dt;
+  if (D.left > 0 && D.spawn <= 0) {
+    D.spawn = rand(1.2, 2.4);
+    D.left--;
+    const m = droneModel();
+    m.position.set(rand(-10, 46), 3, -66);
+    scene.add(m);
+    BASE.drones.push({ m, hp: 3, fire: 0 });
+  }
+  const pos = player.group.position;
+  for (let i = BASE.drones.length - 1; i >= 0; i--) {
+    const d = BASE.drones[i];
+    const to = DEFEND_HQ.clone().setY(2.5).sub(d.m.position);
+    const dist = to.length();
+    d.m.position.addScaledVector(to.normalize(), Math.min(dist, 2.2 * dt));
+    d.m.userData.rotors.forEach((r) => { r.rotation.y += dt * 30; });
+    // The player zaps drones in range
+    d.fire -= dt;
+    if (player.floor === 0 && flatDist(pos, d.m.position) < 6 && d.fire <= 0) {
+      d.fire = 0.3;
+      const shot = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 5), new THREE.MeshBasicMaterial({ color: 0xffd166 }));
+      fly(shot, pos.clone().setY(1.2), () => d.m.position.clone(), (s) => {
+        scene.remove(s);
+        if (BASE.drones.includes(d) && --d.hp <= 0) killDrone(d);
+      }, 0.18, 0.2);
+    }
+    if (dist < 2.5) {
+      // Reached the HQ
+      D.hp--;
+      scene.remove(d.m);
+      BASE.drones.splice(i, 1);
+      tone(120, 0.3, 'sawtooth', 0.05);
+    }
+  }
+  // The army shoots back: power sets how often
+  D.armyT = (D.armyT || 0) - dt;
+  if (D.armyT <= 0 && BASE.drones.length) {
+    D.armyT = Math.max(0.35, 2.5 - militaryPower() / 60);
+    const target = BASE.drones[Math.floor(Math.random() * BASE.drones.length)];
+    const from = pick([v(37, -50), v(37, -58), v(0, -59), v(40, -40)]).setY(1.2);
+    const tracer = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff924c }));
+    fly(tracer, from, () => target.m.position.clone(), (s) => {
+      scene.remove(s);
+      if (BASE.drones.includes(target)) killDrone(target);
+    }, 0.4, 3);
+  }
+  if (D.hp <= 0) endDefense(false);
+  else if (D.left <= 0 && !BASE.drones.length) endDefense(true);
+}
+function killDrone(d) {
+  burst(d.m.position);
+  scene.remove(d.m);
+  BASE.drones.splice(BASE.drones.indexOf(d), 1);
+  BASE.defense.killed++;
+  sfxPop();
+}
+function endDefense(win) {
+  const D = BASE.defense;
+  BASE.defense = null;
+  for (const d of BASE.drones) scene.remove(d.m);
+  BASE.drones = [];
+  if (win) {
+    const reward = Math.round(((3000 + militaryPower() * 30) * priceMult()) / 100) * 100;
+    addMoney(reward);
+    B().medals++;
+    stats().defenses = (stats().defenses || 0) + 1;
+    sfxUnlock();
+    toast(`🏆 <b>ป้องกันฐานสำเร็จ!</b> ยิงโดรน ${D.killed} ลำ<br>รางวัล +${reward.toLocaleString()} · เหรียญกล้าหาญ 🏅`, 5000);
+  } else {
+    if (BASE.pile) BASE.pile.amount = Math.floor(BASE.pile.amount / 2), BASE.pile.sync();
+    toast('💥 ฐานถูกโจมตี งบประมาณหายไปครึ่งหนึ่ง ฝึกกองทัพให้แข็งแกร่งขึ้นนะ', 4500);
+  }
+  save();
+}
+function nearestDrone() {
+  let best = null;
+  for (const d of BASE.drones) if (!best || flatDist(player.group.position, d.m.position) < flatDist(player.group.position, best.m.position)) best = d;
+  return best;
+}
+
+// --- the command panel ---
+const milEl = document.getElementById('military');
+function openMilitary() {
+  renderMilitary();
+  milEl.style.display = 'flex';
+}
+function renderMilitary() {
+  const box = milEl.querySelector('.box');
+  box.innerHTML = `<h3>🎖️ กองบัญชาการ</h3><p class="sub">💪 แสนยานุภาพ <b>${militaryPower().toLocaleString()}</b> · 🏅 เหรียญ ${B().medals} · งบประมาณ +${Math.round(militaryPower() * 0.4 * priceMult()).toLocaleString()}/วินาที</p>`;
+  for (const [k, t] of Object.entries(UNIT_TYPES)) {
+    const built = baseHas(t.from);
+    const S = BASE.stations[t.from];
+    box.append(emEl('div', 'uprow', `<div class="upico">${t.icon}</div><div class="upinfo"><b>${t.name}</b> <span class="lv">${built ? `${B().units[k] || 0}/${unitCap(k)}` : '🔒'}</span><br><small>${built ? (S?.staffed ? 'มีผู้บังคับหน่วยฝึกให้อัตโนมัติ' : 'ยืนวงเขียวหน้าอาคารเพื่อฝึก หรือจ้างผู้บังคับหน่วย') : `สร้าง${BASE_UNLOCKS.find((u) => u.id === t.from).name}ก่อน`} · พลัง ${t.power}/หน่วย</small></div>`));
+  }
+  // Mission
+  const m = BASE.mission;
+  const mc = emEl('div', 'branchcard', m ? `<b>🚨 ${m.icon} ${m.name}</b><br><small>${m.deploy ? `กำลังปฏิบัติภารกิจ… ${Math.ceil(m.deploy)} วินาที` : `โอกาสสำเร็จ ${Math.round(missionChance(m) * 100)}% · รางวัล 💵${m.reward.toLocaleString()}`}</small><br>` : '<small>ยังไม่มีเหตุฉุกเฉิน · เดี๋ยวจะมีภารกิจเข้ามา</small>');
+  if (m && !m.deploy) mc.append(emButton('🪖 ส่งกำลัง', !baseHas('barracks'), dispatchMission));
+  box.append(mc);
+  const dc = emEl('div', 'branchcard', `<b>🛡️ ซ้อมป้องกันฐาน (โหมดพิเศษ)</b><br><small>โดรนบุกฐาน ยิงให้หมดก่อนถึงกองบัญชาการ ชนะได้รางวัลและเหรียญ</small><br>`);
+  dc.append(emButton(BASE.defense ? 'กำลังป้องกัน…' : '▶ เริ่มเลย', Boolean(BASE.defense) || !baseHas('barracks'), () => { startDefense(); milEl.style.display = 'none'; }));
+  box.append(dc);
+  // Generals
+  const cost = recruitCost();
+  const gc = emEl('div', 'branchcard', `<b>🎖️ แต่งตั้งนายพล</b><br><small>นายพลแต่ละคนเพิ่มพลังและความเร็วฝึกของเหล่าทัพ +5% ต่อดาว</small><br>`);
+  gc.append(emButton(`แต่งตั้ง · 💵${cost.toLocaleString()}`, state.money < cost, recruitGeneral));
+  box.append(gc);
+  for (const g of [...B().generals].sort((a, b) => b.stars - a.stars)) {
+    box.append(emEl('div', 'uprow', `<div class="upico">${{ army: '🪖', navy: '⚓', air: '✈️' }[g.branch]}</div><div class="upinfo"><b>${GEN_RANK[g.branch]}${g.name}</b><br><small>${'⭐'.repeat(g.stars)} · ${{ army: 'กองทัพบก', navy: 'กองทัพเรือ', air: 'กองทัพอากาศ' }[g.branch]} +${g.stars * 5}%</small></div>`));
+  }
+  const close = emEl('button', 'btn ghost', 'ปิด');
+  close.addEventListener('click', () => { milEl.style.display = 'none'; });
+  box.append(close);
+}
+function recruitGeneral() {
+  const cost = recruitCost();
+  if (state.money < cost) return;
+  state.money -= cost;
+  updateMoney();
+  B().recruits++;
+  const r = Math.random();
+  const stars = r < 0.45 ? 1 : r < 0.75 ? 2 : r < 0.92 ? 3 : r < 0.98 ? 4 : 5;
+  const g = { name: pick(GEN_FIRST), branch: pick(['army', 'navy', 'air']), stars };
+  B().generals.push(g);
+  syncGenerals();
+  (stars >= 4 ? sfxUnlock : sfxCoin)();
+  toast(`🎖️ <b>${GEN_RANK[g.branch]}${g.name}</b> ${'⭐'.repeat(stars)}<br>เข้าประจำการแล้ว!`, 3500);
+  save();
+  renderMilitary();
+}
+
+// --- AUTO and routing ---
+function baseRoute(from, to) {
+  if (flatDist(from, to) < 1.5) return to;
+  if (Math.abs(from.x - 20) > 1.2) return v(20, from.z);
+  if (Math.abs(from.z - to.z) > 0.5) return v(20, to.z);
+  return to;
+}
+function baseTask() {
+  if (state.step < BASE_OPEN_STEP) return null;
+  if (BASE.defense) {
+    const d = nearestDrone();
+    if (d) return { at: v(d.m.position.x, Math.min(-30, d.m.position.z)), keep: () => BASE.drones.includes(d) };
+  }
+  const u = BASE_UNLOCKS[B().step];
+  if (u && BASE.tile && state.money >= u.price - B().paid) return { at: u.at, keep: () => BASE_UNLOCKS[B().step] === u && state.money > 0 };
+  return null;
+}
+function basePerSecond() {
+  return militaryPower() * 0.4 * priceMult();
 }
 
 // ---------- player actions ----------
@@ -7277,7 +8122,7 @@ function collide(pos, r = 0.35) {
     }
   }
   pos.x = Math.max(-60, Math.min(pos.x > 120 ? 400 : 60, pos.x)); // campus centre interiors live beyond x = 140
-  pos.z = Math.max(-30, Math.min(30, pos.z));
+  pos.z = Math.max(-70, Math.min(32, pos.z)); // the military base reaches z = -64
   if (player.floor >= 1) {
     // Stay on the platform upstairs
     pos.x = Math.max(FLOOR.x0 + 0.2, Math.min(FLOOR.x1 - 0.2, pos.x));
@@ -7320,6 +8165,12 @@ function autoTasks() {
     const b = ev.boss;
     return [{ at: bossStand(b), keep: () => ev.boss === b }];
   }
+  // A drone raid on the military base: go and defend it
+  if (BASE.defense && BASE.drones.length) {
+    if (player.floor !== 0) return [{ at: ELEVATOR, ride: 0, keep: () => player.floor !== 0 }];
+    const bt = baseTask();
+    if (bt) return [bt];
+  }
   // A city epidemic comes next: go vaccinate the sick buildings
   const sick = epiTargets();
   if (sick.length) {
@@ -7341,7 +8192,7 @@ function autoTasks() {
     if (t.u.floor) tasks.push({ at: ELEVATOR, ride: t.u.floor, keep: () => player.floor === 0 });
     else tasks.push({ at: t.u.at, keep: () => tile === t && state.money > 0 });
   } else {
-    const ct = campusTask();
+    const ct = campusTask() || baseTask();
     if (ct) tasks.push(ct);
   }
   for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
@@ -7427,6 +8278,7 @@ function autopilot(dt) {
   const dz = way.z - pos.z;
   const d = Math.hypot(dx, dz);
   if (d < 0.25 && way === auto.task.at) return;
+  if (d < 0.01) return; // standing exactly on a waypoint (a door ring): let it act, never divide by zero
   // If a wall or counter blocks the straight line, side-step for a moment
   if (auto.nudge > 0) {
     auto.nudge -= dt;
@@ -7503,7 +8355,7 @@ function idleIncome(seconds) {
   rooms.forEach((room) => {
     if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), staffMult() / room.time) * room.price * priceMult();
   });
-  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond() + campusPerSecond() + interiorPerSecond();
+  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond() + campusPerSecond() + interiorPerSecond() + basePerSecond();
   const t = Math.min(seconds, OFFLINE_CAP);
   return { amount: Math.floor(perSecond * t * offlineRate()), perHour: Math.round(perSecond * 3600 * offlineRate()), seconds: t };
 }
@@ -8106,6 +8958,7 @@ function sfxUnlock() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => 
 // branch (null = opened but never played). Money, earnings and missions are shared.
 const state = { money: 0, step: 0, paid: 0, unlocked: new Set(), upgrades: {}, rating: 3, branch: 0, branches: [null], daily: null, earned: 0, tutorial: 0, style: defaultStyle(), empire: defaultEmpire(),
   challenge: { date: '', score: 0 }, room: null, tips: [],
+  base: defaultBase(),
   prestige: defaultPrestige(), cards: [], cardPulls: 0, research: { done: [], cur: null }, stats: {}, achievements: [], quiz: null, week: null };
 
 let awayOnLoad = 0;
@@ -8134,6 +8987,7 @@ function saveData() {
     challenge: state.challenge, room: state.room, tips: state.tips,
     prestige: state.prestige, cards: state.cards, cardPulls: state.cardPulls, research: state.research,
     stats: state.stats, achievements: state.achievements, quiz: state.quiz, week: state.week,
+    base: { ...state.base, cash: BASE.pile?.amount || 0 },
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
     branch: state.branches.length - 1, step: state.step,
@@ -8209,6 +9063,8 @@ function load() {
   state.achievements = Array.isArray(data.achievements) ? data.achievements : [];
   state.quiz = data.quiz || null;
   state.week = data.week || null;
+  state.base = { ...defaultBase(), ...(data.base || {}) };
+  state.base.units = { ...defaultBase().units, ...(state.base.units || {}) };
   while (state.empire.plots.length < CITY_PLOTS + 4 * (state.empire.land || 0)) state.empire.plots.push(null);
   // Players from before the tutorial existed (or anyone who has earned money) skip it
   state.tutorial = data.tutorial ?? (state.earned > 0 || state.branches.some((b) => b?.step) ? TUTORIAL.length : 0);
@@ -8320,6 +9176,7 @@ function frame(now) {
     updateCollectors(dt);
     updateCampus(dt);
     updateInteriors(dt);
+    updateBase(dt);
     updateExtras(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
@@ -8381,6 +9238,7 @@ applyOutfit();
 buildDistrict();
 buildKrathong();
 buildCampus();
+buildBase();
 spawnCrew();
 syncCollectors();
 showNextTile();
@@ -8860,4 +9718,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };

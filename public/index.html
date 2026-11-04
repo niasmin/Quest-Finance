@@ -258,6 +258,11 @@
   .ach { background: #eef0f5; border-radius: 12px; padding: 6px 2px; text-align: center; font-size: 22px; filter: grayscale(1); opacity: .45; line-height: 1.1; }
   .ach small { display: block; font-size: 9px; color: #4b5a70; margin-top: 2px; }
   .ach.got { filter: none; opacity: 1; background: #fff6d6; }
+  #military { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 13; }
+  #military .box { background: #f6f3e7; color: #1d2433; border-radius: 22px; padding: 18px; width: min(390px, 92vw); max-height: 88dvh; overflow-y: auto; border: 4px solid #6b7a3a; }
+  #military h3 { margin: 0 0 4px; text-align: center; }
+  #military .sub { text-align: center; color: #3a4520; font-size: 13px; margin: 0 0 8px; }
+  #military .btn.ghost { display: block; margin: 12px auto 0; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
 </style>
 </head>
@@ -280,6 +285,7 @@
   </div>
 </div>
 <div id="toast"></div>
+<div id="military"><div class="box"></div></div>
 <div id="quiz"><div class="box"></div></div>
 <div id="share"><div class="box"></div></div>
 <div id="mapview"><div id="mvtouch"></div><div id="mvlabels"></div><div class="mvtop"><b id="mvtitle"></b><button id="mvclose" class="btn ghost">✕ ปิด</button></div><div id="mvsheet"></div></div>
