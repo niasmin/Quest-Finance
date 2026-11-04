@@ -1,6 +1,6 @@
-<p align="center"><img src="public/logo.png" alt="Dr. Quest โรงพยาบาลป่วน" width="560"></p>
+<p align="center"><img src="public/logo.png" alt="Dr. Quest World" width="560"></p>
 
-# Dr. Quest โรงพยาบาลป่วน 🏥
+# Dr. Quest World 🏥🌏
 
 เกมไทคูนโรงพยาบาล 3D แนวไฮเปอร์แคชวล ใช้จอยเดินอย่างเดียว
 เก็บยาจากเครื่องผลิต เอาไปวางเคาน์เตอร์ จ่ายยาให้คนไข้ เก็บเงิน แล้วขยายโรงพยาบาลให้ใหญ่ที่สุด

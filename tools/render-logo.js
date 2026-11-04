@@ -9,6 +9,8 @@ const { chromium } = require('playwright');
   const page = await browser.newPage();
   await page.goto(`file://${path.join(__dirname, 'logo.html')}`);
   const files = await page.evaluate(() => window.render());
+  // og-image.png is a screenshot of the title screen over the live 3D world now, so keep it
+  delete files['og-image.png'];
   for (const [name, base64] of Object.entries(files)) {
     const out = path.join(__dirname, '..', 'public', name);
     fs.writeFileSync(out, Buffer.from(base64, 'base64'));

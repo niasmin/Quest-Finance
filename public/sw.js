@@ -1,5 +1,5 @@
-// Dr. Quest offline support: network first (so updates arrive), cached copy when offline
-const CACHE = 'drquest-v1';
+// Dr. Quest World offline support: network first (so updates arrive), cached copy when offline
+const CACHE = 'drquest-v2';
 const CORE = ['./', 'index.html', 'game.js', 'vendor/three.module.min.js', 'logo.png', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'favicon.png'];
 
 self.addEventListener('install', (e) => {

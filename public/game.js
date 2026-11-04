@@ -1,4 +1,4 @@
-// Dr. Quest — 3D hospital tycoon.
+// Dr. Quest World — 3D hospital tycoon that grows into a world empire.
 // Walk to the machines to stack medicine on your back, stock the counters, serve the
 // queueing patients, collect the cash and spend it on the next unlock tile.
 import * as THREE from './vendor/three.module.min.js';
@@ -6382,7 +6382,7 @@ async function shareHospital() {
   const canvas = await makeShareCard();
   const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.9));
   const url = URL.createObjectURL(blob);
-  const text = `มาดูโรงพยาบาลของฉันใน Dr. Quest! เล่นฟรีบนมือถือ 🏥 ${location.origin}${location.pathname}`;
+  const text = `มาดูอาณาจักรของฉันใน Dr. Quest World! เล่นฟรีบนมือถือ 🏥 ${location.origin}${location.pathname}`;
   box.innerHTML = `<h3>📸 แชร์โรงพยาบาลของฉัน</h3><img class="shareimg" src="${url}" alt="">`;
   const file = new File([blob], 'dr-quest.jpg', { type: 'image/jpeg' });
   if (navigator.canShare?.({ files: [file] })) {
@@ -9156,6 +9156,22 @@ function watchFps(now) {
   }
   if (fps < 26 && !asked) toast(`🐢 เกมกระตุกไหม? (${Math.round(fps)} fps)<br>ลองเปิด <b>⚡ โหมดประหยัด</b> ในเมนู ⚙️`, 6500);
 }
+// Title screen: a slow cinematic orbit over the hospital, campus and base
+const startEl = document.getElementById('start');
+function titleCamera(now) {
+  const a = now / 26000;
+  const cx = 6;
+  const cz = -10;
+  const k = camera.aspect < 1 ? 1.7 : 1; // portrait phones: further back to fit the width
+  camera.position.set(cx + Math.sin(a) * 46 * k, (30 + Math.sin(a * 0.7) * 4) * k, cz + Math.cos(a) * 46 * k);
+  camera.lookAt(cx, 0, cz);
+  scene.fog.near = 80 * k;
+  scene.fog.far = 170 * k;
+  fogZoom = -1; // recompute the normal fog when play starts
+  sun.position.set(cx + 9, 18, cz + 8);
+  sun.target.position.set(cx, 0, cz);
+  sun.target.updateMatrixWorld();
+}
 let last = performance.now();
 let dnTimer = 0;
 let saveTimer = 0;
@@ -9204,7 +9220,8 @@ function frame(now) {
   updateDecor();
   updateWeather(dt);
   updateFloats(dt);
-  updateCamera(dt);
+  if (!running && startEl.style.display !== 'none') titleCamera(now);
+  else updateCamera(dt);
   updateBag();
   updateUpgradeDot();
   updateMissionDot();
