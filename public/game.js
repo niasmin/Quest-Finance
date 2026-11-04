@@ -713,6 +713,14 @@ function districtRoute(from, to) {
   return to;
 }
 function route(from, to) {
+  // Inside a campus centre: same room is a straight walk; otherwise out through the exit, or in through the door
+  if (inInterior(from) || inInterior(to)) {
+    const a = inInterior(from) ? interiorAt(from) : null;
+    const b = inInterior(to) ? interiorAt(to) : null;
+    if (a && a === b) return to;
+    if (a) return a.exit;
+    if (b) return route(from, doorOf(b.lot));
+  }
   // Campus east of the hospital: in by the main road and up the campus avenue
   if (inCampus(to) || inCampus(from)) {
     if (inCampus(to) && inCampus(from)) return campusRoute(from, to);
@@ -3063,6 +3071,7 @@ const TIPS = {
   wing: '💡 <b>อาคารใหม่</b> เข้าทางประตูที่ผนังทางเดินฝั่งขวา',
   outdoor: '💡 <b>ฝั่งตรงข้ามถนน</b> เดินออกประตูหน้า แล้วข้ามถนนไปเก็บค่าจอดรถ',
   boss: '💡 <b>เชื้อโรคยักษ์!</b> แค่ยืนใกล้ ๆ หมอยิงยาใส่เอง<br>ถ้าเปิด AUTO หมอจะวิ่งไปเอง',
+  interior: '💡 <b>ข้างในศูนย์</b> มีผู้ใช้บริการเข้ามาเอง<br>ยืนวงเขียวเพื่อให้บริการ หรือยืนบนป้าย 🧑‍⚕️ เพื่อจ้างเจ้าหน้าที่ · ออกที่วงเหลือง 🚪',
   campus: '💡 <b>วิทยาเขต Healthcare Empire</b> เปิดแล้ว!<br>เดินออกประตูหน้า ไปทางขวาตามถนนวิทยาเขต แล้วยืนบนป้ายราคาเพื่อซื้อตึก',
   special: '💡 <b>เคสพิเศษ</b> (เสื้อม่วง ⭐) ต้องไปหลายห้องตามลำดับ<br>ดูเส้นทางที่มุมขวาบน',
 };
@@ -6439,7 +6448,7 @@ const CAMPUS_OPEN_STEP = 16; // the elevator stage
 const campus = { built: false, owned: [], paid: {}, cash: {}, piles: {}, tiles: {}, cars: [], folk: [], carTimer: 2, tipShown: false };
 const campusOpen = () => state.step >= CAMPUS_OPEN_STEP;
 const campusPiles = () => Object.values(campus.piles);
-const inCampus = (p) => p.x > CAMPUS_X - 1.4 && p.z < ROAD_Z - 1.6;
+const inCampus = (p) => p.x > CAMPUS_X - 1.4 && p.x < 60 && p.z < ROAD_Z - 1.6;
 
 function campusGround() {
   const g = new THREE.Group();
@@ -6524,6 +6533,14 @@ function buildCampusLot(lot, animate) {
   }
   scene.add(g);
   addCollider(lot.at.x, lot.at.z, lot.foot[0], lot.foot[1]);
+  if (CENTERS[lot.id]) {
+    // Door ring: stand on it to walk inside
+    const door = doorOf(lot);
+    scene.add(zoneRing(door, 0xffd166));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.45), new THREE.MeshBasicMaterial({ map: signTex('🚪 เข้าอาคาร', '#b45309'), side: THREE.DoubleSide }));
+    sign.position.set(door.x, 1.6, door.z - 0.9);
+    scene.add(sign);
+  }
   if (animate) {
     popIn(g);
     burst(lot.at);
@@ -6690,13 +6707,416 @@ function campusPerSecond() {
   return campus.owned.reduce((a, id) => a + (CAMPUS_LOTS.find((l) => l.id === id)?.rate || 0), 0) * priceMult();
 }
 function campusSnapshot() {
-  return { owned: campus.owned, paid: campus.paid, cash: Object.fromEntries(Object.entries(campus.piles).map(([k, p]) => [k, p.amount])) };
+  return { owned: campus.owned, paid: campus.paid, hired: campus.hired || {}, cash: Object.fromEntries(Object.entries(campus.piles).map(([k, p]) => [k, p.amount])) };
 }
 // AUTO: buy the next campus building it can afford outright
 function campusTask() {
   if (!campusOpen()) return null;
   const lot = CAMPUS_LOTS.find((l) => !campus.owned.includes(l.id) && state.money >= l.price - (campus.paid[l.id] || 0));
   return lot ? { at: lot.front, keep: () => !campus.owned.includes(lot.id) && state.money > 0 } : null;
+}
+
+// ---------- inside the campus centres: walk in through the door and run them like the hospital ----------
+// Each centre's interior is built far off to the east (x ≥ 140) and reached by standing still on its
+// door ring. Inside are service desks (clients queue) and beds (clients stay and need care rounds).
+// Serve by standing in the green ring or hire staff on a price tile. Money goes to the centre's
+// cash pile outside, where the player, AUTO and the collectors pick it up.
+const INT_W = 18;
+const INT_D = 12;
+const ELDERS = ['elder_f', 'elder_m', 'wheelchair', 'resident'];
+const CROWD = ['elder_f', 'elder_m', 'kid', 'student', 'jogger', 'resident', 'owner_f', 'owner_m'];
+const CENTERS = {
+  homecare: {
+    floor: 0xe0f2fe, clients: CROWD,
+    stations: [
+      { id: 'intake', kind: 'queue', icon: '📞', name: 'รับเรื่องเยี่ยมบ้าน', at: v(-4, -3.2), sprite: 'eq3_reception_desk_s', w: 2.6, price: 60, time: 2.5, staff: 'ch3_receptionist_s', hire: 6000 },
+      { id: 'kit', kind: 'queue', icon: '🧰', name: 'จัดชุดอุปกรณ์เยี่ยมบ้าน', at: v(3, -3.2), sprite: 'eq3_storage_rack_s', w: 2, price: 90, time: 3.2, staff: 'ch3_caregiver_s', hire: 9000 },
+    ],
+    decor: [['eq3_care_van_s', 7, 2.2, 3.6], ['eq3_whiteboard_s', -7.2, -4.9, 1.8], ['eq3_waiting_chairs_s', -6.5, 2.6, 2.4]],
+  },
+  derma: {
+    floor: 0xfce7f3, clients: CROWD,
+    stations: [
+      { id: 'shop', kind: 'queue', icon: '🧴', name: 'เคาน์เตอร์ผลิตภัณฑ์ผิว', at: v(-4.5, -3.2), sprite: 'eq3_medicine_shelf_s', w: 2.2, price: 70, time: 2.2, staff: 'ch3_pharmacist_s', hire: 8000 },
+      { id: 'treat', kind: 'bed', icon: '✨', name: 'ห้องทรีตเมนต์ผิว', beds: [v(2, -3.4), v(5, -3.4)], op: v(3.5, -0.4), bed: 'eq3_rest_sofa_s', price: 180, staff: 'ch3_nurse_s', hire: 12000 },
+    ],
+    decor: [['eq3_waiting_chairs_s', -6.5, 2.6, 2.4], ['dc_planter', 7.4, 3.5, 1.4]],
+  },
+  tranquila: {
+    floor: 0xecfccb, clients: ELDERS,
+    stations: [
+      { id: 'villa', kind: 'bed', icon: '🛏️', name: 'ห้องพักผู้สูงวัย', beds: [v(-6.5, -3.5), v(-3.5, -3.5), v(-0.5, -3.5)], op: v(-3.5, -0.4), bed: 'eq3_care_bed_s', price: 260, staff: 'ch3_caregiver_s', hire: 20000 },
+      { id: 'dining', kind: 'queue', icon: '🍲', name: 'ห้องอาหาร', at: v(5, -3.2), sprite: 'eq3_dining_table_s', w: 2.6, price: 80, time: 2.6, staff: 'ch3_nutritionist_s', hire: 10000 },
+    ],
+    decor: [['eq3_rest_sofa_s', 6.8, 2.6, 2.2], ['dc_planter', -7.6, 3.5, 1.4]],
+  },
+  cmnh: {
+    floor: 0xfff7ed, clients: ELDERS,
+    stations: [
+      { id: 'care', kind: 'bed', icon: '🛏️', name: 'เตียงดูแลผู้สูงอายุ', beds: [v(-7.2, -3.6), v(-4.6, -3.6), v(-2, -3.6), v(0.6, -3.6)], op: v(-3.3, -0.4), bed: 'eq3_care_bed_s', extra: 'eq3_nurse_desk_s', price: 300, staff: 'ch3_nurse_s', hire: 30000 },
+      { id: 'rehab', kind: 'queue', icon: '🦽', name: 'กายภาพบำบัด', at: v(5.2, -3.2), sprite: 'eq3_parallel_bars_s', w: 2.6, price: 120, time: 3.0, staff: 'ch3_pt_s', hire: 15000 },
+    ],
+    decor: [['eq3_med_cart_s', 7.4, 2.4, 1.3], ['eq3_bath_set_s', -7.4, 2.6, 1.8]],
+  },
+  phc: {
+    floor: 0xede9fe, clients: ['student', 'nurse', 'caregiver', 'owner_f', 'owner_m'],
+    stations: [
+      { id: 'cpr', kind: 'queue', icon: '🎓', name: 'ห้องอบรม CPR', at: v(-4, -3.2), sprite: 'eq3_training_manikin_s', w: 2.2, price: 110, time: 3.0, staff: 'ch3_doctor_s', hire: 14000 },
+      { id: 'exam', kind: 'queue', icon: '📝', name: 'ห้องสอบใบประกาศ', at: v(3.5, -3.2), sprite: 'eq3_office_desk_s', w: 2.2, price: 90, time: 2.4, staff: 'ch3_accountant_s', hire: 12000 },
+    ],
+    decor: [['eq3_whiteboard_s', -7.2, -4.9, 1.8], ['eq3_lockers_s', 7.4, -4.6, 1.6], ['eq3_waiting_chairs_s', 6.5, 2.6, 2.4]],
+  },
+  neuro: {
+    floor: 0xdbeafe, clients: ['elder_f', 'elder_m', 'wheelchair', 'owner_f', 'owner_m', 'resident'],
+    stations: [
+      { id: 'opd', kind: 'queue', icon: '🧠', name: 'OPD ประสาทวิทยา', at: v(-5.4, -3.2), sprite: 'eq3_exam_desk_s', w: 2.2, price: 160, time: 2.8, staff: 'ch3_doctor_s', hire: 25000 },
+      { id: 'stroke', kind: 'bed', icon: '🫀', name: 'Stroke Unit', beds: [v(-0.4, -3.6), v(2.4, -3.6), v(5.2, -3.6)], op: v(2.4, -0.4), bed: 'eq3_care_bed_s', extra: 'eq3_vital_monitor_s', price: 420, staff: 'ch3_nurse_s', hire: 40000 },
+    ],
+    decor: [['eq3_suction_unit_s', 7.5, -4.6, 1.2], ['eq3_waiting_chairs_s', -6.5, 2.6, 2.4], ['eq3_med_cart_s', 7.4, 2.4, 1.3]],
+  },
+};
+const INT = {}; // live interiors by lot id
+let inside = null; // lot id the player is in
+const doorState = { still: 0, armed: true };
+const interiorOrigin = (k) => v(150 + k * 32, 0);
+const inInterior = (p) => p.x > 120;
+const interiorAt = (p) => Object.values(INT).find((it) => Math.abs(p.x - it.o.x) < INT_W && Math.abs(p.z - it.o.z) < INT_D);
+const doorOf = (lot) => lot.front.clone().add(v(-1.6, 0));
+
+function buildInterior(lot, k) {
+  const def = CENTERS[lot.id];
+  if (!def || INT[lot.id]) return;
+  const o = interiorOrigin(k);
+  const g = new THREE.Group();
+  g.position.copy(o);
+  // A dark "building" all around so the room reads as indoors
+  const under = new THREE.Mesh(new THREE.PlaneGeometry(INT_W + 30, INT_D + 30), mat(0x2b2d42));
+  under.rotation.x = -Math.PI / 2;
+  under.position.y = -0.02;
+  g.add(under);
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(INT_W, 0.12, INT_D), mat(def.floor));
+  floor.position.y = 0.06;
+  floor.receiveShadow = true;
+  g.add(floor);
+  const wall = (x, z, w, d, h = 1.1) => {
+    const m = box(w, h, d, 0xf4f4f0);
+    m.position.set(x, h / 2, z);
+    g.add(m);
+    addCollider(o.x + x, o.z + z, w, d);
+  };
+  wall(0, -INT_D / 2 - 0.15, INT_W + 0.6, 0.3, 2.2);
+  wall(-INT_W / 2 - 0.15, 0, 0.3, INT_D);
+  wall(INT_W / 2 + 0.15, 0, 0.3, INT_D);
+  wall(-INT_W / 4 - 1, INT_D / 2 + 0.15, INT_W / 2 - 2, 0.3, 0.6);
+  wall(INT_W / 4 + 1, INT_D / 2 + 0.15, INT_W / 2 - 2, 0.3, 0.6);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.9), new THREE.MeshBasicMaterial({ map: signTex(`${lot.icon} ${lot.name}`, '#0f766e'), side: THREE.DoubleSide }));
+  sign.position.set(0, 2.9, -INT_D / 2);
+  g.add(sign);
+  const exit = v(0, INT_D / 2 - 0.9);
+  const exitRing = zoneRing(exit, 0xffd166);
+  g.add(exitRing);
+  const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.45), new THREE.MeshBasicMaterial({ map: signTex('🚪 ทางออก', '#b45309'), side: THREE.DoubleSide }));
+  exitSign.position.set(0, 1.7, INT_D / 2 - 0.1);
+  g.add(exitSign);
+  scene.add(g);
+  const put = (name, x, z, w, base = 0.2) => {
+    const s = campusSprite(name, w, base);
+    s.position.set(o.x + x, 0.12, o.z + z);
+    scene.add(s);
+    return s;
+  };
+  for (const [n, x, z, w] of def.decor || []) put(n, x, z, w);
+  const it = { lot, def, o, exit: exit.clone().add(o), stations: [], timer: 2, leaving: [] };
+  for (const st of def.stations) {
+    const S = { ...st, clients: [], staffed: false, scan: 0 };
+    if (st.kind === 'queue') {
+      S.atW = st.at.clone().add(o);
+      S.opW = st.at.clone().add(o).add(v(0, -1.5)); // behind the desk
+      put(st.sprite, st.at.x, st.at.z, st.w);
+      addCollider(S.atW.x, S.atW.z, st.w * 0.7, 0.8);
+      S.cap = 4;
+    } else {
+      S.bedsW = st.beds.map((b) => ({ at: b.clone().add(o), who: null, care: 0, rest: 0, done: 0, bubble: null }));
+      S.opW = st.op.clone().add(o);
+      for (const b of S.bedsW) {
+        put(st.bed, b.at.x - o.x, b.at.z - o.z, 2.2);
+        if (st.extra) put(st.extra, b.at.x - o.x + 1.1, b.at.z - o.z - 0.6, 0.9);
+        addCollider(b.at.x, b.at.z, 1.2, 1.6);
+        b.bubble = makeBubble();
+        b.bubble.position.set(b.at.x, 2.4, b.at.z);
+        b.bubble.visible = false;
+        scene.add(b.bubble);
+      }
+      S.cap = S.bedsW.length;
+    }
+    // Operator ring and station label
+    scene.add(zoneRing(S.opW, 0x3fbf5f));
+    const lbl = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.55), new THREE.MeshBasicMaterial({ map: signTex(`${st.icon} ${st.name}`, '#14b8a6'), side: THREE.DoubleSide, transparent: true }));
+    lbl.position.set(S.kind === 'queue' ? S.atW.x : S.opW.x, 2.3, (S.kind === 'queue' ? S.atW.z : S.opW.z - 3.2) - 0.9);
+    scene.add(lbl);
+    // Hire tile beside the operator ring
+    S.tile = makeHireTile(S, S.opW.clone().add(v(st.kind === 'queue' ? -2.4 : 2.6, 0.6)));
+    it.stations.push(S);
+  }
+  INT[lot.id] = it;
+  restoreInterior(it);
+}
+function makeHireTile(S, at) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const tex = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.08, 1.8), [mat(0x2b2d42), mat(0x2b2d42), new THREE.MeshBasicMaterial({ map: tex }), mat(0x2b2d42), mat(0x2b2d42), mat(0x2b2d42)]);
+  mesh.position.set(at.x, 0.14, at.z);
+  scene.add(mesh);
+  const t = { at, mesh, paid: 0, draw: null };
+  t.draw = () => {
+    const g = c.getContext('2d');
+    g.fillStyle = '#2b2d42';
+    g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#3fbf5f';
+    g.fillRect(0, 256 - (256 * t.paid) / S.hire, 256, (256 * t.paid) / S.hire);
+    g.font = '80px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('🧑‍⚕️', 128, 90);
+    g.font = '700 38px Mitr, sans-serif';
+    g.fillStyle = '#fff';
+    g.fillText(`จ้าง 💵${(S.hire - t.paid).toLocaleString()}`, 128, 190);
+    tex.needsUpdate = true;
+  };
+  t.draw();
+  return t;
+}
+function hireStation(it, S, animate) {
+  S.staffed = true;
+  if (S.tile) {
+    scene.remove(S.tile.mesh);
+    S.tile = null;
+  }
+  const s = campusSprite(S.staff, 0.85, 0.04);
+  s.position.copy(S.opW);
+  scene.add(s);
+  if (animate) {
+    burst(S.opW);
+    sfxUnlock();
+    toast(`🧑‍⚕️ จ้างเจ้าหน้าที่ ${S.icon} ${S.name} แล้ว`);
+  }
+}
+function restoreInterior(it) {
+  const hired = campus.hired?.[it.lot.id] || [];
+  for (const S of it.stations) if (hired.includes(S.id)) hireStation(it, S, false);
+}
+
+// Payments land in the centre's cash pile out front
+function centerPay(it, amount, at) {
+  campus.piles[it.lot.id].add(amount);
+  missionProgress('serve', 1);
+  missionProgress('earn', amount);
+  if (inside === it.lot.id) floatText(at, `+${amount}`, '#8be08f');
+  sfxCoin();
+}
+function spawnClient(it, S) {
+  const kind = pick(it.def.clients);
+  const s = campusSprite(`ch3_${kind}_n`, 0.8, 0.04);
+  s.position.copy(it.exit).add(v(rand(-0.5, 0.5), 0.6));
+  scene.add(s);
+  return { s, kind, arrived: false };
+}
+function updateInterior(it, dt) {
+  const ppos = player.group.position;
+  const playerAt = (p) => inside === it.lot.id && flatDist(ppos, p) < ZONE_R;
+  it.timer -= dt;
+  if (it.timer <= 0) {
+    it.timer = (6 / arrivalMult()) * rand(0.7, 1.3);
+    const open = it.stations.filter((S) => (S.kind === 'queue' ? S.clients.length < S.cap : S.bedsW.some((b) => !b.who)));
+    if (open.length) {
+      const S = pick(open);
+      const c = spawnClient(it, S);
+      if (S.kind === 'queue') S.clients.push(c);
+      else {
+        const bed = S.bedsW.find((b) => !b.who);
+        bed.who = c;
+        bed.care = 0;
+        bed.done = 0;
+        bed.rest = rand(1, 3);
+        c.bed = bed;
+      }
+    }
+  }
+  for (const S of it.stations) {
+    const staffed = S.staffed || playerAt(S.opW);
+    if (S.kind === 'queue') {
+      S.clients.forEach((c, i) => {
+        const slot = S.atW.clone().add(v(i === 0 ? 0 : 1.4 + (i - 1) * 0.9, 1.3));
+        walkSprite(c, slot, dt);
+      });
+      const front = S.clients[0];
+      if (front?.arrived && staffed) {
+        S.scan += dt * (S.staffed ? staffMult() : 1);
+        if (S.scan >= S.time) {
+          S.scan = 0;
+          S.clients.shift();
+          centerPay(it, Math.round(S.price * priceMult() * eventPayMult()), S.atW);
+          it.leaving.push(front);
+        }
+      }
+    } else {
+      for (const b of S.bedsW) {
+        if (!b.who) {
+          b.bubble.visible = false;
+          continue;
+        }
+        const c = b.who;
+        if (!c.inBed) {
+          walkSprite(c, b.at.clone().add(v(0, 1.2)), dt);
+          if (c.arrived) {
+            c.inBed = true;
+            c.s.visible = false; // tucked in
+          }
+          continue;
+        }
+        // Resting, then a care round: needs someone at the station for a few seconds
+        b.bubble.visible = inside === it.lot.id;
+        if (b.rest > 0) {
+          b.rest -= dt;
+          b.bubble.userData.draw('😴', '', '#1d2433', null);
+          continue;
+        }
+        if (staffed) b.care += dt * (S.staffed ? staffMult() : 1);
+        b.bubble.userData.draw('🔔', '', '#1d2433', Math.min(1, b.care / 2.5));
+        if (b.care >= 2.5) {
+          b.care = 0;
+          b.done++;
+          b.rest = rand(5, 8);
+          if (b.done >= 3) {
+            // Recovered and checked out
+            centerPay(it, Math.round(S.price * priceMult() * eventPayMult()), b.at);
+            c.s.visible = true;
+            c.s.position.copy(b.at).add(v(0, 1.2));
+            it.leaving.push(c);
+            b.who = null;
+          }
+        }
+      }
+    }
+    // Hire tile: stand on it to pay
+    const t = S.tile;
+    if (t && inside === it.lot.id && flatDist(ppos, t.at) < 1.0 && state.money > 0) {
+      const pay = Math.min(state.money, S.hire - t.paid, Math.max(1, Math.ceil(S.hire * dt * 0.8)));
+      state.money -= pay;
+      t.paid += pay;
+      t.draw();
+      sfxTick();
+      if (t.paid >= S.hire) {
+        campus.hired = campus.hired || {};
+        (campus.hired[it.lot.id] = campus.hired[it.lot.id] || []).push(S.id);
+        hireStation(it, S, true);
+        save();
+      }
+    }
+  }
+  for (let i = it.leaving.length - 1; i >= 0; i--) {
+    const c = it.leaving[i];
+    walkSprite(c, it.exit.clone().add(v(0, 0.8)), dt, 's');
+    if (c.arrived) {
+      scene.remove(c.s);
+      it.leaving.splice(i, 1);
+    }
+  }
+}
+function walkSprite(c, target, dt, face) {
+  const p = c.s.position;
+  const dx = target.x - p.x;
+  const dz = target.z - p.z;
+  const d = Math.hypot(dx, dz);
+  c.arrived = d < 0.06;
+  if (c.arrived) return;
+  const step = Math.min(d, 1.6 * dt);
+  p.x += (dx / d) * step;
+  p.z += (dz / d) * step;
+  p.y = 0.12 + Math.abs(Math.sin(performance.now() / 150 + c.s.id)) * 0.05;
+  const dir = face || (dz < 0 ? 'n' : 's');
+  if (c.dir !== dir) {
+    c.dir = dir;
+    c.s.material.map = campusTex(`ch3_${c.kind}_${dir}`);
+  }
+}
+// Doors: stand still on a centre's door ring (outside) or the exit ring (inside) to go through
+function updateDoors(dt) {
+  if (player.floor !== 0 || lift.riding) return;
+  const p = player.group.position;
+  const still = Math.hypot(input.x, input.z) < 0.08;
+  let target = null;
+  if (inside) {
+    const it = INT[inside];
+    if (flatDist(p, it.exit) < ZONE_R) target = { out: it };
+  } else {
+    for (const it of Object.values(INT)) if (flatDist(p, doorOf(it.lot)) < ZONE_R) target = { into: it };
+  }
+  if (!target) {
+    doorState.armed = true;
+    doorState.still = 0;
+    return;
+  }
+  // AUTO walks straight through a door its route needs; a player stops on the ring for a moment
+  const autoOn = autoBadge.classList.contains('show') && auto.task;
+  const tAt = autoOn ? auto.task.at : null;
+  const autoGo = autoOn && (target.into ? interiorAt(tAt) === target.into || flatDist(tAt, doorOf(target.into.lot)) < 0.3 : interiorAt(tAt) !== target.out);
+  doorState.still = still && doorState.armed ? doorState.still + dt : 0;
+  if (!autoGo && doorState.still < 0.4) return;
+  doorState.still = 0;
+  doorState.armed = false;
+  if (target.into) {
+    inside = target.into.lot.id;
+    p.copy(target.into.exit);
+    tip('interior');
+  } else {
+    inside = null;
+    p.copy(doorOf(target.out.lot));
+  }
+  auto.task = null;
+  tone(660, 0.12, 'triangle', 0.05);
+  updateCamera(0, true);
+}
+function updateInteriors(dt) {
+  if (!campus.built) return;
+  CAMPUS_LOTS.forEach((lot, k) => {
+    if (campus.owned.includes(lot.id) && CENTERS[lot.id] && !INT[lot.id]) buildInterior(lot, k);
+  });
+  // Player wandered out of an interior some other way (teleport home etc.)
+  if (inside && !inInterior(player.group.position)) inside = null;
+  for (const it of Object.values(INT)) updateInterior(it, dt);
+  updateDoors(dt);
+}
+// AUTO: serve an unstaffed station that has someone waiting
+let interiorPick = null;
+function interiorTask() {
+  // Stay at one station for up to 20 s, then pick another waiting one so every centre gets help
+  const now = performance.now();
+  const waitingAt = (S) => (S.kind === 'queue' ? Boolean(S.clients[0]?.arrived) : S.bedsW.some((b) => b.who?.inBed && b.rest <= 0));
+  if (!interiorPick || now - interiorPick.since > 20000 || interiorPick.S.staffed || !waitingAt(interiorPick.S)) {
+    const all = [];
+    for (const it of Object.values(INT)) for (const S of it.stations) if (!S.staffed && waitingAt(S) && S !== interiorPick?.S) all.push({ it, S });
+    interiorPick = all.length ? { ...pick(all), since: now } : null;
+  }
+  if (!interiorPick) return null;
+  const { it, S } = interiorPick;
+  const since = interiorPick.since;
+  const stillMine = () => interiorPick && interiorPick.since === since && now - since < 20000;
+  if (inside === it.lot.id) return { at: S.opW, keep: () => stillMine() && performance.now() - since < 20000 && waitingAt(S) };
+  if (inside) return { at: INT[inside].exit, keep: () => Boolean(inside) };
+  return { at: doorOf(it.lot), keep: () => !inside && performance.now() - since < 20000 };
+}
+function interiorPerSecond() {
+  let rate = 0;
+  for (const it of Object.values(INT)) {
+    for (const S of it.stations) {
+      if (!S.staffed) continue;
+      rate += S.kind === 'queue' ? (S.price * priceMult() * staffMult()) / (S.time + 4) : (S.price * priceMult() * S.cap) / 35;
+    }
+  }
+  return rate * 0.5;
 }
 
 // ---------- player actions ----------
@@ -6856,7 +7276,7 @@ function collide(pos, r = 0.35) {
       }
     }
   }
-  pos.x = Math.max(-40, Math.min(40, pos.x));
+  pos.x = Math.max(-60, Math.min(pos.x > 120 ? 400 : 60, pos.x)); // campus centre interiors live beyond x = 140
   pos.z = Math.max(-30, Math.min(30, pos.z));
   if (player.floor >= 1) {
     // Stay on the platform upstairs
@@ -6951,7 +7371,11 @@ function autoTasks() {
   }
   if (OUT.kiosk && !OUT.clerk && OUT.kioskQueue[0]?.arrived) tasks.push({ at: KIOSK_ZONE, keep: () => OUT.kioskQueue[0]?.arrived });
   const piles = [...lines, ...rooms].map((x) => x.cash).concat(basket.pile ? [basket.pile] : [], outdoorPiles()).sort((a, b) => b.amount - a.amount);
+  // With cash collectors on the job, serving people inside the campus centres comes first
+  const inner = interiorTask();
+  if (inner && upLevel('collector') > 0) tasks.push(inner);
   if (piles[0]?.amount >= 15) tasks.push({ at: piles[0].pos, keep: () => piles[0].amount > 0 });
+  if (inner && upLevel('collector') === 0) tasks.push(inner);
   if (roofNeedsPlayer()) tasks.push({ at: ELEVATOR, ride: 2, keep: () => player.floor === 0 });
   const upNeed = upperNeedsPlayer();
   if (upNeed) tasks.push({ at: ELEVATOR, ride: upNeed, keep: () => player.floor === 0 });
@@ -7079,7 +7503,7 @@ function idleIncome(seconds) {
   rooms.forEach((room) => {
     if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), staffMult() / room.time) * room.price * priceMult();
   });
-  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond() + campusPerSecond();
+  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond() + campusPerSecond() + interiorPerSecond();
   const t = Math.min(seconds, OFFLINE_CAP);
   return { amount: Math.floor(perSecond * t * offlineRate()), perHour: Math.round(perSecond * 3600 * offlineRate()), seconds: t };
 }
@@ -7812,6 +8236,7 @@ function load() {
     campus.owned = br.campus.owned || [];
     campus.paid = br.campus.paid || {};
     campus.cash = br.campus.cash || {};
+    campus.hired = br.campus.hired || {};
   }
   if (br.out) {
     OUT.parkingCash?.add(br.out.parking || 0);
@@ -7894,6 +8319,7 @@ function frame(now) {
     updateDistrict(dt);
     updateCollectors(dt);
     updateCampus(dt);
+    updateInteriors(dt);
     updateExtras(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
@@ -8434,4 +8860,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
