@@ -6445,50 +6445,486 @@ function updateExtras(dt) {
   updateAchievements(dt);
 }
 
-// ---------- Healthcare Empire campus: the art of the Healthcare-Simulator-Starter project,
+// ---------- Healthcare Empire campus: low-poly buildings laid out like the Healthcare-Simulator-Starter map,
 // laid out east of the hospital like its world map. Buildings are bought by standing on
 // their price tiles; each then fills a cash pile. Cars and townsfolk bring it to life.
 const CAMPUS_X = 20; // the campus avenue, running north from the main road
 const CAMPUS_STREETS = [-9, 4]; // cross streets heading east from the avenue
-const campusSprites = { info: null, tex: new Map() };
-fetch('campus/sprites.json').then((r) => r.json()).then((j) => { campusSprites.info = j; }).catch(() => {});
-const campusLoader = new THREE.TextureLoader();
-function campusTex(name) {
-  if (!campusSprites.tex.has(name)) {
-    const t = campusLoader.load(`campus/${name}.webp`);
-    t.colorSpace = THREE.SRGBColorSpace;
-    campusSprites.tex.set(name, t);
+// --- campus models: everything on the campus is built from boxes and cylinders, like the military base ---
+const cylM = (rt, rb, h, color, seg = 12) => {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat(color));
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+};
+const at3 = (o, x, y, z) => {
+  o.position.set(x, y, z);
+  return o;
+};
+// Rows of windows on the front and back faces of a w×h×d block
+function windows(g, w, h, d, y0, floors, color = 0x9fd8ff, frame = 0xffffff) {
+  const cols = Math.max(2, Math.floor(w / 1.3));
+  for (let f = 0; f < floors; f++) {
+    for (let c = 0; c < cols; c++) {
+      const x = -w / 2 + (w / cols) * (c + 0.5);
+      for (const side of [1, -1]) {
+        const fr = box(0.78, 0.66, 0.05, frame, { shadow: false });
+        const gl = box(0.64, 0.52, 0.06, color, { shadow: false });
+        at3(fr, x, y0 + 0.75 + f * (h / floors), side * (d / 2 + 0.02));
+        at3(gl, x, y0 + 0.75 + f * (h / floors), side * (d / 2 + 0.04));
+        g.add(fr, gl);
+      }
+    }
   }
-  return campusSprites.tex.get(name);
 }
-// A billboard of one sprite, `w` world units wide, standing at its base
-function campusSprite(name, w, base = 0.28) {
-  const m = new THREE.SpriteMaterial({ map: campusTex(name), transparent: true, alphaTest: 0.04, depthWrite: false });
-  const s = new THREE.Sprite(m);
-  const size = campusSprites.info?.[name];
-  const aspect = size ? size[1] / size[0] : 0.6;
-  s.scale.set(w, w * aspect, 1);
-  s.center.set(0.5, base);
-  s.userData.sprite = name;
-  // Fix the height once the size table arrives (first load)
-  if (!size) {
-    const fix = () => {
-      const sz = campusSprites.info?.[name];
-      if (sz) s.scale.set(w, (w * sz[1]) / sz[0], 1);
-      else setTimeout(fix, 300);
-    };
-    setTimeout(fix, 300);
+// A pitched roof (four-sided pyramid stretched over the block)
+function hipRoof(w, d, h, color) {
+  const r = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1), mat(color));
+  r.rotation.y = Math.PI / 4;
+  r.scale.set(w * 1.08, h, d * 1.08);
+  r.castShadow = true;
+  return r;
+}
+// Thai-style gable roof: two sloped slabs and a ridge with curled ends
+function thaiRoof(w, d, h, color, trim = 0xffd166) {
+  const g = new THREE.Group();
+  const slope = Math.hypot(d / 2, h);
+  const ang = Math.atan2(h, d / 2);
+  for (const s of [1, -1]) {
+    const slab = box(w * 1.06, 0.14, slope + 0.25, color);
+    slab.rotation.x = s * ang;
+    slab.position.set(0, h / 2, (s * d) / 4);
+    g.add(slab);
   }
-  return s;
+  const ridge = box(w * 1.08, 0.12, 0.18, trim, { shadow: false });
+  ridge.position.y = h + 0.04;
+  g.add(ridge);
+  for (const s of [1, -1]) {
+    const horn = box(0.12, 0.5, 0.12, trim, { shadow: false });
+    horn.position.set((s * w * 1.08) / 2, h + 0.25, 0);
+    horn.rotation.z = -s * 0.5;
+    g.add(horn);
+  }
+  return g;
 }
+function signBoard(text, bg, w = 3.2, h = 0.6) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: signTex(text, bg), side: THREE.DoubleSide }));
+  return m;
+}
+function treeModel(kind = 'round') {
+  const g = new THREE.Group();
+  g.add(at3(cylM(0.12, 0.16, 1.1, 0x8b5a2b, 8), 0, 0.55, 0));
+  if (kind === 'sakura') {
+    for (const [x, y, z, r] of [[0, 1.6, 0, 0.75], [0.45, 1.4, 0.2, 0.5], [-0.4, 1.45, -0.15, 0.5]]) {
+      const b = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), mat(0xffb3d1));
+      b.castShadow = true;
+      g.add(at3(b, x, y, z));
+    }
+  } else if (kind === 'cone') {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.8, 7), mat(0x2f8f4a));
+    c.castShadow = true;
+    g.add(at3(c, 0, 1.8, 0));
+  } else {
+    const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85, 0), mat(0x4caf50));
+    b.castShadow = true;
+    g.add(at3(b, 0, 1.65, 0));
+  }
+  return g;
+}
+function benchModel() {
+  const g = new THREE.Group();
+  g.add(at3(box(1.3, 0.08, 0.42, 0xb5651d), 0, 0.45, 0), at3(box(1.3, 0.36, 0.08, 0xb5651d), 0, 0.68, -0.2));
+  for (const x of [-0.55, 0.55]) g.add(at3(box(0.08, 0.45, 0.4, 0x444444), x, 0.22, 0));
+  return g;
+}
+function lampModel() {
+  const g = new THREE.Group();
+  g.add(at3(cylM(0.06, 0.08, 2.6, 0x37474f, 8), 0, 1.3, 0));
+  g.add(at3(box(0.5, 0.08, 0.16, 0x37474f), 0.2, 2.6, 0));
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ color: 0xfff3b0 }));
+  g.add(at3(bulb, 0.4, 2.5, 0));
+  return g;
+}
+
+// Street furniture and the town strip
+function campusProp(name, w = 2) {
+  const g = new THREE.Group();
+  switch (name) {
+    case 'lamp': return lampModel();
+    case 'busstop': {
+      g.add(at3(box(2, 0.1, 0.9, 0x1d4ed8), 0, 2.1, 0), at3(box(1.9, 1.6, 0.06, 0xbfdbfe, { shadow: false }), 0, 1.15, -0.4));
+      for (const x of [-0.9, 0.9]) g.add(at3(box(0.08, 2.1, 0.08, 0x37474f), x, 1.05, -0.4));
+      g.add(at3(benchModel(), 0, 0, -0.1));
+      g.add(at3(signBoard('🚌 ป้ายรถเมล์', '#1d4ed8', 1.4, 0.35), 0, 2.4, 0));
+      return g;
+    }
+    case 'spirit': {
+      g.add(at3(cylM(0.1, 0.12, 1.2, 0xf4f4f0, 8), 0, 0.6, 0), at3(box(0.8, 0.5, 0.6, 0xf9e2a5), 0, 1.45, 0));
+      const r = thaiRoof(0.8, 0.6, 0.45, 0xc0392b);
+      g.add(at3(r, 0, 1.7, 0));
+      return g;
+    }
+    case 'tree': return treeModel('round');
+    case 'tree2': return treeModel('cone');
+    case 'sakura': return treeModel('sakura');
+    case 'hedge': {
+      const h = box(w, 0.7, 0.7, 0x3c9a46);
+      h.position.y = 0.35;
+      g.add(h);
+      return g;
+    }
+    case 'planter': {
+      g.add(at3(box(1.2, 0.5, 0.6, 0xa1887f), 0, 0.25, 0));
+      for (let i = 0; i < 4; i++) {
+        const f = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), mat([0xff6b9d, 0xffd166, 0xff8c42, 0xc77dff][i]));
+        g.add(at3(f, -0.42 + i * 0.28, 0.62, 0));
+      }
+      return g;
+    }
+    case 'flowers': {
+      for (let i = 0; i < 9; i++) {
+        const f = new THREE.Mesh(new THREE.SphereGeometry(0.14, 7, 5), mat(pick([0xff6b9d, 0xffd166, 0xff8c42, 0xc77dff, 0xffffff])));
+        g.add(at3(f, -0.7 + (i % 3) * 0.7, 0.18, -0.6 + Math.floor(i / 3) * 0.6));
+      }
+      g.add(at3(box(2.1, 0.06, 1.9, 0x6d4c41, { shadow: false }), 0, 0.03, 0));
+      return g;
+    }
+    case 'fountain': {
+      g.add(at3(cylM(1, 1.05, 0.45, 0xd7ccc8, 20), 0, 0.22, 0), at3(cylM(0.85, 0.85, 0.06, 0x7fd1ff, 20), 0, 0.44, 0));
+      g.add(at3(cylM(0.14, 0.18, 0.9, 0xd7ccc8, 10), 0, 0.85, 0), at3(cylM(0.45, 0.3, 0.12, 0xd7ccc8, 14), 0, 1.3, 0));
+      const jet = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshBasicMaterial({ color: 0xbfe9ff }));
+      g.add(at3(jet, 0, 1.5, 0));
+      return g;
+    }
+    case 'sala': {
+      for (const [x, z] of [[-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]]) g.add(at3(box(0.14, 1.6, 0.14, 0x8d5524), x, 0.8, z));
+      g.add(at3(box(2, 0.12, 2, 0xd7b98e), 0, 0.06, 0));
+      g.add(at3(thaiRoof(2.1, 2.1, 0.8, 0xc0392b), 0, 1.6, 0));
+      return g;
+    }
+    case 'umbrella': {
+      g.add(at3(cylM(0.04, 0.04, 1.8, 0xffffff, 6), 0, 0.9, 0));
+      const top = new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.4, 10), mat(0xff6b6b));
+      g.add(at3(top, 0, 1.9, 0), at3(cylM(0.4, 0.4, 0.05, 0xffffff, 14), 0, 0.7, 0));
+      return g;
+    }
+    case 'temple': {
+      g.add(at3(box(4.4, 0.4, 3, 0xf4f4f0), 0, 0.2, 0), at3(box(3.6, 1.8, 2.4, 0xfff3e0), 0, 1.3, 0));
+      g.add(at3(thaiRoof(3.8, 2.6, 1.3, 0xd35400), 0, 2.2, 0), at3(thaiRoof(3.0, 2.0, 1.0, 0x1e8449), 0, 3.0, 0));
+      g.add(at3(box(0.8, 1.2, 0.06, 0xb8860b), 0, 0.95, 1.22));
+      return g;
+    }
+    case 'cafe': case 'shop1': case 'shop2': case 'store': {
+      const col = { cafe: 0xf5cba7, shop1: 0xaed6f1, shop2: 0xd2b4de, store: 0xa9dfbf }[name];
+      const label = { cafe: '☕ คาเฟ่', shop1: '👕 ร้านเสื้อผ้า', shop2: '🍜 ร้านข้าว', store: '🏪 มินิมาร์ท' }[name];
+      g.add(at3(box(3.4, 2.4, 2.4, col), 0, 1.2, 0), at3(box(3.6, 0.16, 2.6, 0x555555), 0, 2.48, 0));
+      const awning = box(3.4, 0.08, 0.9, name === 'cafe' ? 0xc0392b : 0x2e86c1);
+      awning.rotation.x = 0.35;
+      g.add(at3(awning, 0, 1.75, 1.5), at3(box(1.6, 0.9, 0.05, 0x9fd8ff, { shadow: false }), -0.6, 1.0, 1.22), at3(box(0.7, 1.4, 0.05, 0x6d4c41, { shadow: false }), 1.1, 0.7, 1.22));
+      g.add(at3(signBoard(label, '#5d4037', 2.2, 0.45), 0, 2.15, 1.23));
+      return g;
+    }
+    default: { // houses
+      const col = pick([0xfad7a0, 0xd6eaf8, 0xfadbd8, 0xd5f5e3]);
+      g.add(at3(box(3, 2, 2.4, col), 0, 1, 0), at3(hipRoof(3, 2.4, 1.2, pick([0xc0392b, 0x7d3c98, 0x2874a6])), 0, 2.6, 0));
+      g.add(at3(box(0.7, 1.3, 0.05, 0x6d4c41, { shadow: false }), 0.7, 0.65, 1.22), at3(box(0.8, 0.6, 0.05, 0x9fd8ff, { shadow: false }), -0.7, 1.2, 1.22));
+      return g;
+    }
+  }
+}
+
+// Flat roofs seen from the camera: AC units, a solar array and a little roof garden
+function roofDetails(g, cx, w, d, y, seed = 0) {
+  const ac = (x, z) => {
+    const u = new THREE.Group();
+    u.add(at3(box(0.7, 0.45, 0.6, 0xcfd8dc), 0, 0.22, 0), at3(cylM(0.22, 0.22, 0.05, 0x607d8b, 12), 0, 0.47, 0));
+    g.add(at3(u, cx + x, y, z));
+  };
+  ac(-w / 2 + 0.7, -d / 2 + 0.6);
+  if (w > 4) ac(-w / 2 + 1.6, -d / 2 + 0.6);
+  if (seed % 2 === 0 && w > 4) {
+    for (let i = 0; i < Math.min(4, Math.floor(w / 1.4)); i++) {
+      const p = box(1.0, 0.06, 0.7, 0x1a237e);
+      p.rotation.x = -0.35;
+      g.add(at3(p, cx + w / 2 - 0.7 - i * 1.15, y + 0.3, -d / 2 + 0.7));
+    }
+  } else {
+    g.add(at3(box(Math.min(2.4, w * 0.4), 0.1, Math.min(1.6, d * 0.4), 0x66bb6a, { shadow: false }), cx + w / 4, y + 0.05, 0));
+    for (let i = 0; i < 3; i++) g.add(at3(new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 0), mat(0x43a047)), cx + w / 4 - 0.6 + i * 0.6, y + 0.3, 0));
+  }
+}
+// The plot around a bought building: a paved forecourt to the street, hedges, flower beds and trees
+function campusSite(lot) {
+  const g = new THREE.Group();
+  const [fw, fd] = lot.foot;
+  const toStreet = Math.abs(lot.front.z - lot.at.z) - fd / 2 + 0.3;
+  const dir = Math.sign(lot.front.z - lot.at.z);
+  const pave = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(fw, 5), toStreet), mat(0xe8e2d4));
+  pave.rotation.x = -Math.PI / 2;
+  pave.position.set(lot.front.x - lot.at.x, 0.018, dir * (fd / 2 + toStreet / 2 - 0.3));
+  pave.receiveShadow = true;
+  g.add(pave);
+  const lawnEdge = new THREE.Mesh(new THREE.PlaneGeometry(fw + 1.6, fd + 1.6), mat(0x8fcf6c));
+  lawnEdge.rotation.x = -Math.PI / 2;
+  lawnEdge.position.y = 0.014;
+  g.add(lawnEdge);
+  for (const sx of [-1, 1]) {
+    const bed = campusProp('flowers');
+    bed.scale.set(0.7, 1, 0.5);
+    g.add(at3(bed, sx * (Math.min(fw, 5) / 2 + 0.7), 0, dir * (fd / 2 + 0.7)));
+    g.add(at3(treeModel(sx > 0 ? 'round' : 'sakura'), sx * (fw / 2 + 0.6), 0, -dir * (fd / 2 - 0.4)));
+  }
+  return g;
+}
+// The seven campus buildings; front faces +z before turning toward the lot's street
+function campusBuilding(lot) {
+  const g = new THREE.Group();
+  const [fw, fd] = lot.foot;
+  const sign = (text, bg, y, w = 3.6) => g.add(at3(signBoard(text, bg, w, 0.62), 0, y, fd / 2 + 0.06));
+  const door = (x = 0, color = 0x9fd8ff) => g.add(at3(box(1.1, 1.5, 0.06, color, { shadow: false }), x, 0.75, fd / 2 + 0.03));
+  switch (lot.id) {
+    case 'homecare': {
+      g.add(at3(box(fw, 3.6, fd, 0xe0f7fa), 0, 1.8, 0), at3(box(fw + 0.2, 0.25, fd + 0.2, 0x3a9fb0), 0, 3.7, 0));
+      windows(g, fw, 3.2, fd, 0.2, 2);
+      door(-1.2);
+      sign('🏠 Home Care ดูแลถึงบ้าน', '#0e7490', 3.15);
+      roofDetails(g, 0, fw, fd, 3.82, 0);
+      // Visit van parked by the door
+      const van = new THREE.Group();
+      van.add(at3(box(2.2, 1.1, 1.1, 0xffffff), 0, 0.75, 0), at3(box(0.8, 0.6, 1.0, 0x9fd8ff, { shadow: false }), 0.75, 1.15, 0), at3(box(2.22, 0.18, 1.12, 0x0e7490, { shadow: false }), 0, 0.85, 0));
+      for (const x of [-0.7, 0.7]) for (const z of [-0.55, 0.55]) van.add(at3(cylM(0.22, 0.22, 0.16, 0x222222, 10), x, 0.22, z).rotateX(Math.PI / 2));
+      g.add(at3(van, 1.6, 0, fd / 2 + 1.0));
+      break;
+    }
+    case 'derma': {
+      g.add(at3(box(fw * 0.62, 2.8, fd, 0xfff0f5), -fw * 0.18, 1.4, 0), at3(box(fw * 0.36, 2.2, fd * 0.85, 0xf8d7e3), fw * 0.32, 1.1, 0));
+      g.add(at3(box(fw * 0.66, 0.2, fd + 0.2, 0xe07a9b), -fw * 0.18, 2.9, 0), at3(box(fw * 0.4, 0.16, fd * 0.85 + 0.2, 0xd48aa5), fw * 0.32, 2.28, 0));
+      windows(g.children[0], fw * 0.62, 2.4, fd, -1.2, 1, 0xffc1e3, 0xffffff);
+      roofDetails(g, -fw * 0.18, fw * 0.62, fd, 3.0, 1);
+      const awning = box(fw * 0.6, 0.08, 0.9, 0xec407a);
+      awning.rotation.x = 0.35;
+      g.add(at3(awning, -fw * 0.18, 2.1, fd / 2 + 0.4), at3(box(1.6, 1.0, 0.05, 0x9fd8ff, { shadow: false }), -fw * 0.32, 1.0, fd / 2 + 0.03));
+      door(0.2, 0xffffff);
+      g.add(at3(signBoard('💊 CM.Derma+', '#ad1457', 2.4, 0.55), -fw * 0.18, 2.5, fd / 2 + 0.07));
+      break;
+    }
+    case 'park': {
+      g.add(at3(campusProp('sala'), 0, 0, 0));
+      for (const [x, z] of [[-1.6, 1.4], [1.6, 1.4]]) g.add(at3(benchModel(), x, 0, z));
+      g.add(at3(campusProp('fountain'), -2.4, 0, -1.6), at3(campusProp('flowers'), 2.2, 0, -1.4), at3(treeModel('sakura'), -3.2, 0, 1.4), at3(treeModel('round'), 3.2, 0, 1.2));
+      break;
+    }
+    case 'tranquila': {
+      // A low villa with a Thai roof, a deck and a lotus pond
+      g.add(at3(box(fw * 0.7, 0.4, fd * 0.9, 0xd7b98e), -0.6, 0.2, 0), at3(box(fw * 0.62, 2.2, fd * 0.7, 0xfffaf0), -0.6, 1.5, 0));
+      windows(g.children[1], fw * 0.62, 1.6, fd * 0.7, -1.0, 1, 0xc8e6c9, 0x8d6e63);
+      g.add(at3(thaiRoof(fw * 0.66, fd * 0.78, 1.3, 0x6d4c41, 0xffd166), -0.6, 2.6, 0));
+      const pond = cylM(1.1, 1.1, 0.06, 0x4fc3f7, 18);
+      g.add(at3(pond, fw / 2 - 1.1, 0.04, fd / 2 - 1.0));
+      for (let i = 0; i < 3; i++) g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), mat(0xff80ab)), fw / 2 - 1.5 + i * 0.4, 0.12, fd / 2 - 1.0 + (i % 2) * 0.3));
+      g.add(at3(treeModel('round'), fw / 2 - 0.7, 0, -fd / 2 + 0.8));
+      door(-0.6, 0x8d6e63);
+      g.add(at3(signBoard('🌿 Tranquila', '#2e7d32', 2.4, 0.55), -0.6, 2.25, fd * 0.35 + 0.07));
+      break;
+    }
+    case 'cmnh': {
+      // Two-storey care home: a long block, a wing, balconies and a ramp to the door
+      g.add(at3(box(fw, 4.2, fd * 0.7, 0xfff3e0), 0, 2.1, -fd * 0.12), at3(box(fw * 0.3, 3.2, fd, 0xffe0b2), -fw * 0.35, 1.6, 0));
+      g.add(at3(box(fw + 0.2, 0.25, fd * 0.7 + 0.2, 0xd9825b), 0, 4.3, -fd * 0.12));
+      windows(g.children[0], fw, 4, fd * 0.7, -2.0, 2, 0xffe082, 0xffffff);
+      roofDetails(g, 0, fw, fd * 0.7, 4.43, 0);
+      for (const x of [fw * 0.05, fw * 0.3]) g.add(at3(box(2.2, 0.1, 0.8, 0xffffff), x, 2.6, fd * 0.23 + 0.4), at3(box(2.2, 0.5, 0.06, 0xffffff, { shadow: false }), x, 2.9, fd * 0.23 + 0.78));
+      const ramp = box(1.2, 0.1, 2.2, 0xbdbdbd);
+      ramp.rotation.x = 0.12;
+      g.add(at3(ramp, 1.2, 0.15, fd / 2 - 0.3));
+      g.add(at3(box(1.2, 1.6, 0.06, 0x9fd8ff, { shadow: false }), 1.2, 0.8, fd * 0.23 + 0.03));
+      g.add(at3(signBoard('🏡 CMNH ศูนย์ดูแลผู้สูงอายุ', '#e65100', 4.4, 0.66), fw * 0.1, 3.55, fd * 0.23 + 0.06));
+      break;
+    }
+    case 'phc': {
+      // Training centre: columns across the front and a graduation cap on the roof
+      g.add(at3(box(fw, 3.4, fd, 0xede7f6), 0, 1.7, 0), at3(box(fw + 0.3, 0.3, fd + 0.3, 0x8a6fd1), 0, 3.55, 0));
+      windows(g, fw, 3, fd, 0.2, 2, 0xd1c4e9);
+      for (let i = 0; i < 5; i++) g.add(at3(cylM(0.16, 0.16, 3.2, 0xffffff, 10), -fw / 2 + 0.5 + (i * (fw - 1)) / 4, 1.6, fd / 2 + 0.45));
+      g.add(at3(box(fw, 0.25, 1.0, 0xffffff), 0, 3.3, fd / 2 + 0.4));
+      const cap = new THREE.Group();
+      cap.add(at3(box(1.4, 0.1, 1.4, 0x212121), 0, 0.45, 0), at3(cylM(0.4, 0.45, 0.4, 0x212121, 12), 0, 0.2, 0), at3(box(0.06, 0.5, 0.06, 0xffd166, { shadow: false }), 0.6, 0.25, 0.6));
+      cap.rotation.y = 0.5;
+      g.add(at3(cap, 0, 3.7, 0));
+      door(0, 0xffffff);
+      sign('🎓 PHC ศูนย์พัฒนาบุคลากร', '#5e35b1', 2.65);
+      roofDetails(g, -fw / 2 + 1.3, 2, fd, 3.7, 1);
+      break;
+    }
+    case 'neuro': {
+      // A three-storey glass hospital with a lower stroke-unit wing and a red cross on top
+      g.add(at3(box(fw * 0.55, 5.6, fd, 0xe3f2fd), -fw * 0.2, 2.8, 0), at3(box(fw * 0.42, 3.2, fd * 0.9, 0xbbdefb), fw * 0.28, 1.6, 0));
+      windows(g.children[0], fw * 0.55, 5.2, fd, -2.6, 3, 0x64b5f6, 0xe3f2fd);
+      windows(g.children[1], fw * 0.42, 2.8, fd * 0.9, -1.4, 2, 0x90caf9, 0xffffff);
+      g.add(at3(box(fw * 0.57, 0.25, fd + 0.2, 0x4f83cc), -fw * 0.2, 5.7, 0), at3(box(fw * 0.44, 0.22, fd * 0.9 + 0.2, 0x6e9ad6), fw * 0.28, 3.3, 0));
+      g.add(at3(box(1.4, 0.4, 0.3, 0xe5484d), -fw * 0.2, 6.3, 0), at3(box(0.4, 1.4, 0.3, 0xe5484d), -fw * 0.2, 6.3, 0));
+      roofDetails(g, fw * 0.28, fw * 0.42, fd * 0.9, 3.41, 0);
+      door(-fw * 0.2, 0xffffff);
+      g.add(at3(signBoard('🧠 Neuro Hospital', '#1565c0', 3.2, 0.6), -fw * 0.2, 4.9, fd / 2 + 0.06));
+      g.add(at3(signBoard('🫀 Stroke Unit', '#0d47a1', 2.4, 0.5), fw * 0.28, 2.75, fd * 0.45 + 0.06));
+      break;
+    }
+  }
+  // Turn the front toward the lot's street
+  if (lot.front.z < lot.at.z) g.rotation.y = Math.PI;
+  return g;
+}
+
+// People on the campus and inside the centres
+const PERSON_LOOK = {
+  nurse: { shirt: 0xffffff, pants: 0xffffff, cap: 0xffffff },
+  doctor: { shirt: 0x9fd8ff, coat: 0xffffff },
+  caregiver: { shirt: 0x81c784, pants: 0x2e7d32 },
+  pt: { shirt: 0x4fc3f7, pants: 0x1a237e },
+  ot: { shirt: 0xffb74d, pants: 0x1a237e },
+  pharmacist: { shirt: 0x26a69a, coat: 0xffffff },
+  nutritionist: { shirt: 0xaed581, apron: 0xffffff },
+  receptionist: { shirt: 0x7986cb, pants: 0x283593 },
+  accountant: { shirt: 0x90a4ae, pants: 0x37474f },
+  security: { shirt: 0x455a64, pants: 0x263238 },
+  student: { shirt: 0xffffff, pants: 0x1a237e },
+  jogger: { shirt: 0xff7043, pants: 0x212121 },
+  kid: { shirt: 0xffd54f, pants: 0x1565c0 },
+};
+function campusPerson(kind) {
+  const elder = kind === 'elder_f' || kind === 'elder_m' || kind === 'wheelchair';
+  const look = PERSON_LOOK[kind] || { shirt: pick(SHIRTS) };
+  const p = makePerson({ ...look, hair: elder ? 0xdddddd : pick(HAIR) });
+  if (kind === 'kid') p.group.scale.setScalar(0.7);
+  if (elder) p.group.scale.setScalar(0.92);
+  if (kind === 'elder_m' || kind === 'elder_f') {
+    const cane = box(0.05, 0.9, 0.05, 0x6d4c41, { shadow: false });
+    cane.position.set(0.35, 0.45, 0.2);
+    p.body.add(cane);
+  }
+  if (kind === 'wheelchair') {
+    const chair = new THREE.Group();
+    chair.add(at3(box(0.6, 0.08, 0.55, 0x607d8b), 0, 0.5, 0), at3(box(0.6, 0.55, 0.06, 0x607d8b), 0, 0.8, -0.26));
+    for (const s of [-0.34, 0.34]) chair.add(at3(cylM(0.3, 0.3, 0.05, 0x37474f, 14), s, 0.3, -0.05).rotateZ(Math.PI / 2));
+    p.group.add(chair);
+    p.chair = chair;
+    p.body.position.y = -0.05;
+    p.seated = true;
+    for (const leg of p.legs) leg.rotation.x = -1.4;
+  }
+  p.kind = kind;
+  return p;
+}
+function vanCar() {
+  const g = new THREE.Group();
+  const col = pick([0xe5484d, 0x3d8bfd, 0xffffff, 0x2ec4b6, 0xffd166, 0x555b6e]);
+  g.add(at3(box(0.8, 0.42, 1.5, col), 0, 0.32, 0), at3(box(0.7, 0.34, 0.8, 0xcfe8ff, { shadow: false }), 0, 0.7, -0.1));
+  for (const x of [-0.4, 0.4]) for (const z of [-0.48, 0.48]) g.add(at3(box(0.1, 0.3, 0.3, 0x222222, { shadow: false }), x, 0.16, z));
+  return g;
+}
+
+// Interior equipment
+function equipModel(name) {
+  const g = new THREE.Group();
+  switch (name) {
+    case 'reception': case 'nursedesk': case 'office': case 'exam': {
+      const col = { reception: 0x80cbc4, nursedesk: 0xffcc80, office: 0xbcaaa4, exam: 0x90caf9 }[name];
+      g.add(at3(box(2, 1.0, 0.7, col), 0, 0.5, 0), at3(box(2.1, 0.08, 0.8, 0xffffff), 0, 1.04, 0));
+      g.add(at3(box(0.5, 0.36, 0.05, 0x263238, { shadow: false }), -0.4, 1.3, -0.15), at3(box(0.08, 0.2, 0.08, 0x263238, { shadow: false }), -0.4, 1.12, -0.15));
+      if (name === 'exam') g.add(at3(box(0.4, 0.06, 0.3, 0xffffff), 0.5, 1.12, 0));
+      return g;
+    }
+    case 'rack': case 'shelf': case 'lockers': {
+      const col = { rack: 0x8d6e63, shelf: 0xf8bbd0, lockers: 0x90a4ae }[name];
+      g.add(at3(box(1.8, 2, 0.5, col), 0, 1, 0));
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+        const item = box(0.32, 0.3, 0.06, name === 'lockers' ? 0x78909c : pick([0xffffff, 0x4fc3f7, 0xff8a80, 0xffd54f, 0xce93d8]), { shadow: false });
+        g.add(at3(item, -0.66 + c * 0.44, 0.35 + r * 0.45, 0.27));
+      }
+      return g;
+    }
+    case 'bed': {
+      g.add(at3(box(1.2, 0.45, 1.9, 0xb0bec5), 0, 0.3, 0), at3(box(1.1, 0.16, 1.8, 0xffffff), 0, 0.6, 0));
+      g.add(at3(box(0.8, 0.14, 0.4, 0xe3f2fd), 0, 0.74, -0.65), at3(box(1.2, 0.9, 0.1, 0x78909c), 0, 0.6, -0.97));
+      g.add(at3(box(1.12, 0.06, 1.0, 0x81d4fa, { shadow: false }), 0, 0.7, 0.35));
+      return g;
+    }
+    case 'sofa': {
+      g.add(at3(box(2, 0.45, 0.9, 0xf48fb1), 0, 0.3, 0), at3(box(2, 0.7, 0.25, 0xec407a), 0, 0.6, -0.35));
+      for (const x of [-0.95, 0.95]) g.add(at3(box(0.2, 0.6, 0.9, 0xec407a), x, 0.4, 0));
+      return g;
+    }
+    case 'dining': {
+      g.add(at3(box(2.2, 0.08, 1.1, 0xd7a86e), 0, 0.8, 0));
+      for (const x of [-0.9, 0.9]) for (const z of [-0.4, 0.4]) g.add(at3(box(0.08, 0.8, 0.08, 0x8d6e63), x, 0.4, z));
+      for (const x of [-0.6, 0, 0.6]) g.add(at3(cylM(0.16, 0.12, 0.08, 0xffffff, 12), x, 0.88, 0));
+      return g;
+    }
+    case 'bars': {
+      for (const z of [-0.35, 0.35]) {
+        g.add(at3(box(2.2, 0.06, 0.06, 0xb0bec5), 0, 0.95, z));
+        for (const x of [-1, 1]) g.add(at3(box(0.06, 0.95, 0.06, 0x78909c), x, 0.47, z));
+      }
+      g.add(at3(box(2.3, 0.05, 1, 0x4fc3f7, { shadow: false }), 0, 0.03, 0));
+      return g;
+    }
+    case 'manikin': {
+      g.add(at3(box(1.8, 0.7, 0.8, 0xd7ccc8), 0, 0.35, 0), at3(box(1.2, 0.2, 0.45, 0xffcc80), 0.1, 0.8, 0), at3(new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), mat(0xffcc80)), -0.65, 0.85, 0));
+      return g;
+    }
+    case 'monitor': case 'suction': {
+      g.add(at3(cylM(0.05, 0.05, 1.3, 0x90a4ae, 8), 0, 0.65, 0), at3(box(0.5, 0.4, 0.12, 0x263238), 0, 1.4, 0));
+      g.add(at3(box(0.42, 0.06, 0.02, name === 'monitor' ? 0x69f0ae : 0x40c4ff, { shadow: false }), 0, 1.42, 0.07));
+      return g;
+    }
+    case 'cart': {
+      g.add(at3(box(0.8, 0.8, 0.5, 0xeceff1), 0, 0.5, 0), at3(box(0.85, 0.05, 0.55, 0x90a4ae), 0, 0.92, 0), at3(box(0.2, 0.2, 0.2, 0xe5484d, { shadow: false }), 0.2, 1.05, 0));
+      return g;
+    }
+    case 'bath': {
+      g.add(at3(box(1.6, 0.6, 0.8, 0xffffff), 0, 0.3, 0), at3(box(1.4, 0.05, 0.6, 0x81d4fa, { shadow: false }), 0, 0.58, 0), at3(cylM(0.04, 0.04, 0.7, 0xb0bec5, 6), 0.7, 0.9, -0.3));
+      return g;
+    }
+    case 'whiteboard': {
+      g.add(at3(box(1.8, 1.1, 0.08, 0xffffff), 0, 1.5, 0), at3(box(1.9, 0.08, 0.15, 0x90a4ae), 0, 0.92, 0.04));
+      for (let i = 0; i < 3; i++) g.add(at3(box(0.9 - i * 0.2, 0.05, 0.02, [0x1e88e5, 0xe53935, 0x43a047][i], { shadow: false }), -0.3, 1.75 - i * 0.22, 0.05));
+      return g;
+    }
+    case 'chairs': {
+      for (let i = 0; i < 3; i++) {
+        g.add(at3(box(0.55, 0.08, 0.5, 0x4fc3f7), -0.65 + i * 0.65, 0.45, 0), at3(box(0.55, 0.5, 0.08, 0x0288d1), -0.65 + i * 0.65, 0.7, -0.22));
+      }
+      g.add(at3(box(2, 0.06, 0.4, 0x546e7a), 0, 0.38, 0));
+      return g;
+    }
+    case 'van': {
+      const v2 = vanCar();
+      v2.scale.setScalar(1.6);
+      v2.rotation.y = Math.PI / 2;
+      g.add(v2);
+      return g;
+    }
+    case 'planter': return campusProp('planter');
+    default: return g;
+  }
+}
+// The old sprite names used by CENTERS, mapped to the new models
+const EQUIP_OF = {
+  eq3_reception_desk_s: 'reception', eq3_storage_rack_s: 'rack', eq3_care_van_s: 'van', eq3_whiteboard_s: 'whiteboard', eq3_waiting_chairs_s: 'chairs',
+  eq3_medicine_shelf_s: 'shelf', eq3_rest_sofa_s: 'sofa', dc_planter: 'planter', eq3_care_bed_s: 'bed', eq3_dining_table_s: 'dining', eq3_nurse_desk_s: 'nursedesk',
+  eq3_parallel_bars_s: 'bars', eq3_med_cart_s: 'cart', eq3_bath_set_s: 'bath', eq3_training_manikin_s: 'manikin', eq3_office_desk_s: 'office', eq3_lockers_s: 'lockers',
+  eq3_exam_desk_s: 'exam', eq3_vital_monitor_s: 'monitor', eq3_suction_unit_s: 'suction',
+};
+const staffKind = (name) => name.replace(/^ch3_/, '').replace(/_s$/, '');
+
 const CAMPUS_LOTS = [
-  { id: 'homecare', icon: '🏠', name: 'Home Care ดูแลถึงบ้าน', sprite: 'b_homecare_office_4x3', at: v(27, 10), w: 8.5, front: v(27, 5.3), price: 15000, rate: 30, foot: [6, 4] },
-  { id: 'derma', icon: '💊', name: 'CM.Derma+ ผลิตภัณฑ์ผิว', sprite: 'b_pharmacy_2x2', extra: ['b_storage_room_2x2', 2.2, 0], at: v(36, 10.5), w: 5.8, front: v(36, 5.3), price: 25000, rate: 50, foot: [4, 3.4] },
-  { id: 'park', icon: '🌳', name: 'Community Park สวนชุมชน', sprite: 'dc_gazebo', at: v(44, 10.5), w: 4, front: v(44, 5.3), price: 20000, rate: 20, park: true, foot: [2.6, 2.6] },
-  { id: 'tranquila', icon: '🌿', name: 'Tranquila บ้านพักผู้สูงวัย', sprite: 'b_villa_3x3', extra: ['dc_thai_house', -3.6, 1.0, 3], at: v(42, -2.6), w: 8, front: v(42, 2.9), price: 40000, rate: 75, foot: [6, 4.2] },
-  { id: 'cmnh', icon: '🏡', name: 'CMNH ศูนย์ดูแลผู้สูงอายุ', sprite: 'b_ward_5x6', at: v(29, -2.4), w: 12, front: v(29, 2.9), price: 90000, rate: 150, foot: [9, 5.5] },
-  { id: 'phc', icon: '🎓', name: 'PHC ศูนย์พัฒนาบุคลากร', sprite: 'b_training_room_2x3', extra: ['b_staff_room_2x3', 3.0, 0.5], at: v(42, -17.5), w: 6.5, front: v(42, -10.2), price: 60000, rate: 100, foot: [5, 3.6] },
-  { id: 'neuro', icon: '🧠', name: 'Neuro Hospital รพ.ประสาท', sprite: 'b_neuro_clinic_4x3', extra: ['b_stroke_unit_4x3', 6.5, -1.0, 9], at: v(28, -17.5), w: 9.5, front: v(30, -10.2), price: 150000, rate: 240, foot: [12, 4.6] },
+  { id: 'homecare', icon: '🏠', name: 'Home Care ดูแลถึงบ้าน', at: v(27, 10), front: v(27, 5.3), price: 15000, rate: 30, foot: [6, 4] },
+  { id: 'derma', icon: '💊', name: 'CM.Derma+ ผลิตภัณฑ์ผิว', at: v(36, 10.5), front: v(36, 5.3), price: 25000, rate: 50, foot: [4, 3.4] },
+  { id: 'park', icon: '🌳', name: 'Community Park สวนชุมชน', at: v(44, 10.5), front: v(44, 5.3), price: 20000, rate: 20, park: true, foot: [2.6, 2.6] },
+  { id: 'tranquila', icon: '🌿', name: 'Tranquila บ้านพักผู้สูงวัย', at: v(42, -2.6), front: v(42, 2.9), price: 40000, rate: 75, foot: [6, 4.2] },
+  { id: 'cmnh', icon: '🏡', name: 'CMNH ศูนย์ดูแลผู้สูงอายุ', at: v(29, -2.4), front: v(29, 2.9), price: 90000, rate: 150, foot: [9, 5.5] },
+  { id: 'phc', icon: '🎓', name: 'PHC ศูนย์พัฒนาบุคลากร', at: v(42, -17.5), front: v(42, -10.2), price: 60000, rate: 100, foot: [5, 3.6] },
+  { id: 'neuro', icon: '🧠', name: 'Neuro Hospital รพ.ประสาท', at: v(28, -17.5), front: v(30, -10.2), price: 150000, rate: 240, foot: [12, 4.6] },
 ];
 const CAMPUS_OPEN_STEP = 16; // the elevator stage
 const campus = { built: false, owned: [], paid: {}, cash: {}, piles: {}, tiles: {}, cars: [], folk: [], carTimer: 2, tipShown: false };
@@ -6529,22 +6965,23 @@ function campusGround() {
   }
   scene.add(g);
   // Street furniture and town buildings from the starter's art
-  const put = (name, x, z, w, base) => {
-    const s = campusSprite(name, w, base);
-    s.position.set(x, 0, z);
-    scene.add(s);
-    return s;
+  const put = (name, x, z, w, turn = 0) => {
+    const m = campusProp(name, w);
+    m.position.set(x, 0, z);
+    m.rotation.y = turn;
+    scene.add(m);
+    return m;
   };
-  for (let z = -22; z <= 12; z += 6) put('st3_lamp', CAMPUS_X - 1.7, z, 0.9, 0.05);
-  put('st3_busstop', CAMPUS_X - 1.9, 9, 2.2, 0.08);
-  put('st3_spirit', 46.5, -24, 1.4, 0.08);
-  [[24, -24.5, 'dc_tree'], [46, -12, 'dc_tree2'], [23, -6, 'dc_sakura'], [46, 1.5, 'dc_tree'], [23.5, 7, 'dc_tree2'], [47, 7.8, 'dc_sakura'], [32, 14.4, 'dc_hedge'], [40, 14.4, 'dc_hedge'], [24, 14.3, 'dc_planter']]
-    .forEach(([x, z, n]) => put(n, x, z, n.includes('hedge') ? 3 : 2.2, 0.12));
+  for (let z = -22; z <= 12; z += 6) put('lamp', CAMPUS_X - 1.7, z, 1);
+  put('busstop', CAMPUS_X - 2.1, 9, 2, Math.PI / 2);
+  put('spirit', 46.5, -24, 1.4);
+  [[24, -24.5, 'tree'], [46, -12, 'tree2'], [23, -6, 'sakura'], [46, 1.5, 'tree'], [23.5, 7, 'tree2'], [47, 7.8, 'sakura'], [32, 14.4, 'hedge'], [40, 14.4, 'hedge'], [24, 14.3, 'planter'], [47, -6, 'tree2'], [36, -24.5, 'tree'], [23, -15, 'sakura']]
+    .forEach(([x, z, n]) => put(n, x, z, 3));
   // A little town strip across the main road
-  [['tw_temple', 25, 21.5, 6], ['tw_cafe', 32, 21, 4.4], ['tw_shop_1', 38, 21.5, 4.2], ['tw_shop_2', 43, 21.5, 4.2], ['tw_store', 26, 26.5, 4.2], ['tw_house_a1', 33, 26.5, 4], ['tw_house_b1', 39, 26.5, 4], ['tw_house_a2', 45, 26.5, 4]]
+  [['temple', 25, 21.5, 4.4], ['cafe', 32, 21, 3.4], ['shop1', 38, 21.5, 3.4], ['shop2', 43, 21.5, 3.4], ['store', 26, 26.5, 3.4], ['house', 33, 26.5, 3], ['house', 39, 26.5, 3], ['house', 45, 26.5, 3]]
     .forEach(([n, x, z, w]) => {
-      put(n, x, z, w, 0.18);
-      addCollider(x, z, w * 0.6, w * 0.4);
+      put(n, x, z, w);
+      addCollider(x, z, w * 0.9, 2.6);
     });
 }
 
@@ -6563,20 +7000,8 @@ function buildCampusLot(lot, animate) {
   // Sprites go in a group: the pop-in animation scales the group, not the sprites' own sizes
   const g = new THREE.Group();
   g.position.copy(lot.at);
-  g.add(campusSprite(lot.sprite, lot.w));
-  if (lot.extra) {
-    const [name, dx, dz, w] = lot.extra;
-    const e = campusSprite(name, w || lot.w * 0.85);
-    e.position.set(dx, 0, dz);
-    g.add(e);
-  }
-  if (lot.park) {
-    [['dc_fountain', -1.8, -1.4, 2.2], ['dc_flowers', 1.6, 1.0, 2], ['dc_sala3d', 2.4, -1.6, 2.2], ['dc_umbrella', -2.6, 1.2, 1.6]].forEach(([n, dx, dz, w]) => {
-      const d = campusSprite(n, w, 0.15);
-      d.position.set(dx, 0, dz);
-      g.add(d);
-    });
-  }
+  if (!lot.park) g.add(campusSite(lot));
+  g.add(campusBuilding(lot));
   scene.add(g);
   addCollider(lot.at.x, lot.at.z, lot.foot[0], lot.foot[1]);
   if (CENTERS[lot.id]) {
@@ -6675,15 +7100,14 @@ function updateCampus(dt) {
   updateCampusLife(dt);
 }
 // Cars up and down the avenue; townsfolk strolling between the buildings
-const CAR_SPRITES = ['sedan_blue', 'sedan_red', 'sedan_teal', 'sedan_white', 'pickup_black', 'pickup_silver', 'tuktuk', 'songthaew', 'moto', 'ambulance'];
 const FOLK_SPRITES = ['nurse', 'doctor', 'caregiver', 'elder_f', 'elder_m', 'wheelchair', 'pt', 'ot', 'pharmacist', 'kid', 'jogger', 'student', 'resident', 'security', 'nutritionist'];
 function updateCampusLife(dt) {
   campus.carTimer -= dt;
   if (campus.carTimer <= 0 && campus.cars.length < 5) {
     campus.carTimer = rand(3, 6);
     const north = Math.random() < 0.5;
-    const kind = pick(CAR_SPRITES);
-    const s = campusSprite(`car3_${kind}_${north ? 'n' : 's'}`, kind === 'moto' ? 1.4 : kind === 'songthaew' ? 3.4 : 3, 0.12);
+    const s = vanCar();
+    s.rotation.y = north ? Math.PI : 0;
     s.position.set(CAMPUS_X + (north ? 0.65 : -0.65), 0, north ? 17 : -26);
     scene.add(s);
     campus.cars.push({ s, north, speed: rand(4, 6.5) });
@@ -6699,15 +7123,16 @@ function updateCampusLife(dt) {
   const want = Math.min(10, 3 + campus.owned.length);
   while (campus.folk.length < want) {
     const kind = pick(FOLK_SPRITES);
-    const s = campusSprite(`ch3_${kind}_s`, 0.8, 0.04);
+    const person = campusPerson(kind);
     const start = pick(CAMPUS_LOTS).front.clone().add(v(rand(-2, 2), rand(-0.5, 0.5)));
-    s.position.copy(start);
-    scene.add(s);
-    campus.folk.push({ s, kind, target: null, wait: rand(0, 3), dir: 's' });
+    person.group.position.copy(start);
+    scene.add(person.group);
+    campus.folk.push({ s: person.group, p: person, kind, target: null, wait: rand(0, 3) });
   }
   for (const f of campus.folk) {
     if (!f.target) {
       f.wait -= dt;
+      animatePerson(f.p, false, dt);
       if (f.wait <= 0) f.target = pick(CAMPUS_LOTS).front.clone().add(v(rand(-2.5, 2.5), rand(-0.4, 0.4)));
       continue;
     }
@@ -6721,13 +7146,8 @@ function updateCampusLife(dt) {
       pos.x += (dx / d) * step;
       pos.z += (dz / d) * step;
     }
-    // Face away from the camera when walking north, toward it when walking south
-    const dir = dz < -0.01 ? 'n' : 's';
-    if (dir !== f.dir && Math.abs(dz) > Math.abs(dx) * 0.3) {
-      f.dir = dir;
-      f.s.material.map = campusTex(`ch3_${f.kind}_${dir}`);
-    }
-    pos.y = Math.abs(Math.sin(performance.now() / 160 + f.s.id)) * 0.05;
+    if (d > 0.01) faceToward(f.s, dx, dz, dt);
+    animatePerson(f.p, !f.p.seated && d > 0.01, dt);
     if (flatDist(pos, f.target) < 0.1) {
       f.target = null;
       f.wait = rand(2, 6);
@@ -6867,11 +7287,11 @@ function buildInterior(lot, k) {
   exitSign.position.set(0, 1.7, INT_D / 2 - 0.1);
   g.add(exitSign);
   scene.add(g);
-  const put = (name, x, z, w, base = 0.2) => {
-    const s = campusSprite(name, w, base);
-    s.position.set(o.x + x, 0.12, o.z + z);
-    scene.add(s);
-    return s;
+  const put = (name, x, z) => {
+    const m = equipModel(EQUIP_OF[name] || name);
+    m.position.set(o.x + x, 0.12, o.z + z);
+    scene.add(m);
+    return m;
   };
   for (const [n, x, z, w] of def.decor || []) put(n, x, z, w);
   const it = { lot, def, o, exit: exit.clone().add(o), stations: [], timer: 2, leaving: [] };
@@ -6942,9 +7362,10 @@ function hireStation(it, S, animate) {
     scene.remove(S.tile.mesh);
     S.tile = null;
   }
-  const s = campusSprite(S.staff, 0.85, 0.04);
-  s.position.copy(S.opW);
-  scene.add(s);
+  const staffer = campusPerson(staffKind(S.staff));
+  staffer.group.position.copy(S.opW).setY(0.12);
+  if (S.kind === 'queue') staffer.group.rotation.y = Math.PI; // behind the desk, facing the queue
+  scene.add(staffer.group);
   if (animate) {
     burst(S.opW);
     sfxUnlock();
@@ -6966,10 +7387,11 @@ function centerPay(it, amount, at) {
 }
 function spawnClient(it, S) {
   const kind = pick(it.def.clients);
-  const s = campusSprite(`ch3_${kind}_n`, 0.8, 0.04);
-  s.position.copy(it.exit).add(v(rand(-0.5, 0.5), 0.6));
-  scene.add(s);
-  return { s, kind, arrived: false };
+  const p = campusPerson(kind);
+  p.group.position.copy(it.exit).add(v(rand(-0.5, 0.5), 0.6)).setY(0.12);
+  p.group.rotation.y = Math.PI;
+  scene.add(p.group);
+  return { s: p.group, p, kind, arrived: false };
 }
 function updateInterior(it, dt) {
   const ppos = player.group.position;
@@ -7020,7 +7442,11 @@ function updateInterior(it, dt) {
           walkSprite(c, b.at.clone().add(v(0, 1.2)), dt);
           if (c.arrived) {
             c.inBed = true;
-            c.s.visible = false; // tucked in
+            // Tucked in: lie down along the bed, head on the pillow
+            c.s.position.set(b.at.x, 0.8, b.at.z + 0.8);
+            c.s.rotation.set(-Math.PI / 2, 0, 0);
+            if (c.p.chair) c.p.chair.visible = false;
+            animatePerson(c.p, false, 0);
           }
           continue;
         }
@@ -7040,8 +7466,9 @@ function updateInterior(it, dt) {
           if (b.done >= 3) {
             // Recovered and checked out
             centerPay(it, Math.round(S.price * priceMult() * eventPayMult()), b.at);
-            c.s.visible = true;
-            c.s.position.copy(b.at).add(v(0, 1.2));
+            c.s.rotation.set(0, 0, 0);
+            if (c.p.chair) c.p.chair.visible = true;
+            c.s.position.copy(b.at).add(v(0, 1.2)).setY(0.12);
             it.leaving.push(c);
             b.who = null;
           }
@@ -7079,16 +7506,17 @@ function walkSprite(c, target, dt, face) {
   const dz = target.z - p.z;
   const d = Math.hypot(dx, dz);
   c.arrived = d < 0.06;
-  if (c.arrived) return;
+  if (c.arrived) {
+    if (face === 's') c.s.rotation.y = 0;
+    animatePerson(c.p, false, dt);
+    return;
+  }
   const step = Math.min(d, 1.6 * dt);
   p.x += (dx / d) * step;
   p.z += (dz / d) * step;
-  p.y = 0.12 + Math.abs(Math.sin(performance.now() / 150 + c.s.id)) * 0.05;
-  const dir = face || (dz < 0 ? 'n' : 's');
-  if (c.dir !== dir) {
-    c.dir = dir;
-    c.s.material.map = campusTex(`ch3_${c.kind}_${dir}`);
-  }
+  p.y = 0.12;
+  faceToward(c.s, dx, dz, dt);
+  animatePerson(c.p, !c.p.seated, dt);
 }
 // Doors: stand still on a centre's door ring (outside) or the exit ring (inside) to go through
 function updateDoors(dt) {
@@ -8201,7 +8629,6 @@ function showEnding() {
       <b>Dr. Quest World</b><br><br>
       <small>ออกแบบเกมและไอเดีย</small><br>ทีม Dr. Quest<br><br>
       <small>พัฒนาเกม</small><br>Claude Code<br><br>
-      <small>ภาพวิทยาเขต</small><br>Healthcare-Simulator-Starter<br><br>
       <small>เครื่องยนต์สามมิติ</small><br>three.js<br><br>
       <small>ขอบคุณเป็นพิเศษ</small><br>คุณหมอ พยาบาล และเจ้าหน้าที่ทุกคน<br>ที่ดูแลพวกเราในชีวิตจริง 💚<br><br>
       <b>ขอบคุณที่เล่นจนจบ!</b>
