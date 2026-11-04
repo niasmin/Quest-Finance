@@ -348,6 +348,13 @@
 
   /* ---- UI cleanup: compact HUD, one bottom message, toasts from the top, bottom-sheet panels ---- */
   #substats { display: flex; gap: 5px; flex-wrap: wrap; max-width: 72vw; }
+  #left { min-width: 0; flex: 1 1 auto; }
+  #right { flex: 0 0 auto; align-items: flex-end; }
+  #money { max-width: 100%; box-sizing: border-box; white-space: nowrap; }
+  #money.long { font-size: 21px; }
+  #money.long .ico { font-size: 21px; }
+  #money.huge { font-size: 17px; }
+  #money.huge .ico { font-size: 18px; }
   #substats .pill { font-size: 13.5px; padding: 4px 10px; }
   #substats #clock { font-size: 12.5px; }
   #saved:not(.bad) { display: none !important; }
