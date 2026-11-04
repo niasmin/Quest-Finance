@@ -114,6 +114,7 @@ const UPGRADES = [
   { id: 'machine', icon: '⚙️', name: 'เครื่องผลิตยา', desc: (l) => `ผลิตเร็ว +${l * 10}%`, max: 10, base: 250, growth: 1.6 },
   { id: 'price', icon: '💰', name: 'ค่ารักษา', desc: (l) => `รายได้ +${l * 10}%`, max: 20, base: 400, growth: 1.55 },
   { id: 'ads', icon: '📣', name: 'ประชาสัมพันธ์', desc: (l) => `คนไข้มาเพิ่ม +${l * 8}%`, max: 10, base: 350, growth: 1.6 },
+  { id: 'collector', icon: '💰', name: 'จ้างพนักงานเก็บเงิน', desc: (l) => `คนเดินเก็บเงินให้ +${l} คน`, max: 3, base: 800, growth: 3 },
 ];
 const upLevel = (id) => state.upgrades[id] || 0;
 const upCost = (u) => Math.round((u.base * u.growth ** upLevel(u.id)) / 10) * 10;
@@ -2056,6 +2057,58 @@ function makeHousekeeper() {
     animatePerson(person, true, dt);
   };
   staff.push(hk);
+}
+
+// ---------- cash collectors: hired staff who sweep up the money piles for you ----------
+const collectors = [];
+// Every pile on the ground: counters, rooms, the cash basket and the lot across the road
+const groundPiles = () => [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.cash)
+  .concat(basket.pile ? [basket.pile] : [], outdoorPiles());
+const COLLECTOR_HOME = v(7.6, 11.2);
+function syncCollectors(animate = false) {
+  while (collectors.length < upLevel('collector')) {
+    const person = makePerson({ shirt: 0xffd166, pants: 0x2b2d42, cap: true });
+    // A money bag on the back
+    const bag = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), mat(0x8a5a30));
+    bag.position.set(0, 1.0, -0.32);
+    const knot = box(0.12, 0.12, 0.12, 0xffd166);
+    knot.position.set(0, 1.28, -0.32);
+    person.body.add(bag, knot);
+    person.group.position.copy(COLLECTOR_HOME).add(v(collectors.length * 0.8, 0));
+    scene.add(person.group);
+    collectors.push({ person, pile: null, timer: 0, look: 0 });
+    if (animate) popIn(person.group);
+  }
+}
+function updateCollectors(dt) {
+  for (const c of collectors) {
+    const pos = c.person.group.position;
+    // Pick the fullest pile nobody else is heading for
+    c.look -= dt;
+    if (!c.pile || c.pile.amount <= 0 || c.look <= 0) {
+      c.look = 2;
+      const taken = new Set(collectors.filter((o) => o !== c).map((o) => o.pile));
+      c.pile = groundPiles().filter((p) => p.amount >= 10 && !taken.has(p)).sort((a, b) => b.amount - a.amount)[0] || null;
+    }
+    const target = c.pile ? c.pile.pos : COLLECTOR_HOME;
+    const way = route(pos, target);
+    const arrived = walkTo(c.person, way, 4.2 * staffMult(), dt);
+    animatePerson(c.person, !arrived, dt);
+    if (!c.pile || flatDist(pos, c.pile.pos) > 1.2) continue;
+    c.timer -= dt;
+    if (c.timer > 0) continue;
+    c.timer = 0.05;
+    const pile = c.pile;
+    const chunk = Math.min(pile.amount, Math.max(5, Math.ceil(pile.amount / 10)));
+    pile.amount -= chunk;
+    const top = pile.stack.count ? pile.stack.worldPos(pile.stack.count - 1) : pile.pos.clone();
+    pile.sync();
+    const bill = makeItem('cash');
+    bill.position.copy(top);
+    fly(bill, top, () => pos.clone().setY(1.2), (m) => scene.remove(m), 0.22, 0.6);
+    addMoney(chunk);
+    if (pile.amount <= 0) c.pile = null;
+  }
 }
 
 function spawnCrew() {
@@ -6141,6 +6194,10 @@ function buyUpgrade(u) {
   if (upLevel(u.id) >= u.max || state.money < cost) return false;
   state.money -= cost;
   state.upgrades[u.id] = upLevel(u.id) + 1;
+  if (u.id === 'collector') {
+    syncCollectors(true);
+    toast('💰 <b>จ้างพนักงานเก็บเงินแล้ว!</b><br>เขาจะเดินเก็บกองเงินทุกจุดให้คุณ', 3500);
+  }
   missionProgress('upgrade', 1);
   updateMoney();
   updateBag();
@@ -6753,6 +6810,7 @@ function frame(now) {
     tickOtherBranches(dt);
     tickEmpire(dt);
     updateDistrict(dt);
+    updateCollectors(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
     updateRoof(dt);
@@ -6806,6 +6864,7 @@ applyTheme();
 applyOutfit();
 buildDistrict();
 spawnCrew();
+syncCollectors();
 showNextTile();
 updateBag();
 updateCamera(0, true);
@@ -7240,4 +7299,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
