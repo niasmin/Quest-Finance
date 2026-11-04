@@ -124,7 +124,7 @@ const machineMult = () => (1 + 0.1 * upLevel('machine')) * empireMachine() * pre
 const branchMult = () => 1 + 0.5 * (state.branch || 0);
 const priceMult = () => (1 + 0.1 * upLevel('price')) * branchMult() * empirePrice() * prestigeIncome();
 // Reputation (0-5 stars) and advertising both bring patients in faster
-const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating) * (1 + 0.02 * comfort()) * (OUT.parking ? 1.15 : 1) * empireArrival();
+const arrivalMult = () => (1 + 0.08 * upLevel('ads')) * (0.7 + 0.1 * state.rating) * (1 + 0.02 * comfort()) * (OUT.parking ? 1.15 : 1) * empireArrival() * trafficArrival();
 
 // Patient types: [weight, unlocked from step]
 const PATIENT_TYPES = {
@@ -1661,7 +1661,7 @@ class Patient {
       const bar = this.inside || this.seatedBar ? this.patienceLeft() : null;
       const icon = ROOMS[this.kind] ? ROOMS[this.kind].icon : PRODUCTS[this.kind].icon;
       const text = ROOMS[this.kind] ? '' : String(this.need - this.got);
-      draw(icon, text, '#1d2433', bar, this.t.badge || '');
+      draw(icon, text, '#1d2433', bar, this.badge || this.t.badge || '');
     }
   }
   // Final bill: patient type bonus, price upgrade and a tip for quick service
@@ -1678,6 +1678,11 @@ class Patient {
     if (this.tipped) missionProgress('tips', 1);
     if (this.type === 'emergency') missionProgress('emergency', 1);
     if (this.type === 'vip') missionProgress('vip', 1);
+    if (this.citizen != null) citizenTreated(this);
+    if (this.type === 'tourist') {
+      cityState().tourists++;
+      cityState().touristCash += amount;
+    }
     return amount;
   }
   // Served: a special case moves on to the next service on its list, everyone else goes home
@@ -1766,6 +1771,7 @@ class Patient {
           this.seat = null;
           this.standUp();
           this.angry = true;
+          if (this.citizen != null) citizenLeftAngry(this);
           this.leave();
           changeRating(-0.15);
           floatText(this.person.group.position, '😡 รอนานเกินไป!', '#ff8a8a');
@@ -1820,6 +1826,7 @@ class Patient {
     const queue = (ROOMS[this.kind] || LINES[this.kind]).queue;
     queue.splice(queue.indexOf(this), 1);
     this.angry = true;
+    if (this.citizen != null) citizenLeftAngry(this);
     this.leave();
     changeRating(-0.15);
     floatText(this.person.group.position, '😡 รอนานเกินไป!', '#ff8a8a');
@@ -1853,7 +1860,16 @@ function updatePatients(dt) {
     const open = services.filter((k) => serviceQueue(k).length < QUEUE_MAX);
     const seat = state.unlocked.has('waiting') ? SEATS.find((st) => !st.taken) : null;
     if (open.length) {
-      const p = new Patient(pick(open), rollType());
+      const sickOne = Math.random() < 0.4 ? citizenPatientDue() : -1;
+      const p = new Patient(pick(open), sickOne >= 0 ? 'normal' : rollType());
+      if (sickOne >= 0) {
+        p.citizen = sickOne;
+        p.badge = '🏠';
+        p.refreshBubble();
+      } else if (p.type === 'tourist') {
+        p.badge = pick(FLAGS);
+        p.refreshBubble();
+      }
       joinQueue(p);
       patients.push(p);
     } else if (seat && services.length) {
@@ -3092,6 +3108,7 @@ const TIPS = {
   interior: '💡 <b>ข้างในศูนย์</b> มีผู้ใช้บริการเข้ามาเอง<br>ยืนวงเขียวเพื่อให้บริการ หรือยืนบนป้าย 🧑‍⚕️ เพื่อจ้างเจ้าหน้าที่ · ออกที่วงเหลือง 🚪',
   base: '💡 <b>🎖️ ค่ายทหาร</b> เปิดแล้ว! ขึ้นถนนวิทยาเขตไปทางเหนือสุด<br>ยืนบนป้ายเพื่อสร้าง · ยืนวงเขียวเพื่อฝึกทหาร · วงเหลืองคือกองบัญชาการ',
   campus: '💡 <b>วิทยาเขต Healthcare Empire</b> เปิดแล้ว!<br>เดินออกประตูหน้า ไปทางขวาตามถนนวิทยาเขต แล้วยืนบนป้ายราคาเพื่อซื้อตึก',
+  cityhub: '💡 <b>🏙️ เมืองของคุณ</b> (มุมขวาบน)<br>ดูชีวิตชาวเมือง การจราจร นักท่องเที่ยว และคำแนะนำจากที่ปรึกษา',
   special: '💡 <b>เคสพิเศษ</b> (เสื้อม่วง ⭐) ต้องไปหลายห้องตามลำดับ<br>ดูเส้นทางที่มุมขวาบน',
 };
 const tipQueue = [];
@@ -5125,13 +5142,14 @@ function updateDistrict(dt) {
     const person = makePerson({ shirt: pick(SHIRTS) });
     person.group.position.set((district.road2 && Math.random() < 0.5 ? DIST_ROAD2_X : DIST_ROAD_X) + rand(-0.8, 0.8), 0, rand(-10, 12));
     scene.add(person.group);
-    district.residents.push({ person, target: null, wait: rand(0, 3) });
+    district.residents.push({ person, target: null, wait: rand(0, 3), cit: district.residents.length * 5 });
   }
   for (const r of district.residents) {
     if (!r.target) {
       r.wait -= dt;
       animatePerson(r.person, false, dt);
-      if (r.wait <= 0) r.target = Math.random() < 0.5 ? plotZone(pick(district.plots).at) : v(roadOf(r.person.group.position.x) + rand(-1, 1), rand(-20, 12));
+      const due = r.cit < citizenCount() && !isSick(r.cit) ? citizenPlace(r.cit) : null;
+      if (r.wait <= 0) r.target = due && Math.random() < 0.7 ? due.clone().add(v(rand(-0.6, 0.6), rand(-0.6, 0.6))) : Math.random() < 0.5 ? plotZone(pick(district.plots).at) : v(roadOf(r.person.group.position.x) + rand(-1, 1), rand(-20, 12));
       continue;
     }
     const arrived = walkTo(r.person, r.target, 1.8, dt);
@@ -8197,6 +8215,487 @@ function showEnding() {
   for (let i = 0; i < 6; i++) setTimeout(() => burst(player.group.position), i * 350);
 }
 
+// ---------- city life: a game clock, named citizens, traffic, the city advisor and medical tourists ----------
+// Ideas from city builders: the city's people live out their days (home, work, shops), fall ill and
+// come to the hospital by name; cars fill the roads at rush hour and slow the ambulances unless the
+// roads are improved; an advisor reads the city; tourists fly in for treatment and pay more.
+
+// --- the game clock: one game minute = 0.5 s at 1×; the speed button runs the world 1×, 2× or 3× ---
+const CLOCK_RATE = 2; // game minutes per real second
+const defaultCity = () => ({ day: 1, min: 7 * 60, hp: [], log: {}, sickAt: {}, lights: 0, round: false, wide: false, tourists: 0, touristCash: 0, treated: 0 });
+const cityState = () => {
+  if (!state.city) state.city = defaultCity();
+  return state.city;
+};
+let gameSpeed = 1;
+try {
+  gameSpeed = Math.min(3, Math.max(1, Number(localStorage.getItem('drquest-speed')) || 1));
+} catch {
+  gameSpeed = 1;
+}
+const clockHour = () => Math.floor(cityState().min / 60);
+const clockText = () => {
+  const m = Math.floor(cityState().min);
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
+const DAY_NAMES = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสฯ', 'ศุกร์', 'เสาร์'];
+function tickClock(dt) {
+  const c = cityState();
+  c.min += dt * CLOCK_RATE;
+  if (c.min >= 24 * 60) {
+    c.min -= 24 * 60;
+    c.day++;
+    newCityDay();
+  }
+}
+
+// --- citizens: one per home level ×4 (up to 60), each with a name, a home, a job and a health bar ---
+const FIRST = ['สมชาย', 'สมหญิง', 'มานี', 'มานะ', 'ปิติ', 'ชูใจ', 'วีระ', 'ดวงใจ', 'อนันต์', 'กานดา', 'ประยุทธ', 'สุดา', 'ธนา', 'พิมพ์', 'ณัฐ', 'ฟ้าใส', 'ภูมิ', 'แก้ว', 'บุญมี', 'จันทร์เพ็ญ', 'ต้นกล้า', 'น้ำฝน', 'ก้อง', 'ใบเตย', 'เอก', 'มะลิ', 'ทองดี', 'ปลายฟ้า', 'วินัย', 'อรุณี'];
+const LAST = ['ใจดี', 'รักสุข', 'มีสุข', 'แข็งแรง', 'สายบุญ', 'ศรีสุข', 'ทองคำ', 'บุญมา', 'แสงทอง', 'ชื่นใจ'];
+const JOBS = {
+  school: ['ครูโรงเรียนแพทย์', 'นักศึกษาแพทย์'],
+  factory: ['พนักงานโรงงานยา', 'วิศวกรโรงงานยา'],
+  bank: ['พนักงานธนาคาร', 'ผู้จัดการธนาคาร'],
+  market: ['แม่ค้าตลาด', 'พ่อค้าผลไม้'],
+  garden: ['คนสวน', 'ครูโยคะในสวน'],
+};
+const CITIZEN_ICONS = ['🧑', '👩', '👨', '👵', '👴', '🧒'];
+const citizenCount = () => Math.min(60, cityLevel('homes') * 4);
+const plotsOf = (types) => (emp()?.plots || []).map((p, i) => (p && types.includes(p.type) ? i : -1)).filter((i) => i >= 0);
+// Stable details from the citizen's number, so nothing but health needs saving
+function citizen(i) {
+  const homes = plotsOf(['homes']);
+  const work = plotsOf(['school', 'factory', 'bank', 'market', 'garden']);
+  const job = work.length ? work[(i * 7 + 3) % work.length] : -1;
+  const jobType = job >= 0 ? emp().plots[job].type : null;
+  const age = 6 + ((i * 37) % 76);
+  return {
+    i,
+    name: `${FIRST[(i * 11) % FIRST.length]} ${LAST[(i * 3 + Math.floor(i / FIRST.length)) % LAST.length]}`,
+    icon: age < 15 ? '🧒' : age > 64 ? (i % 2 ? '👴' : '👵') : CITIZEN_ICONS[i % 3],
+    age,
+    home: homes.length ? homes[i % homes.length] : -1,
+    job: age < 15 || age > 64 ? -1 : job,
+    jobName: age < 15 ? 'นักเรียน' : age > 64 ? 'วัยเกษียณ' : jobType ? JOBS[jobType][i % 2] : 'ว่างงาน',
+  };
+}
+const citizenHp = (i) => cityState().hp[i] ?? 90;
+const isSick = (i) => citizenHp(i) < 35;
+function citizenStatus(i) {
+  if (patients.some((p) => p.citizen === i && !p.leaving)) return { icon: '🏥', text: 'กำลังรักษาที่โรงพยาบาล' };
+  if (isSick(i)) return { icon: '🤒', text: 'ไม่สบาย กำลังมาโรงพยาบาล' };
+  const h = clockHour();
+  const c = citizen(i);
+  if (h < 6 || h >= 22) return { icon: '😴', text: 'นอนหลับอยู่ที่บ้าน' };
+  if (h < 8) return { icon: '🚶', text: c.job >= 0 ? 'กำลังเดินทางไปทำงาน' : 'ตื่นนอน กินข้าวเช้า' };
+  if (h < 12 || (h >= 13 && h < 17)) return c.job >= 0 ? { icon: '💼', text: `ทำงานเป็น${c.jobName}` } : c.age < 15 ? { icon: '📚', text: 'เรียนหนังสือ' } : { icon: '🏡', text: 'พักผ่อนที่บ้าน' };
+  if (h < 13) return { icon: '🍜', text: 'พักกินข้าวกลางวัน' };
+  if (h < 19) return plotsOf(['market']).length ? { icon: '🛒', text: 'ซื้อของที่ตลาด' } : { icon: '🚶', text: 'เดินทางกลับบ้าน' };
+  return plotsOf(['garden']).length && i % 3 === 0 ? { icon: '🌳', text: 'เดินเล่นในสวน' } : { icon: '🏠', text: 'อยู่บ้านกับครอบครัว' };
+}
+// Where a citizen should be right now (for the walkers on the district road)
+function citizenPlace(i) {
+  const c = citizen(i);
+  const h = clockHour();
+  const at = (plot) => (plot >= 0 && district.plots[plot] ? plotZone(district.plots[plot].at) : null);
+  if (h >= 8 && h < 17 && c.job >= 0) return at(c.job);
+  if (h >= 17 && h < 19) return at(plotsOf(['market'])[i % Math.max(1, plotsOf(['market']).length)] ?? -1) || at(c.home);
+  return at(c.home);
+}
+function cityLog(i, text) {
+  const c = cityState();
+  const list = (c.log[i] = c.log[i] || []);
+  list.unshift(`วัน ${c.day} ${clockText()} · ${text}`);
+  if (list.length > 6) list.length = 6;
+}
+
+// Every game hour: health drifts with the city (parks and the hospital's rating help); the sick head in
+let cityHourAt = -1;
+function tickCitizens() {
+  const c = cityState();
+  const n = citizenCount();
+  const hour = c.day * 24 + clockHour();
+  if (hour === cityHourAt) return;
+  cityHourAt = hour;
+  const parks = cityLevel('garden') + (OUT.park ? 2 : 0);
+  for (let i = 0; i < n; i++) {
+    if (c.hp[i] == null) c.hp[i] = 70 + ((i * 13) % 30);
+    if (isSick(i)) continue;
+    const drop = Math.random() < 0.06 ? rand(4, 14) : rand(0, 1.6);
+    c.hp[i] = Math.max(0, Math.min(100, c.hp[i] - drop * (1 - Math.min(0.5, parks * 0.04)) + (Math.random() < 0.3 ? 1 : 0)));
+    if (isSick(i)) {
+      c.sickAt[i] = hour;
+      cityLog(i, '🤒 รู้สึกไม่สบาย');
+    }
+  }
+}
+// Sick citizens come in as patients (one at a time per citizen), marked 🏠 with their name
+function citizenPatientDue() {
+  const n = citizenCount();
+  for (let i = 0; i < n; i++) if (isSick(i) && !patients.some((p) => p.citizen === i)) return i;
+  return -1;
+}
+function citizenTreated(p) {
+  const c = cityState();
+  c.hp[p.citizen] = 100;
+  c.treated++;
+  delete c.sickAt[p.citizen];
+  const who = citizen(p.citizen);
+  cityLog(p.citizen, `💚 รักษาหายที่${serviceIcon(p.kind)} โรงพยาบาลสาขา ${state.branch + 1}`);
+  floatText(p.person.group.position, `💚 คุณ${who.name.split(' ')[0]} หายป่วยแล้ว`, '#8be08f');
+}
+function citizenLeftAngry(p) {
+  cityLog(p.citizen, '😡 รอนานเกินไป กลับบ้านไปก่อน');
+  cityState().hp[p.citizen] = Math.max(cityState().hp[p.citizen] || 0, 25);
+}
+function newCityDay() {
+  const c = cityState();
+  // Anyone left sick for a whole day loses faith in the hospital a little
+  const longSick = Object.values(c.sickAt).filter((h) => c.day * 24 - h > 24).length;
+  if (longSick) changeRating(-0.05 * Math.min(4, longSick));
+  toast(`🌅 <b>วัน${DAY_NAMES[c.day % 7]}ที่ ${c.day}</b><br><small>ชาวเมือง ${citizenCount()} คน · รักษาหายแล้ว ${c.treated} ครั้ง${c.tourists ? ` · นักท่องเที่ยว ${c.tourists} คน` : ''}</small>`, 3500);
+}
+
+// --- traffic: cars on the main road and the district road; lights, a roundabout and a wider road ease it ---
+const TRAFFIC = {
+  lights: { icon: '🚦', name: 'ไฟจราจรอัจฉริยะ', max: 3, cost: (l) => [20000, 80000, 250000][l], desc: 'สัญญาณไฟที่สี่แยก ลดรถติด' },
+  round: { icon: '🔄', name: 'วงเวียนหน้าโรงพยาบาล', max: 1, cost: () => 400000, desc: 'รถไหลต่อเนื่อง ไม่ต้องรอไฟแดง' },
+  wide: { icon: '🛣️', name: 'ขยายถนนเป็น 4 เลน', max: 1, cost: () => 1200000, desc: 'รับรถได้มากขึ้นเกือบเท่าตัว' },
+};
+const roadCapacity = () => 10 + 4 * cityState().lights + (cityState().round ? 6 : 0) + (cityState().wide ? 10 : 0);
+const rushHour = () => [7, 8, 17, 18].includes(clockHour());
+function carDemand() {
+  const base = 2 + builtPlots() * 0.5 + citizenCount() * 0.12 + cityState().tourists * 0.02;
+  return base * (rushHour() ? 1.8 : clockHour() < 6 || clockHour() >= 22 ? 0.4 : 1);
+}
+// 0 = clear, 1 = gridlock
+const jam = () => (builtPlots() < 1 ? 0 : Math.max(0, Math.min(1, (carDemand() - roadCapacity()) / roadCapacity() + 0.15)));
+// Jams slow the ambulances (fewer arrivals, emergencies lose patience)
+const trafficArrival = () => 1 - 0.3 * jam();
+const jamText = (j) => (j < 0.25 ? '🟢 คล่องตัว' : j < 0.5 ? '🟡 หนาแน่น' : j < 0.75 ? '🟠 รถติด' : '🔴 ติดหนัก');
+
+const traffic = { cars: [], lights: [], phase: 0, built: false };
+const CAR_COLORS = [0xe5484d, 0x3d8bfd, 0xffd166, 0xffffff, 0x2ec4b6, 0x9b5de5, 0x555b6e, 0xff8c42];
+function makeCar() {
+  const g = new THREE.Group();
+  const body = box(1.5, 0.42, 0.78, pick(CAR_COLORS));
+  body.position.y = 0.32;
+  const cab = box(0.8, 0.34, 0.7, 0xcfe8ff, { shadow: false });
+  cab.position.set(-0.1, 0.7, 0);
+  g.add(body, cab);
+  for (const [x, z] of [[-0.48, 0.4], [0.48, 0.4], [-0.48, -0.4], [0.48, -0.4]]) {
+    const w = box(0.3, 0.3, 0.1, 0x222222, { shadow: false });
+    w.position.set(x, 0.16, z);
+    g.add(w);
+  }
+  scene.add(g);
+  return g;
+}
+// Intersections on the main road with a light once bought: the district road, the gate, the campus avenue
+const CROSSINGS = () => [DIST_ROAD_X, GATE.x, CAMPUS_X];
+function syncTrafficLights() {
+  const want = cityState().round ? 0 : cityState().lights;
+  while (traffic.lights.length < want) {
+    const x = CROSSINGS()[traffic.lights.length];
+    const g = new THREE.Group();
+    const pole = box(0.12, 2.4, 0.12, 0x444444);
+    pole.position.y = 1.2;
+    const head = box(0.3, 0.7, 0.3, 0x222222);
+    head.position.y = 2.5;
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: 0x3fbf5f }));
+    lamp.position.set(0, 2.5, 0.17);
+    g.add(pole, head, lamp);
+    g.position.set(x - 1.6, 0, ROAD_Z - 1.5);
+    scene.add(g);
+    popIn(g);
+    traffic.lights.push({ g, lamp, x });
+  }
+  while (traffic.lights.length > want) scene.remove(traffic.lights.pop().g);
+  if (cityState().round && !traffic.round) {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 0.1, 28), mat(0x7ccf5a));
+    ring.position.set(GATE.x, 0.06, ROAD_Z);
+    const fountain = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 0.9, 12), mat(0x9fd8ff));
+    fountain.position.set(GATE.x, 0.5, ROAD_Z);
+    scene.add(ring, fountain);
+    traffic.round = [ring, fountain];
+  }
+}
+function updateTraffic(dt) {
+  if (!running || !district.built || builtPlots() < 1) return;
+  syncTrafficLights();
+  const want = Math.min(22, Math.round(carDemand()));
+  while (traffic.cars.length < want) {
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const lanes = cityState().wide ? [0.55, 1.35] : [0.8];
+    const lane = pick(lanes) * (dir > 0 ? 1 : -1);
+    const g = makeCar();
+    const x = dir > 0 ? -62 : 62;
+    g.position.set(x, 0, ROAD_Z + lane);
+    g.rotation.y = dir > 0 ? 0 : Math.PI;
+    traffic.cars.push({ g, dir, lane, v: rand(5, 7) });
+  }
+  // Lights: main road green 7 s, red 4 s
+  traffic.phase = (traffic.phase + dt) % 11;
+  const red = traffic.lights.length && traffic.phase > 7;
+  for (const L of traffic.lights) L.lamp.material.color.set(red ? 0xe5484d : 0x3fbf5f);
+  const j = jam();
+  for (let k = traffic.cars.length - 1; k >= 0; k--) {
+    const c = traffic.cars[k];
+    const x = c.g.position.x;
+    let speed = c.v * (1 - 0.65 * j);
+    // Keep a gap to the car ahead in the same lane
+    for (const o of traffic.cars) {
+      if (o === c || o.lane !== c.lane) continue;
+      const ahead = (o.g.position.x - x) * c.dir;
+      if (ahead > 0 && ahead < 2.1) speed = Math.min(speed, Math.max(0, (ahead - 1.7) * 4));
+    }
+    // Stop at a red light before the crossing
+    if (red) for (const L of traffic.lights) {
+      const to = (L.x - x) * c.dir;
+      if (to > 1.4 && to < 2.6) speed = 0;
+    }
+    c.g.position.x += speed * c.dir * dt;
+    if (Math.abs(c.g.position.x) > 64 || traffic.cars.length > want + 2) {
+      scene.remove(c.g);
+      traffic.cars.splice(k, 1);
+    }
+  }
+}
+function buyTraffic(id) {
+  const t = TRAFFIC[id];
+  const c = cityState();
+  const lvl = id === 'lights' ? c.lights : c[id] ? 1 : 0;
+  if (lvl >= t.max || !empireSpend(t.cost(lvl))) return;
+  if (id === 'lights') c.lights++;
+  else c[id] = true;
+  burst(player.group.position);
+  toast(`${t.icon} <b>${t.name}</b> เสร็จแล้ว!<br><small>การจราจร: ${jamText(jam())}</small>`, 3500);
+  save();
+  renderCityHub();
+}
+
+// --- medical tourists: fly in for treatment, pay 3×, more come to a pretty, well-rated city ---
+const FLAGS = ['🇯🇵', '🇨🇳', '🇰🇷', '🇺🇸', '🇬🇧', '🇩🇪', '🇫🇷', '🇦🇺', '🇮🇳', '🇸🇬', '🇦🇪', '🇸🇪'];
+function tourismScore() {
+  return Math.max(0, Math.round(
+    cityLevel('garden') * 1.5 + cityLevel('market') + (OUT.park ? 2 : 0) + (OUT.kiosk ? 1 : 0)
+    + comfort() / 4 + Math.max(0, state.rating - 3.5) * 4 + campusCount() * 0.6 + emp().tier * 2 - jam() * 4,
+  ));
+}
+PATIENT_TYPES.tourist = { weight: 0, from: 8, patience: 50, pay: 3, speed: 3.1, badge: '✈️', shirt: 0x7fd1ff };
+let tourWeightT = 0;
+function tickTourism(dt) {
+  tourWeightT -= dt;
+  if (tourWeightT > 0) return;
+  tourWeightT = 3;
+  PATIENT_TYPES.tourist.weight = builtPlots() >= 1 ? Math.min(12, tourismScore()) : 0;
+}
+
+// --- the advisor: reads the city, says what's going well, what needs care, and what to do first ---
+function demandRows() {
+  const n = citizenCount();
+  const jobs = (cityLevel('school') + cityLevel('factory') + cityLevel('bank') + cityLevel('market') + cityLevel('garden')) * 4;
+  const workers = Array.from({ length: n }, (_, i) => citizen(i)).filter((c) => c.age >= 15 && c.age <= 64).length;
+  const shops = cityLevel('market') * 8;
+  const parks = (cityLevel('garden') + (OUT.park ? 2 : 0)) * 8;
+  const beds = [state.unlocked.has('ward'), state.unlocked.has('beds2'), state.unlocked.has('beds3'), state.unlocked.has('icubeds')].filter(Boolean).length * 2 + 2;
+  const sick = Array.from({ length: n }, (_, i) => i).filter(isSick).length;
+  return [
+    { icon: '🏠', name: 'บ้าน', have: n, use: n },
+    { icon: '💼', name: 'งาน', have: jobs, use: workers },
+    { icon: '🛒', name: 'ร้านค้า', have: shops, use: Math.ceil(n * 0.6) },
+    { icon: '🌳', name: 'สวน/พักผ่อน', have: parks, use: Math.ceil(n * 0.4) },
+    { icon: '🛏️', name: 'เตียงผู้ป่วย', have: beds, use: sick },
+    { icon: '🚗', name: 'ถนน', have: roadCapacity(), use: Math.round(carDemand()) },
+  ];
+}
+function advise() {
+  const good = [];
+  const care = [];
+  const todo = [];
+  const rows = demandRows();
+  const short = rows.filter((r) => r.use > r.have);
+  const j = jam();
+  const sick = Array.from({ length: citizenCount() }, (_, i) => i).filter(isSick).length;
+  if (state.rating >= 4.5) good.push(`ชาวเมืองรักโรงพยาบาลมาก ⭐ ${state.rating.toFixed(1)}`);
+  else if (state.rating < 3.5) care.push(`คะแนนโรงพยาบาลต่ำ (⭐ ${state.rating.toFixed(1)}) คนไข้รอนานเกินไป`);
+  if (j < 0.3) good.push('ถนนโล่ง รถพยาบาลวิ่งได้เร็ว');
+  else {
+    care.push(`การจราจร${jamText(j).slice(2)} รถพยาบาลมาช้าลง`);
+    const next = cityState().lights < 3 ? 'lights' : !cityState().round ? 'round' : !cityState().wide ? 'wide' : null;
+    if (next) todo.push(`สร้าง${TRAFFIC[next].icon} ${TRAFFIC[next].name} (💵${TRAFFIC[next].cost(cityState().lights).toLocaleString()})`);
+  }
+  if (sick === 0 && citizenCount()) good.push('ชาวเมืองทุกคนสุขภาพดี');
+  else if (sick > 2) care.push(`มีชาวเมืองป่วย ${sick} คน รอรักษาอยู่`);
+  for (const r of short) {
+    care.push(`${r.icon} ${r.name}ไม่พอ (ขาด ${r.use - r.have})`);
+    if (r.name === 'งาน') todo.push('สร้างโรงเรียนแพทย์ โรงงานยา หรือธนาคาร ให้คนมีงานทำ');
+    if (r.name === 'ร้านค้า') todo.push('สร้างหรืออัปเลเวลตลาด 🏪');
+    if (r.name === 'สวน/พักผ่อน') todo.push('สร้างสวนสาธารณะ 🌳 ช่วยให้คนป่วยน้อยลงและดึงนักท่องเที่ยว');
+    if (r.name === 'เตียงผู้ป่วย') todo.push('เพิ่มเตียงในหอผู้ป่วยชั้น 2');
+  }
+  if (cityState().tourists > 0) good.push(`นักท่องเที่ยวมารักษาแล้ว ${cityState().tourists} คน ✈️`);
+  if (tourismScore() < 4 && state.step >= 8) todo.push('อยากได้นักท่องเที่ยวมากขึ้น: สวน ตลาด ของตกแต่ง และคะแนนดาวช่วยได้');
+  const g = !storyDone() && curGoal();
+  if (g) todo.push(`เป้าหมายเนื้อเรื่อง: ${g.text}`);
+  if (!good.length) good.push('เมืองกำลังเติบโต ค่อย ๆ สร้างไปนะคะ');
+  if (!care.length) care.push('ไม่มีเรื่องน่าห่วงตอนนี้');
+  return { good, care, todo: todo.slice(0, 3) };
+}
+
+// --- the 🏙️ city hub: advisor, citizens, traffic, tourists ---
+const hubEl = document.getElementById('cityhub');
+let hubTab = 'advisor';
+let hubFilter = 'all';
+let hubSearch = '';
+let hubPick = -1;
+function openCityHub(tab) {
+  if (tab) hubTab = tab;
+  hubPick = -1;
+  renderCityHub();
+  hubEl.style.display = 'flex';
+}
+function renderCityHub() {
+  const box = hubEl.querySelector('.box');
+  const c = cityState();
+  box.innerHTML = `<h3>🏙️ เมืองของคุณ</h3><p class="sub">วัน${DAY_NAMES[c.day % 7]}ที่ ${c.day} · ${clockText()} · ชาวเมือง ${citizenCount()} คน · ${jamText(jam())}</p>`;
+  const tabs = emEl('div', 'hubtabs');
+  for (const [id, label] of [['advisor', '👩‍💼 ที่ปรึกษา'], ['people', '👥 ชาวเมือง'], ['traffic', '🚦 จราจร'], ['tourism', '✈️ ท่องเที่ยว']]) {
+    const b = emEl('button', hubTab === id ? 'on' : '', label);
+    b.addEventListener('click', () => { hubTab = id; hubPick = -1; renderCityHub(); });
+    tabs.append(b);
+  }
+  box.append(tabs);
+  const page = emEl('div', 'hubpage');
+  box.append(page);
+  if (hubTab === 'advisor') {
+    const a = advise();
+    page.append(emEl('div', 'advisor', `<div class="av">👩‍💼</div><div><b>คุณอร ที่ปรึกษาเมือง</b><br><small>มาดูเมืองของเรากันค่ะ</small></div>`));
+    page.append(emEl('div', 'advsec good', `<b>✅ สิ่งที่ไปได้ดี</b>${a.good.map((t) => `<div>• ${t}</div>`).join('')}`));
+    page.append(emEl('div', 'advsec care', `<b>⚠️ เรื่องที่ควรดูแล</b>${a.care.map((t) => `<div>• ${t}</div>`).join('')}`));
+    if (a.todo.length) page.append(emEl('div', 'advsec todo', `<b>👉 ทำอะไรก่อนดี</b>${a.todo.map((t, i) => `<div>${i + 1}. ${t}</div>`).join('')}`));
+    const rows = demandRows();
+    page.append(emEl('div', 'demand', `<b>📊 ความต้องการของเมือง</b><table><tr><th></th><th>มี</th><th>ใช้</th><th>ขาด</th></tr>${rows.map((r) => `<tr><td>${r.icon} ${r.name}</td><td>${r.have}</td><td>${r.use}</td><td class="${r.use > r.have ? 'bad' : 'ok'}">${r.use > r.have ? r.use - r.have : '✓'}</td></tr>`).join('')}</table>`));
+  } else if (hubTab === 'people') {
+    if (!citizenCount()) {
+      page.append(emEl('p', 'emhint', 'ยังไม่มีชาวเมือง สร้างหมู่บ้าน 🏘️ ในเมืองหมอก่อนนะ (กด 🌏 อาณาจักร → เมือง)'));
+    } else if (hubPick >= 0) {
+      const p = citizen(hubPick);
+      const hp = Math.round(citizenHp(hubPick));
+      const st = citizenStatus(hubPick);
+      const home = p.home >= 0 ? `แปลง ${p.home + 1}` : '-';
+      const card = emEl('div', 'lifecard', `<div class="big">${p.icon}</div><b>คุณ${p.name}</b><br><small>อายุ ${p.age} ปี · ${p.jobName} · บ้าน${home}</small>
+        <div class="hpbar"><i style="width:${hp}%;background:${hp < 35 ? '#e5484d' : hp < 65 ? '#ffb020' : '#3fbf5f'}"></i></div><small>สุขภาพ ${hp}/100</small>
+        <p>${st.icon} ตอนนี้: ${st.text}</p><b>📖 บันทึกชีวิต</b>${(c.log[hubPick] || ['ยังไม่มีเรื่องราว']).map((t) => `<div class="logrow">${t}</div>`).join('')}`);
+      page.append(card);
+      page.append(emButton('← กลับไปรายชื่อ', false, () => { hubPick = -1; renderCityHub(); }));
+    } else {
+      const search = emEl('input', 'hubsearch');
+      search.placeholder = '🔎 ค้นหาชื่อหรืออาชีพ';
+      search.value = hubSearch;
+      search.addEventListener('input', () => { hubSearch = search.value; renderPeopleList(list); });
+      const chips = emEl('div', 'hubchips');
+      for (const [id, label] of [['all', 'ทั้งหมด'], ['sick', '🤒 ป่วย'], ['work', '💼 ทำงาน'], ['home', '🏠 อยู่บ้าน']]) {
+        const b = emEl('button', hubFilter === id ? 'on' : '', label);
+        b.addEventListener('click', () => { hubFilter = id; renderCityHub(); });
+        chips.append(b);
+      }
+      const list = emEl('div', 'plist');
+      page.append(search, chips, list);
+      renderPeopleList(list);
+    }
+  } else if (hubTab === 'traffic') {
+    const j = jam();
+    page.append(emEl('div', 'advsec', `<b>การจราจรตอนนี้: ${jamText(j)}</b><div class="hpbar"><i style="width:${Math.round(j * 100)}%;background:${j < 0.5 ? '#3fbf5f' : j < 0.75 ? '#ffb020' : '#e5484d'}"></i></div>
+      <small>รถบนถนน ${Math.round(carDemand())} คัน · ถนนรับได้ ${roadCapacity()} คัน${rushHour() ? ' · ⏰ ชั่วโมงเร่งด่วน' : ''}<br>รถติดทำให้รถพยาบาลมาช้า คนไข้มาน้อยลง ${Math.round((1 - trafficArrival()) * 100)}%</small>`));
+    for (const [id, t] of Object.entries(TRAFFIC)) {
+      const lvl = id === 'lights' ? c.lights : c[id] ? 1 : 0;
+      const maxed = lvl >= t.max;
+      const row = emEl('div', 'uprow', `<div class="upico">${t.icon}</div><div class="upinfo"><b>${t.name}</b> <span class="lv">${lvl}/${t.max}</span><br><small>${t.desc}</small></div>`);
+      row.append(emButton(maxed ? 'สร้างแล้ว' : `💵${t.cost(lvl).toLocaleString()}`, maxed || state.money < t.cost(lvl), () => buyTraffic(id)));
+      page.append(row);
+    }
+    page.append(emEl('p', 'emhint', 'ชั่วโมงเร่งด่วน 07:00–09:00 และ 17:00–19:00 รถจะเยอะเป็นพิเศษ'));
+  } else {
+    const s = tourismScore();
+    page.append(emEl('div', 'advsec', `<b>✈️ เสน่ห์ของเมือง: ${s} คะแนน</b><br><small>${PATIENT_TYPES.tourist.weight ? `มีนักท่องเที่ยวมารักษาประมาณ ${Math.round(PATIENT_TYPES.tourist.weight)}% ของคนไข้` : 'ยังไม่มีนักท่องเที่ยว (เปิดห้องเอกซเรย์และสร้างเมืองก่อน)'}<br>นักท่องเที่ยวจ่ายค่ารักษา ×3 · มาแล้ว ${c.tourists} คน · รายได้ 💵${Math.round(c.touristCash).toLocaleString()}</small>`));
+    const tips = [
+      ['🌳', 'สวนสาธารณะในเมือง', cityLevel('garden') * 1.5],
+      ['🏪', 'ตลาด', cityLevel('market')],
+      ['🌷', 'สวนพักฟื้นและร้านขายยาหน้า รพ.', (OUT.park ? 2 : 0) + (OUT.kiosk ? 1 : 0)],
+      ['🎨', 'ของตกแต่ง (ความสบาย)', comfort() / 4],
+      ['⭐', 'คะแนนโรงพยาบาลเกิน 3.5', Math.max(0, state.rating - 3.5) * 4],
+      ['🏫', 'อาคารในวิทยาเขต', campusCount() * 0.6],
+      ['🌏', 'ระดับอาณาจักร', emp().tier * 2],
+      ['🚗', 'รถติด (หักคะแนน)', -jam() * 4],
+    ];
+    page.append(emEl('div', 'demand', `<b>อะไรดึงดูดนักท่องเที่ยว</b><table>${tips.map(([i, n, v]) => `<tr><td>${i} ${n}</td><td class="${v < 0 ? 'bad' : 'ok'}">${v >= 0 ? '+' : ''}${v.toFixed(1)}</td></tr>`).join('')}</table>`));
+  }
+  box.append(emButton('ปิด', false, () => { hubEl.style.display = 'none'; }));
+  box.lastChild.classList.add('ghost');
+}
+function renderPeopleList(list) {
+  list.innerHTML = '';
+  const q = hubSearch.trim();
+  let shown = 0;
+  for (let i = 0; i < citizenCount() && shown < 60; i++) {
+    const p = citizen(i);
+    const st = citizenStatus(i);
+    if (q && !`${p.name} ${p.jobName}`.includes(q)) continue;
+    if (hubFilter === 'sick' && !isSick(i)) continue;
+    if (hubFilter === 'work' && st.icon !== '💼') continue;
+    if (hubFilter === 'home' && !['🏠', '😴', '🏡'].includes(st.icon)) continue;
+    const hp = Math.round(citizenHp(i));
+    const row = emEl('button', 'prow', `<span class="pi">${p.icon}</span><span class="pn"><b>${p.name}</b><small>${st.icon} ${st.text}</small></span><span class="ph" style="color:${hp < 35 ? '#e5484d' : hp < 65 ? '#c77d00' : '#2f8a3a'}">❤️${hp}</span>`);
+    row.addEventListener('click', () => { hubPick = i; renderCityHub(); });
+    list.append(row);
+    shown++;
+  }
+  if (!shown) list.append(emEl('p', 'emhint', 'ไม่พบชาวเมืองที่ตรงกับตัวกรอง'));
+}
+
+// --- HUD: clock pill and the speed / city buttons ---
+const clockEl = document.getElementById('clock');
+const speedBtn = document.getElementById('speedbtn');
+const cityBtn = document.getElementById('citybtn');
+function setSpeed(s) {
+  gameSpeed = s;
+  speedBtn.textContent = `⏩${s}×`;
+  speedBtn.classList.toggle('on', s > 1);
+  try {
+    localStorage.setItem('drquest-speed', String(s));
+  } catch {
+    // speed just won't be remembered
+  }
+}
+speedBtn.addEventListener('click', () => setSpeed(gameSpeed >= 3 ? 1 : gameSpeed + 1));
+cityBtn.addEventListener('click', () => openCityHub());
+let clockShown = '';
+function updateCityHud() {
+  const show = running && tutorialDone();
+  const txt = show ? `🕘 ${DAY_NAMES[cityState().day % 7].slice(0, 2)}. ${clockText()}${rushHour() && builtPlots() ? ' 🚗' : ''}` : '';
+  if (txt !== clockShown) {
+    clockShown = txt;
+    clockEl.textContent = txt;
+    clockEl.style.display = txt ? 'block' : 'none';
+  }
+  speedBtn.style.display = show ? '' : 'none';
+  cityBtn.style.display = show && builtPlots() >= 1 ? '' : 'none';
+  if (cityBtn.style.display === '' && !cityBtn.dataset.seen) {
+    cityBtn.dataset.seen = '1';
+    tip('cityhub');
+  }
+}
+setSpeed(gameSpeed);
+
+// Everything above, once per simulated step
+function updateCityLife(dt) {
+  tickClock(dt);
+  tickCitizens();
+  tickTourism(dt);
+  updateTraffic(dt);
+}
+
 // ---------- player actions ----------
 let actTimer = 0;
 function playerActions(dt) {
@@ -9244,7 +9743,7 @@ function saveData() {
     challenge: state.challenge, room: state.room, tips: state.tips,
     prestige: state.prestige, cards: state.cards, cardPulls: state.cardPulls, research: state.research,
     stats: state.stats, achievements: state.achievements, quiz: state.quiz, week: state.week,
-    story: state.story, conquests: state.conquests || 0, conquestRun: state.conquestRun ?? -1,
+    city: state.city, story: state.story, conquests: state.conquests || 0, conquestRun: state.conquestRun ?? -1,
     base: { ...state.base, cash: BASE.pile?.amount || 0 },
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
@@ -9323,6 +9822,7 @@ function load() {
   state.week = data.week || null;
   state.story = data.story ? { ...defaultStory(), ...data.story } : { ch: 0, catchup: true };
   state.conquests = data.conquests || 0;
+  state.city = { ...defaultCity(), ...(data.city || {}) };
   state.conquestRun = data.conquestRun ?? -1;
   state.base = { ...defaultBase(), ...(data.base || {}) };
   state.base.units = { ...defaultBase().units, ...(state.base.units || {}) };
@@ -9440,7 +9940,12 @@ let running = false;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (running) {
+  if (running) for (let k = 0; k < gameSpeed; k++) simulate(dt);
+  updateCityHud();
+  frameRest(dt, now);
+}
+function simulate(dt) {
+  {
     updatePlayer(dt);
     playerActions(dt);
     for (const line of Object.values(LINES)) if (line.active) updateLine(line, dt);
@@ -9464,6 +9969,7 @@ function frame(now) {
     updateTile(dt);
     updateEvents(dt);
     updateStory(dt);
+    updateCityLife(dt);
     updateGuide();
     saveTimer += dt;
     if (saveTimer > 5) {
@@ -9471,6 +9977,8 @@ function frame(now) {
       showSaveStatus(save());
     }
   }
+}
+function frameRest(dt, now) {
   for (const belt of belts) belt.material.map.offset.x -= dt * 0.9;
   if (trashLid) trashLid.rotation.z *= Math.max(0, 1 - dt * 6);
   // Floor-2 items in flight hide with floor 2
@@ -10003,4 +10511,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };

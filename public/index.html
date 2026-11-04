@@ -118,6 +118,45 @@
   #ending .roll small { color: #ffd166; }
   @keyframes roll { from { transform: translateY(150px); } to { transform: translateY(-100%); } }
   #ending .btn { display: block; width: 100%; margin-top: 8px; }
+  #hudicons { flex-wrap: wrap; justify-content: flex-end; max-width: 150px; }
+  .hudbtn.wide { width: auto; padding: 0 10px; border-radius: 21px; font-size: 15px; font-weight: 800; color: #fff; }
+  .hudbtn.wide.on { background: rgba(255, 140, 0, .85); }
+  #clock { display: none; font-size: 12.5px; padding: 4px 10px; }
+  #cityhub { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 13; }
+  #cityhub .box { background: #f4f8ff; color: #1d2433; border-radius: 22px; padding: 16px; width: min(400px, 94vw); max-height: 90dvh; overflow-y: auto; border: 4px solid #3d8bfd; box-sizing: border-box; }
+  #cityhub h3 { margin: 0; text-align: center; }
+  #cityhub .sub { text-align: center; color: #5a6274; font-size: 12.5px; margin: 2px 0 8px; }
+  #cityhub .box > .btn, #cityhub .hubpage > .btn { display: block; width: 100%; margin-top: 8px; }
+  .hubtabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 8px; }
+  .hubtabs button, .hubchips button { border: none; border-radius: 12px; padding: 7px 2px; font: inherit; font-size: 12.5px; background: #dfe8f7; color: #1d2433; cursor: pointer; }
+  .hubtabs button.on, .hubchips button.on { background: #3d8bfd; color: #fff; font-weight: 700; }
+  .advisor { display: flex; gap: 10px; align-items: center; background: #fff; border-radius: 14px; padding: 8px 10px; margin-bottom: 6px; }
+  .advisor .av { font-size: 34px; }
+  .advsec { background: #fff; border-radius: 14px; padding: 8px 11px; margin: 6px 0; font-size: 13.5px; }
+  .advsec.good { border-left: 5px solid #3fbf5f; }
+  .advsec.care { border-left: 5px solid #ffb020; }
+  .advsec.todo { border-left: 5px solid #3d8bfd; }
+  .demand { background: #fff; border-radius: 14px; padding: 8px 11px; margin: 6px 0; font-size: 13.5px; }
+  .demand table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  .demand td, .demand th { padding: 3px 4px; text-align: right; }
+  .demand td:first-child, .demand th:first-child { text-align: left; }
+  .demand th { color: #6b7790; font-weight: 600; font-size: 12px; }
+  .demand .bad { color: #e5484d; font-weight: 800; }
+  .demand .ok { color: #2f8a3a; }
+  .hpbar { height: 10px; background: #e4e9f2; border-radius: 6px; overflow: hidden; margin: 6px 0 3px; }
+  .hpbar i { display: block; height: 100%; border-radius: 6px; }
+  .hubsearch { width: 100%; box-sizing: border-box; font: inherit; font-size: 15px; padding: 8px 12px; border-radius: 12px; border: 2px solid #c9d6ee; user-select: text; -webkit-user-select: text; }
+  .hubchips { display: flex; gap: 4px; margin: 6px 0; }
+  .hubchips button { flex: 1; }
+  .plist { display: flex; flex-direction: column; gap: 4px; }
+  .prow { display: flex; align-items: center; gap: 8px; border: none; background: #fff; border-radius: 12px; padding: 6px 9px; font: inherit; text-align: left; cursor: pointer; color: #1d2433; }
+  .prow .pi { font-size: 24px; }
+  .prow .pn { flex: 1; display: flex; flex-direction: column; font-size: 13.5px; }
+  .prow .pn small { color: #5a6274; font-size: 12px; }
+  .prow .ph { font-weight: 800; font-size: 13px; }
+  .lifecard { background: #fff; border-radius: 16px; padding: 12px; text-align: center; font-size: 14px; }
+  .lifecard .big { font-size: 48px; }
+  .lifecard .logrow { text-align: left; font-size: 12.5px; color: #3a4256; border-top: 1px solid #eef1f6; padding: 4px 0; }
   @keyframes popin { 0% { transform: scale(.2); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
 
   /* Tutorial card */
@@ -317,10 +356,11 @@
     <div id="bag" class="pill">🎒 0/10</div>
     <div id="rating" class="pill">⭐ 3.0</div>
     <div id="quest" class="pill"></div>
+    <div id="clock" class="pill"></div>
     <div id="saved" class="pill"></div>
   </div>
   <div id="right">
-    <div id="hudicons"><button id="zoombtn" class="hudbtn" aria-label="ซูม">🔍</button><button id="soundbtn" class="hudbtn" aria-label="เสียง">🔊</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
+    <div id="hudicons"><button id="citybtn" class="hudbtn" aria-label="เมือง" style="display:none">🏙️</button><button id="speedbtn" class="hudbtn wide" aria-label="ความเร็ว" style="display:none">⏩1×</button><button id="zoombtn" class="hudbtn" aria-label="ซูม">🔍</button><button id="soundbtn" class="hudbtn" aria-label="เสียง">🔊</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
     <button id="homebtn" class="evbtn ready" style="display:none">🏥 กลับ รพ.</button>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
     <div id="evchips"></div>
@@ -329,6 +369,7 @@
 <div id="toast"></div>
 <div id="military"><div class="box"></div></div>
 <div id="storypanel"><div class="box"></div></div>
+<div id="cityhub"><div class="box"></div></div>
 <div id="ending"><div class="box"></div></div>
 <div id="quiz"><div class="box"></div></div>
 <div id="share"><div class="box"></div></div>
