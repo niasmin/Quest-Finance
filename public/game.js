@@ -10166,7 +10166,13 @@ function updateMoney() {
 function tickMoneyDisplay(dt) {
   const diff = state.money - shownMoney;
   shownMoney = Math.abs(diff) < 1 ? state.money : shownMoney + diff * Math.min(1, dt * 12);
-  moneyEl.textContent = Math.round(shownMoney).toLocaleString();
+  const txt = Math.round(shownMoney).toLocaleString();
+  if (txt !== moneyEl.textContent) {
+    moneyEl.textContent = txt;
+    // Long totals shrink so the top-right buttons never get pushed off the screen
+    moneyBox.classList.toggle('long', txt.length >= 10 && txt.length < 14);
+    moneyBox.classList.toggle('huge', txt.length >= 14);
+  }
 }
 function updateBag() {
   const cap = bagCapacity();
