@@ -3178,7 +3178,7 @@ const toastEl = document.getElementById('toast');
 // One-time explanations the first time something new shows up; queued so they don't overlap
 const TIPS = {
   rush: '💡 <b>ปุ่ม 🚨 เร่งด่วน</b> มาแล้ว (มุมขวาบน)<br>กดเมื่อพร้อม คนไข้แห่มา 75 วินาที รายได้ ×1.5',
-  stylebtn: '💡 <b>🎨 ตกแต่ง</b> เปิดแล้ว<br>ซื้อของตกแต่งให้คนไข้รอนานขึ้น และเปลี่ยนชุดหมอได้',
+  stylebtn: '💡 <b>🎨 ตกแต่ง</b> เปิดแล้ว (อยู่ในปุ่ม ⬆️ อัปเกรด)<br>ซื้อของตกแต่งให้คนไข้รอนานขึ้น และเปลี่ยนชุดหมอได้',
   branchbtn: '💡 <b>🌏 อาณาจักร</b> เปิดแล้ว<br>สร้างเมืองด้วยเงินจาก รพ. ทุกสาขาจะเก่งขึ้น',
   floor2: '💡 <b>ชั้น 2</b> เก็บวัตถุดิบไปใส่หม้อ เอาชามไปวางเคาน์เตอร์<br>เงินชั้นนี้ส่งลงตะกร้าเชือกหน้า รพ.',
   roof: '💡 <b>ดาดฟ้า</b> ยืนวงส้มเพื่อเข็นเปลเข้าไอซียู<br>แล้วยืนวงเขียวที่เคาน์เตอร์เพื่อดูแลจนหาย',
@@ -3189,7 +3189,7 @@ const TIPS = {
   interior: '💡 <b>ข้างในศูนย์</b> มีผู้ใช้บริการเข้ามาเอง<br>ยืนวงเขียวเพื่อให้บริการ หรือยืนบนป้าย 🧑‍⚕️ เพื่อจ้างเจ้าหน้าที่ · ออกที่วงเหลือง 🚪',
   base: '💡 <b>🎖️ ค่ายทหาร</b> เปิดแล้ว! ขึ้นถนนวิทยาเขตไปทางเหนือสุด<br>ยืนบนป้ายเพื่อสร้าง · ยืนวงเขียวเพื่อฝึกทหาร · วงเหลืองคือกองบัญชาการ',
   campus: '💡 <b>วิทยาเขต Healthcare Empire</b> เปิดแล้ว!<br>เดินออกประตูหน้า ไปทางขวาตามถนนวิทยาเขต แล้วยืนบนป้ายราคาเพื่อซื้อตึก',
-  cityhub: '💡 <b>🏙️ เมืองของคุณ</b> (มุมขวาบน)<br>ดูชีวิตชาวเมือง การจราจร นักท่องเที่ยว และคำแนะนำจากที่ปรึกษา',
+  citybtn: '💡 <b>🏙️ เมือง</b> (ปุ่มด้านล่าง)<br>ดูชีวิตชาวเมือง การจราจร นักท่องเที่ยว และคำแนะนำจากที่ปรึกษา',
   special: '💡 <b>เคสพิเศษ</b> (เสื้อม่วง ⭐) ต้องไปหลายห้องตามลำดับ<br>ดูเส้นทางที่มุมขวาบน',
 };
 const tipQueue = [];
@@ -3208,13 +3208,26 @@ function nextTip() {
     nextTip();
   }, 7000);
 }
+// Toasts slide down from the top one at a time; a busy moment queues them instead of stacking
+const toastQueue = [];
+let toastBusy = false;
 function toast(html, ms = 3200) {
+  if (toastBusy) {
+    if (!toastQueue.some((t) => t.html === html) && toastQueue.length < 4) toastQueue.push({ html, ms });
+    return;
+  }
+  toastBusy = true;
   toastEl.innerHTML = html;
-  toastEl.classList.remove('show');
-  void toastEl.offsetWidth; // restart the pop-in animation
   toastEl.classList.add('show');
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => toastEl.classList.remove('show'), ms);
+  toast.t = setTimeout(() => {
+    toastEl.classList.remove('show');
+    setTimeout(() => {
+      toastBusy = false;
+      const next = toastQueue.shift();
+      if (next) toast(next.html, next.ms);
+    }, 380);
+  }, Math.min(ms, 4500));
 }
 
 // --- rush hour: press the button, patients pour in for 75 s and pay 1.5x ---
@@ -5197,7 +5210,7 @@ function syncDistrict(animate = false) {
     if (slot.collider) colliders.splice(colliders.indexOf(slot.collider), 1);
     slot.collider = null;
     const label = p ? `${CITY_BUILDINGS.find((b) => b.id === p.type).icon} ${'★'.repeat(p.lvl)}` : '🏗️ ที่ว่าง';
-    slot.sign = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.5), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(label, p ? '#2e9e4f' : '#8a96a8'), side: THREE.DoubleSide }));
+    slot.sign = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 0.68), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(label, p ? '#2e9e4f' : '#8a96a8'), side: THREE.DoubleSide }));
     const zone = plotZone(slot.at);
     slot.sign.position.set(zone.x, 2.2, zone.z - 1.1);
     slot.sign.rotation.y = Math.PI / 2;
@@ -7103,7 +7116,7 @@ function buildCampusLot(lot, animate) {
     // Door ring: stand on it to walk inside
     const door = doorOf(lot);
     scene.add(zoneRing(door, 0xffd166));
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.45), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex('🚪 เข้าอาคาร', '#b45309'), side: THREE.DoubleSide }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 0.64), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex('🚪 เข้าอาคาร', '#b45309'), side: THREE.DoubleSide }));
     sign.position.set(door.x, 1.6, door.z - 0.9);
     scene.add(sign);
   }
@@ -7386,7 +7399,7 @@ function buildInterior(lot, k) {
   const exit = v(0, INT_D / 2 - 0.9);
   const exitRing = zoneRing(exit, 0xffd166);
   g.add(exitRing);
-  const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.45), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex('🚪 ทางออก', '#b45309'), side: THREE.DoubleSide }));
+  const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 0.62), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex('🚪 ทางออก', '#b45309'), side: THREE.DoubleSide }));
   exitSign.position.set(0, 1.7, INT_D / 2 - 0.1);
   g.add(exitSign);
   scene.add(g);
@@ -7422,7 +7435,7 @@ function buildInterior(lot, k) {
     }
     // Operator ring and station label
     scene.add(zoneRing(S.opW, 0x3fbf5f));
-    const lbl = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.55), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(`${st.icon} ${st.name}`, '#14b8a6'), side: THREE.DoubleSide, transparent: true }));
+    const lbl = new THREE.Mesh(new THREE.PlaneGeometry(4.0, 0.7), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(`${st.icon} ${st.name}`, '#14b8a6'), side: THREE.DoubleSide, transparent: true }));
     lbl.position.set(S.kind === 'queue' ? S.atW.x : S.opW.x, 2.3, (S.kind === 'queue' ? S.atW.z : S.opW.z - 3.2) - 0.9);
     scene.add(lbl);
     // Hire tile beside the operator ring
@@ -8118,7 +8131,7 @@ function makeBaseTile(u, at, label, color = '#3a4520') {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 2.2), [mat(0x3a4520), mat(0x3a4520), new THREE.MeshBasicMaterial({ toneMapped: false,  map: tex }), mat(0x3a4520), mat(0x3a4520), mat(0x3a4520)]);
   mesh.position.set(at.x, 0.06, at.z);
   scene.add(mesh);
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 0.7), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(label, color), side: THREE.DoubleSide }));
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.0, 0.84), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(label, color), side: THREE.DoubleSide }));
   sign.position.set(at.x, 2.0, at.z - 1.3);
   scene.add(sign);
   const t = { u, at, mesh, sign, paid: 0 };
@@ -9235,11 +9248,6 @@ function updateCityHud() {
     clockEl.style.display = txt ? 'block' : 'none';
   }
   speedBtn.style.display = show ? '' : 'none';
-  cityBtn.style.display = show && builtPlots() >= 1 ? '' : 'none';
-  if (cityBtn.style.display === '' && !cityBtn.dataset.seen) {
-    cityBtn.dataset.seen = '1';
-    tip('cityhub');
-  }
 }
 setSpeed(gameSpeed);
 
@@ -10150,6 +10158,7 @@ function updateBag() {
 }
 function updateGoal() {
   const u = UNLOCKS[state.step];
+  goalEl.classList.toggle('none', !u);
   goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label}${u.floor ? ` (${['', 'ชั้น 2', 'ดาดฟ้า', 'ชั้น 3', 'ชั้น 4'][u.floor]})` : ''} · 💵${u.price}`
     : canOpenBranch() ? '🏆 ครบทุกแผนก! กด 🌏 เพื่อเปิดสาขาใหม่' : '🏆 สาขานี้ครบทุกแผนกแล้ว!';
 }
@@ -10168,11 +10177,11 @@ function renderUpgrades() {
   // Cards open with floor 2, research once the first 24 departments are built
   const tabOpen = { up: true, cards: topStep() >= CAMPUS_OPEN_STEP || state.cards.length > 0, research: topStep() >= CORE_STEPS || state.research.done.length > 0 };
   if (!tabOpen[upTab]) upTab = 'up';
-  for (const b of document.querySelectorAll('#uptabs button')) {
+  for (const b of document.querySelectorAll('#uptabs button[data-tab]')) {
     b.classList.toggle('on', b.dataset.tab === upTab);
     b.style.display = tabOpen[b.dataset.tab] ? '' : 'none';
   }
-  document.getElementById('uptabs').style.display = tabOpen.cards ? '' : 'none';
+  document.getElementById('uptabs').style.display = tabOpen.cards || state.step >= 2 ? '' : 'none';
   if (upTab === 'cards') return renderCards();
   if (upTab === 'research') return renderResearch();
   for (const u of UPGRADES) {
@@ -10497,6 +10506,7 @@ const DOCK = {
   missionbtn: () => tutorialDone(),
   branchbtn: () => tutorialDone() && (state.step >= 10 || state.branches.length > 1),
   stylebtn: () => tutorialDone() && state.step >= 2,
+  citybtn: () => tutorialDone() && builtPlots() >= 1,
 };
 function updateDock(initial = false) {
   for (const [id, visible] of Object.entries(DOCK)) {
@@ -10623,7 +10633,7 @@ function startMusic() {
 function setSound(on) {
   soundOn = on;
   if (master) master.gain.value = on ? 1 : 0;
-  document.getElementById('soundbtn').textContent = on ? '🔊' : '🔇';
+  document.getElementById('soundbtn').textContent = on ? '🔊 เสียง: เปิด' : '🔇 เสียง: ปิด';
   try {
     localStorage.setItem('drquest-sound', on ? 'on' : 'off');
   } catch {
@@ -10972,8 +10982,23 @@ document.getElementById('loading').style.display = 'none';
 requestAnimationFrame(frame);
 // Probe storage up front so a browser that can't keep saves is flagged right away
 save();
+setTimeout(() => logProgress('open'), 0); // after the cloud settings below are defined
+// Panels open as bottom sheets; tapping the dimmed backdrop closes them like their own close button
+const SHEETS = { missions: 'mclose', upgrades: 'upclose', branches: 'bclose', style: 'styleclose', board: 'boardclose', menu: 'resume', military: null, quiz: null, share: null, storypanel: null, cityhub: null };
+for (const [id, closeId] of Object.entries(SHEETS)) {
+  const el = document.getElementById(id);
+  if (!el) continue;
+  el.classList.add('sheet');
+  el.addEventListener('click', (e) => {
+    if (e.target !== el) return;
+    const btn = closeId ? document.getElementById(closeId) : [...el.querySelectorAll('.btn.ghost')].pop();
+    if (btn) btn.click();
+    else el.style.display = 'none';
+  });
+}
 
 function start() {
+  logProgress('start');
   const nameIn = document.getElementById('startname');
   const name = nameIn.value.trim().slice(0, 20);
   if (name && name !== cloud.nickname) {
@@ -11373,12 +11398,13 @@ document.addEventListener('visibilitychange', () => {
 const autoBtn = document.getElementById('autobtn');
 const autoBadge = document.getElementById('autobadge');
 autoBtn.addEventListener('click', () => setAuto(!auto.on));
-for (const b of document.querySelectorAll('#uptabs button')) {
+for (const b of document.querySelectorAll('#uptabs button[data-tab]')) {
   b.addEventListener('click', () => {
     upTab = b.dataset.tab;
     renderUpgrades();
   });
 }
+document.getElementById('stylebtn').addEventListener('click', () => { upPanel.style.display = 'none'; });
 document.getElementById('sharebtn').addEventListener('click', shareHospital);
 document.getElementById('menushare').addEventListener('click', () => {
   menu.style.display = 'none';

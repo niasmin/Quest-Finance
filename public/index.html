@@ -157,6 +157,7 @@
   .lifecard { background: #fff; border-radius: 16px; padding: 12px; text-align: center; font-size: 14px; }
   .lifecard .big { font-size: 48px; }
   .lifecard .logrow { text-align: left; font-size: 12.5px; color: #3a4256; border-top: 1px solid #eef1f6; padding: 4px 0; }
+
   @keyframes popin { 0% { transform: scale(.2); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
 
   /* Tutorial card */
@@ -344,6 +345,29 @@
   #military .sub { text-align: center; color: #3a4520; font-size: 13px; margin: 0 0 8px; }
   #military .btn.ghost { display: block; margin: 12px auto 0; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
+
+  /* ---- UI cleanup: compact HUD, one bottom message, toasts from the top, bottom-sheet panels ---- */
+  #substats { display: flex; gap: 5px; flex-wrap: wrap; max-width: 72vw; }
+  #substats .pill { font-size: 13.5px; padding: 4px 10px; }
+  #substats #clock { font-size: 12.5px; }
+  #saved:not(.bad) { display: none !important; }
+  #hudicons { max-width: none; flex-wrap: nowrap; }
+  #autobadge { display: none !important; }
+  #goal { font-size: 13px; padding: 5px 12px; opacity: .92; bottom: calc(84px + env(safe-area-inset-bottom)); }
+  #goal.none { display: none !important; }
+  #uptabs { flex-wrap: wrap; }
+  #uptabs #stylebtn.locked { display: none; }
+  #toast { top: calc(8px + env(safe-area-inset-top)); width: min(360px, 92vw); box-sizing: border-box; transform: translate(-50%, -140%); transition: transform .35s cubic-bezier(.2, .9, .3, 1.2), opacity .25s; z-index: 15; }
+  #toast.show { transform: translate(-50%, 0); }
+  #toast { font-size: 13.5px !important; line-height: 1.4 !important; padding: 8px 14px !important; }
+  #start .startcard #startbtn { order: -1; font-size: 22px; padding: 14px 44px; }
+  #startname { font-size: 15px; padding: 8px 12px; border-width: 2px; background: rgba(255,255,255,.92); }
+  .sheet { align-items: flex-end !important; }
+  .sheet > .box { width: min(480px, 100vw) !important; max-height: 84dvh !important; border-radius: 24px 24px 0 0 !important; border: none !important; background: #fff !important;
+    padding: 22px 16px calc(16px + env(safe-area-inset-bottom)) !important; box-sizing: border-box; box-shadow: 0 -10px 30px rgba(0,0,0,.25); animation: sheetup .28s cubic-bezier(.2, .9, .3, 1); position: relative; }
+  .sheet > .box::before { content: ''; position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 44px; height: 5px; border-radius: 3px; background: #d6dbe6; }
+  .sheet > .box h3 { margin-top: 2px; }
+  @keyframes sheetup { from { transform: translateY(60%); opacity: .4; } to { transform: none; opacity: 1; } }
 </style>
 </head>
 <body>
@@ -353,14 +377,12 @@
 <div id="hud">
   <div id="left">
     <div id="money" class="pill"><span class="ico">💵</span><span id="moneyval">0</span></div>
-    <div id="bag" class="pill">🎒 0/10</div>
-    <div id="rating" class="pill">⭐ 3.0</div>
+    <div id="substats"><div id="bag" class="pill">🎒 0/10</div><div id="rating" class="pill">⭐ 3.0</div><div id="clock" class="pill"></div></div>
     <div id="quest" class="pill"></div>
-    <div id="clock" class="pill"></div>
     <div id="saved" class="pill"></div>
   </div>
   <div id="right">
-    <div id="hudicons"><button id="citybtn" class="hudbtn" aria-label="เมือง" style="display:none">🏙️</button><button id="speedbtn" class="hudbtn wide" aria-label="ความเร็ว" style="display:none">⏩1×</button><button id="zoombtn" class="hudbtn" aria-label="ซูม">🔍</button><button id="soundbtn" class="hudbtn" aria-label="เสียง">🔊</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
+    <div id="hudicons"><button id="speedbtn" class="hudbtn wide" aria-label="ความเร็ว" style="display:none">⏩1×</button><button id="zoombtn" class="hudbtn" aria-label="ซูม">🔍</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
     <button id="homebtn" class="evbtn ready" style="display:none">🏥 กลับ รพ.</button>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
     <div id="evchips"></div>
@@ -381,7 +403,7 @@
   <button id="upbtn" class="dockbtn locked"><span class="di">⬆️</span><span class="dl">อัปเกรด</span></button>
   <button id="missionbtn" class="dockbtn locked"><span class="di">📋</span><span class="dl">ภารกิจ</span></button>
   <button id="branchbtn" class="dockbtn locked"><span class="di">🌏</span><span class="dl">อาณาจักร</span></button>
-  <button id="stylebtn" class="dockbtn locked"><span class="di">🎨</span><span class="dl">ตกแต่ง</span></button>
+  <button id="citybtn" class="dockbtn locked"><span class="di">🏙️</span><span class="dl">เมือง</span></button>
   <button id="leaderbtn" class="dockbtn"><span class="di">🏆</span><span class="dl">อันดับ</span></button>
 </nav>
 <div id="tut"><div id="tutstep"></div><div id="tuttext"></div></div>
@@ -391,7 +413,7 @@
 <div id="board"><div class="box"><h3>🏆 อันดับผู้เล่น</h3><div id="boardtabs"><button data-tab="all">🏆 รวม</button><button data-tab="daily">📅 วันนี้</button><button data-tab="room">👥 ห้องเพื่อน</button></div><p id="boardsub"></p><div id="boardlist"></div><button id="sharebtn" class="btn">📸 แชร์โรงพยาบาลของฉัน</button><button id="boardname" class="btn ghost">✏️ เปลี่ยนชื่อ</button><button id="boardclose" class="btn ghost">ปิด</button></div></div>
 <div id="branches"><div class="box"><h3 id="emtitle">🌏 อาณาจักร</h3><div id="emtabs"></div><div id="blist"></div><div id="empage"></div><button id="bclose" class="btn ghost">ปิด</button></div></div>
 <div id="missions"><div class="box"><h3>📋 ภารกิจวันนี้</h3><p class="sub">ภารกิจใหม่ทุกวัน</p><div id="mlist"></div><button id="mclose" class="btn ghost">ปิด</button></div></div>
-<div id="upgrades"><div class="box"><h3>⬆️ อัปเกรดโรงพยาบาล</h3><div id="uptabs"><button data-tab="up">⬆️ อัปเกรด</button><button data-tab="cards">🃏 การ์ดหมอ</button><button data-tab="research">🧪 วิจัย</button></div><div id="uplist"></div><button id="upclose" class="btn ghost">ปิด</button></div></div>
+<div id="upgrades"><div class="box"><h3>⬆️ อัปเกรดโรงพยาบาล</h3><div id="uptabs"><button data-tab="up">⬆️ อัปเกรด</button><button data-tab="cards">🃏 การ์ดหมอ</button><button data-tab="research">🧪 วิจัย</button><button id="stylebtn" class="locked">🎨 ตกแต่ง</button></div><div id="uplist"></div><button id="upclose" class="btn ghost">ปิด</button></div></div>
 <div id="style"><div class="box"><h3>🎨 ตกแต่งโรงพยาบาล</h3><p id="comfort" class="sub"></p>
   <div id="styletabs"><button data-tab="decor">🪴 ของตกแต่ง</button><button data-tab="outfit">👕 ชุดหมอ</button></div>
   <div id="stylelist"></div><button id="styleclose" class="btn ghost">ปิด</button></div></div>
@@ -405,8 +427,8 @@
     <span>🏥 โรงพยาบาล 5 ชั้น</span><span>🏙️ เมืองหมอ</span><span>🏫 วิทยาเขต</span><span>🎖️ ค่ายทหาร</span><span>🌏 แผนที่โลก</span><span>🤖 AUTO เล่นให้</span>
   </div>
   <div class="startcard">
-    <input id="startname" maxlength="20" placeholder="✏️ ชื่อหมอของคุณ" autocomplete="nickname">
     <button id="startbtn" class="btn">▶ เริ่มเล่น</button>
+    <input id="startname" maxlength="20" placeholder="✏️ ตั้งชื่อหมอ (ไม่บังคับ)" autocomplete="nickname">
   </div>
   <p class="foot">เล่นฟรีบนเว็บและมือถือ · เซฟบนคลาวด์อัตโนมัติ</p>
 </div>
@@ -415,6 +437,7 @@
   <div class="box">
     <h3>⚙️ เมนู</h3>
     <button id="resume" class="btn ghost">เล่นต่อ</button>
+    <button id="soundbtn" class="btn ghost">🔊 เสียง: เปิด</button>
     <button id="litebtn" class="btn ghost">⚡ โหมดประหยัด: ปิด</button>
     <button id="menushare" class="btn ghost">📸 แชร์โรงพยาบาลของฉัน</button>
     <button id="daynightbtn" class="btn ghost">🌗 กลางวัน-กลางคืนตามเวลาจริง: เปิด</button>
