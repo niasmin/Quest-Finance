@@ -426,6 +426,7 @@ function buildWorld() {
   sign.position.set(0, 9.4, -12.2);
   scene.add(sign);
   addCollider(0, -13.4, 22, 3);
+  hospitalFacade();
 
   // Road with dashes
   const road = new THREE.Mesh(new THREE.PlaneGeometry(160, 3.4), mat(0x55606e));
@@ -3942,6 +3943,7 @@ function buildParking(animate) {
   const roof = box(1.5, 0.15, 1.5, 0xe5484d);
   roof.position.set(-0.6, 1.68, 21.6);
   g.add(p, post, booth, roof);
+  parkingDetails(g);
   addCollider(-0.6, 21.6, 1.2, 1.2);
   scene.add(g);
   OUT.parkingCash = new MoneyPile(v(0.9, 20.6));
@@ -4979,6 +4981,14 @@ function districtRoad(x) {
   road.position.set(x, 0.021, -4.5);
   road.receiveShadow = true;
   g.add(road);
+  for (const dx of [-1.75, 1.75]) {
+    const walk = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 40), mat(0xd9d4c7));
+    walk.rotation.x = -Math.PI / 2;
+    walk.position.set(x + dx, 0.019, -4.5);
+    walk.receiveShadow = true;
+    g.add(walk);
+  }
+  for (let z = -22; z < 13; z += 7) g.add(at3(lampModel(), x + 1.75, 0, z));
   for (let z = -23; z < 15; z += 3) {
     const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 1.3), mat(0xffffff));
     dash.rotation.x = -Math.PI / 2;
@@ -4996,11 +5006,15 @@ function addDistrictLots(animate = false) {
   }
   for (let i = district.plots.length; i < n; i++) {
     const at = DISTRICT_PLOTS[i];
-    const lot = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 5.2), mat(0xc8b48a));
+    const lot = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 5.2), mat(0x8fcf6c));
     lot.rotation.x = -Math.PI / 2;
     lot.position.set(at.x, 0.015, at.z);
     lot.receiveShadow = true;
     scene.add(lot);
+    const apron = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 2.4), mat(0xe8e2d4));
+    apron.rotation.x = -Math.PI / 2;
+    apron.position.set(at.x + (at.x > roadOf(at.x) ? -2.0 : 2.0), 0.018, at.z);
+    scene.add(apron);
     scene.add(zoneRing(plotZone(at), 0x3d8bfd));
     district.plots[i] = { at, lot, group: null, sign: null, key: '', collider: null };
     if (animate) popIn(lot);
@@ -5715,7 +5729,7 @@ function buildUpperRoom(r, animate) {
   g.add(rug);
   const model = upperModel(r);
   model.position.set(r.bed.x, 0, r.bed.z);
-  g.add(model);
+  g.add(model, upperDecor(r));
   addCollider(r.bed.x, r.bed.z, 1.1, 2.2, r.floor);
   r.icon3d = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTexture((c) => {
     c.font = '72px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(r.icon, 64, 68);
@@ -7911,6 +7925,7 @@ function baseGround() {
   link.rotation.x = -Math.PI / 2;
   link.position.set(20, 0.021, -27.5);
   scene.add(link);
+  baseProps();
 }
 function buildingBox(x, z, w, h, d, wall, roof) {
   const g = new THREE.Group();
@@ -7919,11 +7934,10 @@ function buildingBox(x, z, w, h, d, wall, roof) {
   const r = box(w + 0.3, 0.25, d + 0.3, roof);
   r.position.y = h + 0.12;
   g.add(b, r);
-  for (let i = 0; i < Math.floor(w / 1.6); i++) {
-    const win = box(0.6, 0.5, 0.05, 0x7fc8f8, { shadow: false });
-    win.position.set(-w / 2 + 0.9 + i * 1.6, h * 0.6, d / 2 + 0.03);
-    g.add(win);
-  }
+  windows(b, w, h, d, -h / 2 + Math.max(0, h * 0.5 - 1.2), Math.max(1, Math.round(h / 2.4)), 0x9fd8ff, 0xd7ccc8);
+  g.add(at3(box(1.2, 1.6, 0.06, 0x5d4037, { shadow: false }), 0, 0.8, d / 2 + 0.04), at3(box(1.6, 0.12, 0.8, roof), 0, 1.8, d / 2 + 0.4));
+  g.add(at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, d / 2 + 0.2), at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, -d / 2 - 0.2));
+  roofDetails(g, 0, w, d, h + 0.25, 0);
   g.position.set(x, 0, z);
   scene.add(g);
   addCollider(x, z, w, d);
@@ -7937,6 +7951,16 @@ function hangar(x, z, w, d, color) {
   shell.position.y = 0;
   shell.castShadow = true;
   g.add(shell);
+  // Ribs along the arch and a striped door across the front
+  for (let i = -2; i <= 2; i++) {
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(w / 2 + 0.02, 0.06, 6, 20, Math.PI), mat(0x607d8b));
+    rib.position.z = (i * d) / 5;
+    g.add(rib);
+  }
+  const door = new THREE.Mesh(new THREE.CircleGeometry(w / 2 - 0.1, 20, 0, Math.PI), mat(0x546e7a));
+  door.position.z = d / 2 + 0.01;
+  g.add(door);
+  for (let i = 0; i < 4; i++) g.add(at3(box(w * 0.8, 0.12, 0.03, i % 2 ? 0xffd166 : 0x263238, { shadow: false }), 0, 0.3 + i * 0.22, d / 2 + 0.03));
   g.position.set(x, 0, z);
   scene.add(g);
   addCollider(x, z, w, d);
@@ -9225,6 +9249,383 @@ function updateCityLife(dt) {
   tickCitizens();
   tickTourism(dt);
   updateTraffic(dt);
+}
+
+// ---------- detail pass: city buildings, base props, upstairs furniture, parking and the hospital front ----------
+
+// --- the city district: each building type looks like what it is, and grows with its level ---
+// Footprint stays within about ±2.1 × ±2 of the plot centre; the front (+z) turns to face the road.
+const pal = (list, i) => list[i % list.length];
+const NEW_CITY = {
+  homes(l) {
+    const g = new THREE.Group();
+    if (l >= 3) {
+      // A small apartment block with balconies
+      const blk = box(3.6, 4.2, 2.4, 0xf3e5d8);
+      blk.position.set(0, 2.1, -0.6);
+      g.add(blk, at3(box(3.8, 0.2, 2.6, 0xb5651d), 0, 4.3, -0.6));
+      windows(blk, 3.6, 4, 2.4, -2.0, 3, 0x9fd8ff, 0xffffff);
+      for (let f = 0; f < 2; f++) {
+        g.add(at3(box(3.0, 0.08, 0.6, 0xffffff), 0, 1.5 + f * 1.35, 0.9), at3(box(3.0, 0.4, 0.04, 0xffffff, { shadow: false }), 0, 1.72 + f * 1.35, 1.18));
+      }
+      g.add(at3(box(0.8, 1.2, 0.06, 0x8d6e63, { shadow: false }), 0, 0.6, 0.62));
+      roofDetails(g, 0, 3.6, 2.4, 4.4, 1);
+    } else {
+      const spots = l === 1 ? [[0, -0.4]] : [[-1.1, -0.5], [1.15, -0.2]];
+      spots.forEach(([x, z], k) => {
+        const h = new THREE.Group();
+        const w = l === 1 ? 2.6 : 1.9;
+        const wall = pal([0xfff3c4, 0xffd6d6, 0xd6ecff, 0xd8f3dc], x > 0 ? 1 : 0 + k);
+        const body = box(w, 1.5, 1.9, wall);
+        body.position.y = 0.75;
+        h.add(body, at3(hipRoof(w, 1.9, 1.0, pal([0xc0392b, 0x2874a6, 0x7d3c98, 0x1e8449], k + l)), 0, 1.5 + 0.5, 0));
+        h.add(at3(box(0.5, 0.9, 0.05, 0x8d6e63, { shadow: false }), w * 0.2, 0.45, 0.96));
+        for (const wx of [-w * 0.25, w * 0.42]) h.add(at3(box(0.45, 0.4, 0.05, 0x9fd8ff, { shadow: false }), wx, 0.95, 0.96));
+        h.position.set(x, 0, z);
+        g.add(h);
+      });
+      // Picket fence and a garden tree
+      for (let i = 0; i < 9; i++) g.add(at3(box(0.08, 0.45, 0.06, 0xffffff, { shadow: false }), -2 + i * 0.5, 0.22, 1.55));
+      g.add(at3(box(4.1, 0.05, 0.05, 0xffffff, { shadow: false }), 0, 0.36, 1.55));
+      const t = treeModel(l === 1 ? 'round' : 'sakura');
+      t.scale.setScalar(0.75);
+      g.add(at3(t, l === 1 ? 1.7 : 0, 0, l === 1 ? -1.4 : 0.9));
+    }
+    return g;
+  },
+  school(l) {
+    const g = new THREE.Group();
+    const h = 1.6 + l * 0.8;
+    const body = box(3.8, h, 1.8, 0xfff0c8);
+    body.position.set(0, h / 2, -0.9);
+    g.add(body, at3(box(4.0, 0.22, 2.0, 0xc0392b), 0, h + 0.11, -0.9));
+    windows(body, 3.8, h - 0.4, 1.8, -h / 2 + 0.1, l + 1, 0x9fd8ff, 0xffffff);
+    const clock = cylM(0.32, 0.32, 0.06, 0xffffff, 18);
+    clock.rotation.x = Math.PI / 2;
+    g.add(at3(clock, 0, h - 0.4, 0.02), at3(box(0.04, 0.22, 0.02, 0x222222, { shadow: false }), 0, h - 0.33, 0.06));
+    g.add(at3(signBoard('🏫 โรงเรียนแพทย์', '#c0392b', 2.2, 0.4), 0, h + 0.5, -0.9));
+    // A sports field with goals out front
+    const field = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.6), mat(0x66bb6a));
+    field.rotation.x = -Math.PI / 2;
+    g.add(at3(field, 0, 0.02, 1.0), at3(box(3.4, 0.01, 0.05, 0xffffff, { shadow: false }), 0, 0.03, 1.0));
+    for (const x of [-1.7, 1.7]) g.add(at3(box(0.05, 0.6, 0.7, 0xffffff, { shadow: false }), x, 0.3, 1.0));
+    g.add(at3(cylM(0.04, 0.04, 3, 0xdfe6ee, 6), 2.1, 1.5, -0.1), at3(box(0.7, 0.42, 0.02, 0x3d8bfd, { shadow: false }), 2.45, 2.7, -0.1));
+    return g;
+  },
+  factory(l) {
+    const g = new THREE.Group();
+    const body = box(3.6, 1.8, 2.4, 0xc5ccd3);
+    body.position.set(-0.2, 0.9, -0.6);
+    g.add(body);
+    for (let i = 0; i < 3; i++) {
+      const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.7, 0.7, 3), mat(i % 2 ? 0x90a4ae : 0x78909c));
+      saw.rotation.z = Math.PI / 2;
+      saw.rotation.y = Math.PI / 2;
+      saw.castShadow = true;
+      g.add(at3(saw, -1.4 + i * 1.2, 2.05, -0.6));
+      g.add(at3(box(1.0, 0.5, 0.04, 0x9fd8ff, { shadow: false }), -1.4 + i * 1.2, 2.05, -0.25));
+    }
+    g.add(at3(box(1.4, 1.1, 0.06, 0x546e7a, { shadow: false }), 0.6, 0.55, 0.62));
+    for (let k = 0; k < l; k++) {
+      const stack = cylM(0.2, 0.26, 2.6 + k * 0.5, 0xe5484d, 10);
+      g.add(at3(stack, 1.8, 1.3 + k * 0.25, -1.4 + k * 0.7));
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), surface({ color: 0xffffff, transparent: true, opacity: 0.7 }));
+      const by = 2.8 + k * 0.5;
+      puff.position.set(1.8, by, -1.4 + k * 0.7);
+      decorAnims.push((t) => {
+        const f = (t * 0.6 + k * 0.3) % 1;
+        puff.position.y = by + f * 0.9;
+        puff.material.opacity = 0.7 * (1 - f);
+      });
+      g.add(puff);
+    }
+    // Storage tanks and a delivery truck
+    for (const z of [0.9, 1.6].slice(0, l >= 2 ? 2 : 1)) g.add(at3(cylM(0.35, 0.35, 0.9, 0xeceff1, 12), -1.6, 0.45, z));
+    const truck = vanCar();
+    truck.rotation.y = Math.PI / 2;
+    g.add(at3(truck, 0.6, 0, 1.4));
+    g.add(at3(signBoard('🏭 โรงงานยา', '#455a64', 1.8, 0.38), -0.2, 1.4, 0.62));
+    return g;
+  },
+  bank(l) {
+    const g = new THREE.Group();
+    const h = 1.7 + l * 0.6;
+    const body = box(3.2, h, 2.0, 0xf5f2ea);
+    body.position.set(0, h / 2 + 0.3, -0.8);
+    g.add(body, at3(box(3.6, 0.3, 2.6, 0xd7ccc8), 0, 0.15, -0.5));
+    for (let s = 0; s < 3; s++) g.add(at3(box(2.4 - s * 0.2, 0.1, 0.3, 0xe0d8cc), 0, 0.05 + s * 0.1, 1.05 - s * 0.3));
+    for (let i = 0; i < 4; i++) g.add(at3(cylM(0.13, 0.15, h, 0xffffff, 12), -1.2 + i * 0.8, h / 2 + 0.3, 0.35));
+    const pedi = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 2.0, 0.7, 3), mat(0xece6da));
+    pedi.rotation.set(0, 0, 0);
+    pedi.scale.set(1, 1, 0.5);
+    pedi.rotation.y = Math.PI / 2;
+    g.add(at3(box(3.4, 0.2, 1.4, 0xece6da), 0, h + 0.4, -0.15), at3(pedi, 0, h + 0.85, 0.2));
+    const coin = cylM(0.4, 0.4, 0.08, 0xffd166, 20);
+    coin.rotation.x = Math.PI / 2;
+    decorAnims.push((t) => { coin.rotation.z = t * 2; });
+    g.add(at3(coin, 0, h + 1.7, -0.3), at3(signBoard('🏦 ธนาคาร', '#8d6e63', 1.6, 0.36), 0, h + 0.15, 0.6));
+    g.add(at3(box(0.5, 0.8, 0.3, 0x455a64), 1.85, 0.4, 0.4), at3(box(0.36, 0.22, 0.02, 0x40c4ff, { shadow: false }), 1.85, 0.62, 0.56));
+    return g;
+  },
+  market(l) {
+    const g = new THREE.Group();
+    // A covered market hall with stalls under it
+    const roof = thaiRoof(4.0, 2.4, 0.9, 0xd35400);
+    g.add(at3(roof, 0, 2.2, -0.6));
+    for (const [x, z] of [[-1.85, -1.7], [1.85, -1.7], [-1.85, 0.5], [1.85, 0.5]]) g.add(at3(box(0.14, 2.2, 0.14, 0x8d6e63), x, 1.1, z));
+    const colors = [0xe5484d, 0x3d8bfd, 0xffd166, 0x2e9e4f, 0x9b5de5, 0xff8fab];
+    for (let k = 0; k < 1 + l; k++) {
+      const x = -1.35 + (k % 4) * 0.9;
+      g.add(at3(box(0.8, 0.6, 0.6, 0xa0703c), x, 0.3, -0.6));
+      for (let f = 0; f < 4; f++) {
+        const fr = new THREE.Mesh(new THREE.SphereGeometry(0.08, 7, 5), mat(pick([0xff924c, 0xe5484d, 0x8ac926, 0xffd166, 0xc77dff])));
+        g.add(at3(fr, x - 0.27 + f * 0.18, 0.67, -0.6));
+      }
+    }
+    // Umbrella stalls out front
+    for (let k = 0; k < Math.min(3, l + 1); k++) {
+      const x = -1.4 + k * 1.4;
+      const top = new THREE.Mesh(new THREE.ConeGeometry(0.62, 0.35, 8), mat(colors[k]));
+      g.add(at3(top, x, 1.55, 1.25), at3(cylM(0.03, 0.03, 1.4, 0xffffff, 6), x, 0.7, 1.25), at3(box(0.7, 0.45, 0.45, 0xbcaaa4), x, 0.22, 1.25));
+    }
+    g.add(at3(signBoard('🏪 ตลาด', '#d35400', 1.4, 0.36), 0, 2.05, 0.55));
+    return g;
+  },
+  garden(l) {
+    const g = new THREE.Group();
+    const lawn = new THREE.Mesh(new THREE.CircleGeometry(2.3, 24), mat(0x8fd16b));
+    lawn.rotation.x = -Math.PI / 2;
+    g.add(at3(lawn, 0, 0.03, 0));
+    const path = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.55, 24), mat(0xe8dcc8));
+    path.rotation.x = -Math.PI / 2;
+    g.add(at3(path, 0, 0.04, 0));
+    for (let k = 0; k < 2 + l; k++) {
+      const a = (k / (2 + l)) * Math.PI * 2 + 0.4;
+      const t = treeModel(k % 3 === 0 ? 'sakura' : k % 3 === 1 ? 'round' : 'cone');
+      t.scale.setScalar(0.7);
+      g.add(at3(t, Math.cos(a) * 1.95, 0, Math.sin(a) * 1.95));
+    }
+    if (l >= 2) g.add(campusProp('fountain'));
+    else g.add(at3(campusProp('flowers'), 0, 0, 0));
+    if (l >= 3) {
+      const sala = campusProp('sala');
+      sala.scale.setScalar(0.6);
+      g.add(at3(sala, 0, 0, -1.4));
+    }
+    const b = benchModel();
+    g.add(at3(b, 0, 0, 1.4));
+    g.add(at3(lampModel(), 1.6, 0, 1.2));
+    return g;
+  },
+};
+Object.assign(CITY_MODELS, NEW_CITY);
+
+// --- military base: props that make it read as a real camp ---
+function sandbags(n) {
+  const g = new THREE.Group();
+  for (let i = 0; i < n; i++) for (let r = 0; r < 2; r++) {
+    const b = box(0.55, 0.26, 0.32, r ? 0xc2a878 : 0xb39a6b);
+    b.position.set(-((n - 1) * 0.5) / 2 + i * 0.5 + (r ? 0.25 : 0), 0.13 + r * 0.26, 0);
+    g.add(b);
+  }
+  return g;
+}
+function watchtower() {
+  const g = new THREE.Group();
+  for (const [x, z] of [[-0.6, -0.6], [0.6, -0.6], [-0.6, 0.6], [0.6, 0.6]]) g.add(at3(box(0.12, 3.2, 0.12, 0x6d4c41), x, 1.6, z));
+  g.add(at3(box(1.6, 0.12, 1.6, 0x8d6e63), 0, 3.2, 0), at3(box(1.6, 0.6, 0.08, 0x6b7a3a), 0, 3.55, 0.78), at3(box(1.6, 0.6, 0.08, 0x6b7a3a), 0, 3.55, -0.78));
+  g.add(at3(box(1.9, 0.12, 1.9, 0x3a4520), 0, 4.4, 0));
+  for (const [x, z] of [[-0.75, -0.75], [0.75, -0.75], [-0.75, 0.75], [0.75, 0.75]]) g.add(at3(box(0.08, 0.9, 0.08, 0x6d4c41), x, 3.9, z));
+  return g;
+}
+function tent(color = 0x6b7a3a) {
+  const g = new THREE.Group();
+  const t = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1.3, 4), mat(color));
+  t.rotation.y = Math.PI / 4;
+  t.scale.set(1, 1, 0.75);
+  t.castShadow = true;
+  g.add(at3(t, 0, 0.65, 0), at3(box(0.5, 0.7, 0.04, 0x3a4520, { shadow: false }), 0, 0.35, 0.62));
+  return g;
+}
+function baseProps() {
+  const g = new THREE.Group();
+  // Watchtowers at the fence corners, sandbag posts by the gate
+  for (const x of [-11, 47]) g.add(at3(watchtower(), x, 0, -30.4));
+  for (const x of [16.2, 23.8]) g.add(at3(sandbags(4), x, 0, -30.6));
+  // Fuel drums, crates and camo nets dotted around the yard
+  const drums = [[44, -36], [44.7, -36.4], [44.3, -35.3], [-9, -47], [-8.4, -47.5], [46, -62]];
+  for (const [x, z] of drums) g.add(at3(cylM(0.28, 0.28, 0.8, pick([0x556b2f, 0x2e4a1f, 0x8b0000]), 12), x, 0.4, z));
+  const crates = [[45.5, -44.5], [46.2, -44.5], [45.8, -44.5, 0.6], [-10.5, -36], [-9.8, -36.4]];
+  for (const [x, z, y = 0] of crates) g.add(at3(box(0.6, 0.6, 0.6, 0x9c7a4a), x, 0.3 + y, z));
+  for (const [x, z] of [[-4, -33], [-1, -33]]) g.add(at3(tent(), x, 0, z));
+  // Parade-ground markings, a helipad by the HQ, and painted lane lines on the camp road
+  const lines = new THREE.Group();
+  for (let i = 0; i < 5; i++) lines.add(at3(box(8, 0.01, 0.08, 0xffffff, { shadow: false }), 41, 0.03, -44.8 + i * 1.6));
+  g.add(lines);
+  const pad = cylM(1.6, 1.6, 0.04, 0x37474f, 24);
+  g.add(at3(pad, 41, 0.03, -33.5));
+  const H = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, map: signTexture((c) => {
+    c.fillStyle = '#ffd166'; c.font = '700 96px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('H', 64, 70);
+  }) }));
+  H.rotation.x = -Math.PI / 2;
+  g.add(at3(H, 41, 0.06, -33.5));
+  for (let z = -44; z > -64; z -= 3) g.add(at3(box(0.12, 0.01, 1.2, 0xffd166, { shadow: false }), 20, 0.03, z));
+  // Shade trees along the inside of the fence
+  for (const x of [-6, 2, 34, 44]) {
+    const t = treeModel(x % 4 ? 'round' : 'cone');
+    g.add(at3(t, x, 0, -30.8));
+  }
+  scene.add(g);
+}
+
+// --- floors 3 and 4: furniture so each room reads as what it is ---
+// Keeps clear of the bed (x -3.5), the staff ring (x -5.6) and the queue line heading +x along the row.
+function upperDecor(r) {
+  const g = new THREE.Group();
+  const z0 = r.row;
+  const back = (o, x) => g.add(at3(o, x, 0, z0 - 2.1));
+  const front = (o, x) => g.add(at3(o, x, 0, z0 + 2.1));
+  const plant = () => {
+    const p = new THREE.Group();
+    p.add(at3(cylM(0.22, 0.18, 0.4, 0xd7ccc8, 10), 0, 0.2, 0), at3(new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 0), mat(0x43a047)), 0, 0.65, 0));
+    return p;
+  };
+  switch (r.id) {
+    case 'psych': {
+      const sofa = equipModel('sofa');
+      sofa.scale.setScalar(0.85);
+      back(sofa, -6.2);
+      const shelf = equipModel('rack');
+      shelf.scale.setScalar(0.8);
+      back(shelf, -1.4);
+      front(plant(), -7);
+      const chair = new THREE.Group();
+      chair.add(at3(box(0.7, 0.4, 0.7, 0x7e57c2), 0, 0.2, 0), at3(box(0.7, 0.6, 0.15, 0x5e35b1), 0, 0.6, -0.3));
+      front(chair, -4.4);
+      break;
+    }
+    case 'massage': {
+      for (const x of [-6.2, -1.4]) {
+        const bed = new THREE.Group();
+        bed.add(at3(box(1.8, 0.35, 0.8, 0xffffff), 0, 0.3, 0), at3(box(1.8, 0.1, 0.8, 0xffcc80), 0, 0.5, 0));
+        back(bed, x);
+      }
+      front(plant(), -7);
+      const incense = new THREE.Group();
+      incense.add(at3(cylM(0.2, 0.2, 0.15, 0x8d6e63, 10), 0, 0.5, 0), at3(box(0.5, 0.45, 0.5, 0xd7ccc8), 0, 0.22, 0));
+      front(incense, -4.4);
+      break;
+    }
+    case 'nutrition': {
+      const counter = new THREE.Group();
+      counter.add(at3(box(3, 0.9, 0.6, 0xffffff), 0, 0.45, 0), at3(box(3.05, 0.06, 0.65, 0x8ac926), 0, 0.92, 0));
+      for (let i = 0; i < 6; i++) counter.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.1, 7, 5), mat(pick([0xe5484d, 0xff924c, 0x8ac926, 0xffd166]))), -1.2 + i * 0.45, 1.03, 0));
+      back(counter, -5.2);
+      const fridge = box(0.8, 1.8, 0.6, 0xeceff1);
+      fridge.position.y = 0.9;
+      const f = new THREE.Group();
+      f.add(fridge, at3(box(0.04, 0.5, 0.04, 0x90a4ae, { shadow: false }), 0.3, 1.1, 0.31));
+      back(f, -1.4);
+      front(plant(), -7);
+      break;
+    }
+    case 'prenatal': {
+      const scan = equipModel('monitor');
+      back(scan, -6.6);
+      const chairs = equipModel('chairs');
+      chairs.scale.setScalar(0.8);
+      back(chairs, -1.6);
+      front(plant(), -7);
+      break;
+    }
+    case 'delivery': {
+      back(equipModel('monitor'), -6.6);
+      const warmer = new THREE.Group();
+      warmer.add(at3(box(0.7, 0.8, 0.5, 0xeceff1), 0, 0.4, 0), at3(box(0.6, 0.15, 0.45, 0x81d4fa), 0, 0.88, 0), at3(box(0.6, 0.06, 0.4, 0xffcc80, { shadow: false }), 0, 1.45, 0));
+      back(warmer, -1.6);
+      front(equipModel('cart'), -7);
+      break;
+    }
+    case 'nursery': {
+      for (const x of [-6.6, -5.2, -1.6]) {
+        const crib = new THREE.Group();
+        crib.add(at3(box(0.9, 0.08, 0.55, 0xffffff), 0, 0.6, 0));
+        for (const s of [-1, 1]) crib.add(at3(box(0.9, 0.35, 0.04, 0xf8bbd0), 0, 0.8, s * 0.27));
+        for (const [cx, cz] of [[-0.42, -0.25], [0.42, -0.25], [-0.42, 0.25], [0.42, 0.25]]) crib.add(at3(box(0.05, 0.6, 0.05, 0xffffff), cx, 0.3, cz));
+        crib.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), mat(0xffe0b2)), -0.25, 0.72, 0));
+        back(crib, x);
+      }
+      const toy = new THREE.Group();
+      toy.add(at3(box(0.3, 0.3, 0.3, 0xffd166), 0, 0.15, 0), at3(box(0.25, 0.25, 0.25, 0x4fc3f7), 0.35, 0.12, 0.1), at3(new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), mat(0xe5484d)), -0.3, 0.15, 0.1));
+      front(toy, -6.8);
+      break;
+    }
+  }
+  return g;
+}
+
+// --- the parking lot: kerbs, lamps, tree islands and arrows ---
+function parkingDetails(g) {
+  for (const x of [-1.4, 9.1]) g.add(at3(box(0.2, 0.15, 7.0, 0xdfe6ee), x, 0.075, 23.1));
+  g.add(at3(box(10.6, 0.15, 0.2, 0xdfe6ee), 3.85, 0.075, 26.6));
+  for (const x of [-0.9, 8.6]) g.add(at3(lampModel(), x, 0, 26.2));
+  for (const x of [2.2, 6.0]) {
+    const isl = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.8), mat(0x7ccf5a));
+    isl.rotation.x = -Math.PI / 2;
+    g.add(at3(isl, x, 0.04, 26.3));
+    const t = treeModel('round');
+    t.scale.setScalar(0.65);
+    g.add(at3(t, x, 0, 26.3));
+  }
+  for (const x of [1.2, 5.8]) {
+    const arrow = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, map: signTexture((c) => {
+      c.fillStyle = '#ffffff'; c.font = '700 90px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('➜', 64, 66);
+    }) }));
+    arrow.rotation.x = -Math.PI / 2;
+    g.add(at3(arrow, x, 0.04, 21.4));
+  }
+  // EV charger by the booth
+  g.add(at3(box(0.4, 1.1, 0.3, 0x2e9e4f), 8.6, 0.55, 21.0), at3(box(0.3, 0.2, 0.02, 0x69f0ae, { shadow: false }), 8.6, 0.85, 21.16));
+}
+
+// --- the hospital front: entrance canopy, big name sign, planters, flags and street furniture ---
+function hospitalFacade() {
+  const g = new THREE.Group();
+  // Canopy over the entrance and its two posts
+  g.add(at3(box(4.6, 0.22, 2.4, 0xffffff), 7.0, 2.9, 14.6), at3(box(4.7, 0.12, 2.5, 0xe5484d), 7.0, 3.06, 14.6));
+  for (const x of [5.0, 9.0]) g.add(at3(cylM(0.12, 0.12, 2.9, 0xdfe6ee, 10), x, 1.45, 15.6));
+  // Planters with shrubs along the front wall, flags by the path
+  for (let x = -8; x <= 3; x += 2.2) {
+    const p = new THREE.Group();
+    p.add(at3(box(1.4, 0.45, 0.6, 0xbdbdbd), 0, 0.22, 0));
+    for (let i = 0; i < 3; i++) p.add(at3(new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), mat(i % 2 ? 0x43a047 : 0x66bb6a)), -0.4 + i * 0.4, 0.6, 0));
+    g.add(at3(p, x, 0, 14.25));
+  }
+  for (const [x, col] of [[4.2, 0xe5484d], [10.0, 0x3d8bfd]]) {
+    g.add(at3(cylM(0.05, 0.05, 4, 0xdfe6ee, 8), x, 2, 15.2), at3(box(0.8, 0.5, 0.02, col, { shadow: false }), x + 0.42, 3.6, 15.2));
+  }
+  // The main block behind: frames round the windows, a name band and rooftop plant
+  for (let i = 0; i < 6; i++) {
+    for (let r = 0; r < 2; r++) g.add(at3(box(1.8, 0.12, 0.2, 0xdfe6ee), -8.5 + i * 3.4, 1.7 + r * 2.6, -11.8));
+  }
+  for (let i = 0; i < 7; i++) g.add(at3(box(0.3, 7, 0.2, 0xeceff1), -10.2 + i * 3.4, 3.5, -11.85));
+  g.add(at3(signBoard('Dr. Quest Hospital · โรงพยาบาลดร.เควสต์', '#e5484d', 8, 0.7), 0, 6.3, -11.78));
+  const top = new THREE.Group();
+  roofDetails(top, 0, 22, 3, 7.5, 0);
+  top.position.z = -13.4;
+  g.add(top);
+  // Sidewalk along the main road, lamps and trees
+  for (const z of [ROAD_Z - 2.1, ROAD_Z + 2.1]) {
+    const walk = new THREE.Mesh(new THREE.PlaneGeometry(124, 0.9), mat(0xd9d4c7));
+    walk.rotation.x = -Math.PI / 2;
+    walk.receiveShadow = true;
+    g.add(at3(walk, 0, 0.019, z));
+  }
+  for (let x = -56; x <= 56; x += 9) {
+    if (Math.abs(x - GATE.x) < 4 || Math.abs(x - DIST_ROAD_X) < 3 || Math.abs(x - CAMPUS_X) < 3 || Math.abs(x - DIST_ROAD2_X) < 3) continue;
+    g.add(at3(lampModel(), x, 0, ROAD_Z - 2.3));
+  }
+  scene.add(g);
 }
 
 // ---------- player actions ----------
