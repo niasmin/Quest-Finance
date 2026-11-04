@@ -237,6 +237,27 @@
   body.mapopen #hud, body.mapopen #dock, body.mapopen #goal, body.mapopen #hint, body.mapopen #autobadge, body.mapopen #liftpick, body.mapopen #toast { display: none !important; }
   .btn.emgo { display: block; width: 100%; margin-top: 8px; font-size: 17px; }
   #homebtn { display: none; }
+  /* Upgrades tabs, quiz, share, achievements */
+  #uptabs { display: flex; gap: 6px; margin-bottom: 6px; }
+  #uptabs button { flex: 1; border: none; border-radius: 12px; padding: 8px 4px; font: inherit; font-size: 14px; background: #eef0f5; color: #4b5a70; cursor: pointer; }
+  #uptabs button.on { background: #ffd166; color: #3b2400; font-weight: 600; }
+  .uprow.card.s5 { background: linear-gradient(90deg, #fff3c4, #fff); border-radius: 12px; }
+  .uprow.card.s4 { background: linear-gradient(90deg, #f3e8ff, #fff); border-radius: 12px; }
+  #quiz, #share { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 13; }
+  #quiz .box, #share .box { background: #fff; color: #1d2433; border-radius: 22px; padding: 18px; width: min(380px, 92vw); max-height: 90dvh; overflow-y: auto; text-align: center; }
+  #quiz h3, #share h3 { margin: 0 0 8px; }
+  .qtext { font-size: 17px; line-height: 1.55; margin: 6px 0 12px; }
+  .qtext small { color: #4b5a70; font-size: 14px; }
+  .qgain { color: #2e9e4f; }
+  #quiz .btn, #share .btn { display: block; width: 100%; margin-top: 8px; font-size: 16px; text-align: center; text-decoration: none; box-sizing: border-box; }
+  .qopt { text-align: left !important; }
+  .shareimg { width: 100%; border-radius: 14px; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+  #sharebtn { display: block; margin: 12px auto 0; font-size: 17px; }
+  .achhead { margin: 14px 0 6px; text-align: center; }
+  .achwall { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .ach { background: #eef0f5; border-radius: 12px; padding: 6px 2px; text-align: center; font-size: 22px; filter: grayscale(1); opacity: .45; line-height: 1.1; }
+  .ach small { display: block; font-size: 9px; color: #4b5a70; margin-top: 2px; }
+  .ach.got { filter: none; opacity: 1; background: #fff6d6; }
   #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
 </style>
 </head>
@@ -259,6 +280,8 @@
   </div>
 </div>
 <div id="toast"></div>
+<div id="quiz"><div class="box"></div></div>
+<div id="share"><div class="box"></div></div>
 <div id="mapview"><div id="mvtouch"></div><div id="mvlabels"></div><div class="mvtop"><b id="mvtitle"></b><button id="mvclose" class="btn ghost">✕ ปิด</button></div><div id="mvsheet"></div></div>
 <div id="liftpick"></div>
 <!-- Bottom dock: buttons appear as the features they open become useful -->
@@ -274,10 +297,10 @@
 <div id="goal" class="pill"></div>
 <div id="hint" class="pill">ลากนิ้วบนจอเพื่อเดิน</div>
 <div id="autobadge" class="pill">🤖 AUTO เล่นให้อยู่ · แตะจอเพื่อเล่นเอง</div>
-<div id="board"><div class="box"><h3>🏆 อันดับผู้เล่น</h3><div id="boardtabs"><button data-tab="all">🏆 รวม</button><button data-tab="daily">📅 วันนี้</button><button data-tab="room">👥 ห้องเพื่อน</button></div><p id="boardsub"></p><div id="boardlist"></div><button id="boardname" class="btn ghost">✏️ เปลี่ยนชื่อ</button><button id="boardclose" class="btn ghost">ปิด</button></div></div>
+<div id="board"><div class="box"><h3>🏆 อันดับผู้เล่น</h3><div id="boardtabs"><button data-tab="all">🏆 รวม</button><button data-tab="daily">📅 วันนี้</button><button data-tab="room">👥 ห้องเพื่อน</button></div><p id="boardsub"></p><div id="boardlist"></div><button id="sharebtn" class="btn">📸 แชร์โรงพยาบาลของฉัน</button><button id="boardname" class="btn ghost">✏️ เปลี่ยนชื่อ</button><button id="boardclose" class="btn ghost">ปิด</button></div></div>
 <div id="branches"><div class="box"><h3 id="emtitle">🌏 อาณาจักร</h3><div id="emtabs"></div><div id="blist"></div><div id="empage"></div><button id="bclose" class="btn ghost">ปิด</button></div></div>
 <div id="missions"><div class="box"><h3>📋 ภารกิจวันนี้</h3><p class="sub">ภารกิจใหม่ทุกวัน</p><div id="mlist"></div><button id="mclose" class="btn ghost">ปิด</button></div></div>
-<div id="upgrades"><div class="box"><h3>⬆️ อัปเกรดโรงพยาบาล</h3><div id="uplist"></div><button id="upclose" class="btn ghost">ปิด</button></div></div>
+<div id="upgrades"><div class="box"><h3>⬆️ อัปเกรดโรงพยาบาล</h3><div id="uptabs"><button data-tab="up">⬆️ อัปเกรด</button><button data-tab="cards">🃏 การ์ดหมอ</button><button data-tab="research">🧪 วิจัย</button></div><div id="uplist"></div><button id="upclose" class="btn ghost">ปิด</button></div></div>
 <div id="style"><div class="box"><h3>🎨 ตกแต่งโรงพยาบาล</h3><p id="comfort" class="sub"></p>
   <div id="styletabs"><button data-tab="decor">🪴 ของตกแต่ง</button><button data-tab="outfit">👕 ชุดหมอ</button></div>
   <div id="stylelist"></div><button id="styleclose" class="btn ghost">ปิด</button></div></div>
@@ -297,6 +320,8 @@
     <h3>⚙️ เมนู</h3>
     <button id="resume" class="btn ghost">เล่นต่อ</button>
     <button id="litebtn" class="btn ghost">⚡ โหมดประหยัด: ปิด</button>
+    <button id="menushare" class="btn ghost">📸 แชร์โรงพยาบาลของฉัน</button>
+    <button id="daynightbtn" class="btn ghost">🌗 กลางวัน-กลางคืนตามเวลาจริง: เปิด</button>
     <button id="savenow" class="btn ghost">💾 บันทึกตอนนี้</button>
     <p id="cloudstatus"></p>
     <button id="claimcode" class="btn ghost">📲 ใส่รหัสย้ายเครื่อง</button>
