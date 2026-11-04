@@ -7358,6 +7358,14 @@ function buildInterior(lot, k) {
   wall(INT_W / 2 + 0.15, 0, 0.3, INT_D);
   wall(-INT_W / 4 - 1, INT_D / 2 + 0.15, INT_W / 2 - 2, 0.3, 0.6);
   wall(INT_W / 4 + 1, INT_D / 2 + 0.15, INT_W / 2 - 2, 0.3, 0.6);
+  // Glass doors across the doorway: the only way out is the exit ring, never walking off into the dark
+  const glass = box(4, 1.6, 0.12, 0x9fd8ff, { shadow: false });
+  glass.material = glass.material.clone();
+  glass.material.transparent = true;
+  glass.material.opacity = 0.45;
+  glass.position.set(0, 0.8, INT_D / 2 + 0.15);
+  g.add(glass, at3(box(0.08, 1.6, 0.14, 0xb0bec5), 0, 0.8, INT_D / 2 + 0.15));
+  addCollider(o.x, o.z + INT_D / 2 + 0.15, 4, 0.3);
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.9), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(`${lot.icon} ${lot.name}`, '#0f766e'), side: THREE.DoubleSide }));
   sign.position.set(0, 2.9, -INT_D / 2);
   g.add(sign);
@@ -7642,7 +7650,22 @@ function updateInteriors(dt) {
     if (campus.owned.includes(lot.id) && CENTERS[lot.id] && !INT[lot.id]) buildInterior(lot, k);
   });
   // Player wandered out of an interior some other way (teleport home etc.)
-  if (inside && !inInterior(player.group.position)) inside = null;
+  const pp = player.group.position;
+  if (inside && !inInterior(pp)) inside = null;
+  // Somehow outside a room's walls in the dark around the interiors: back to that room's exit ring
+  if (inInterior(pp) && player.floor === 0) {
+    const it = (inside && INT[inside]) || Object.values(INT).sort((a, b) => flatDist(pp, a.exit) - flatDist(pp, b.exit))[0];
+    if (!it) {
+      inside = null;
+      pp.copy(PLAYER_START);
+      updateCamera(0, true);
+    } else if (Math.abs(pp.x - it.o.x) > INT_W / 2 + 0.5 || Math.abs(pp.z - it.o.z) > INT_D / 2 + 0.6) {
+      inside = it.lot.id;
+      pp.copy(it.exit).add(v(0, -1.2));
+      auto.task = null;
+      updateCamera(0, true);
+    }
+  }
   for (const it of Object.values(INT)) updateInterior(it, dt);
   updateDoors(dt);
 }
