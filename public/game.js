@@ -88,6 +88,19 @@ const UNLOCKS = [
   { id: 'paramedic', label: 'จ้างหน่วยกู้ชีพ', icon: '🧑‍🚒', price: 33000, at: v(6.2, -0.6), floor: 2 },
   { id: 'icunurse', label: 'จ้างพยาบาลไอซียู', icon: '👩‍⚕️', price: 36000, at: v(-5.2, 3.0), floor: 2 },
   { id: 'icubeds', label: 'เพิ่มเตียงไอซียู', icon: '🛏️', price: 40000, at: v(3.0, 8.6), floor: 2 },
+  // Floors 3 and 4: bought from the floor below, next to the lift
+  { id: 'floor3', label: 'ชั้น 3: ห้องจิตวิทยา', icon: '🧠', price: 45000, at: v(3.6, 3.4), floor: 1 },
+  { id: 'psychologist', label: 'จ้างนักจิตวิทยา', icon: '🧑‍⚕️', price: 50000, at: v(-5.6, -6), floor: 3 },
+  { id: 'massage', label: 'ห้องนวดแผนไทย', icon: '💆', price: 56000, at: v(-3.5, 1.5), floor: 3 },
+  { id: 'masseuse', label: 'จ้างหมอนวด', icon: '🧑‍⚕️', price: 62000, at: v(-5.6, 1.5), floor: 3 },
+  { id: 'nutrition', label: 'ห้องโภชนาการ', icon: '🥗', price: 70000, at: v(-3.5, 9), floor: 3 },
+  { id: 'nutritionist', label: 'จ้างนักโภชนาการ', icon: '🧑‍⚕️', price: 78000, at: v(-5.6, 9), floor: 3 },
+  { id: 'floor4', label: 'ชั้น 4: ห้องฝากครรภ์', icon: '🤰', price: 90000, at: v(6.6, 3.4), floor: 3 },
+  { id: 'obgyn', label: 'จ้างสูติแพทย์', icon: '🧑‍⚕️', price: 100000, at: v(-5.6, -6), floor: 4 },
+  { id: 'delivery', label: 'ห้องคลอด', icon: '👶', price: 115000, at: v(-3.5, 1.5), floor: 4 },
+  { id: 'midwife', label: 'จ้างพยาบาลผดุงครรภ์', icon: '👩‍⚕️', price: 130000, at: v(-5.6, 1.5), floor: 4 },
+  { id: 'nursery', label: 'ห้องเด็กแรกเกิด', icon: '🍼', price: 150000, at: v(-3.5, 9), floor: 4 },
+  { id: 'nurserynurse', label: 'จ้างพยาบาลเด็กแรกเกิด', icon: '👩‍⚕️', price: 170000, at: v(-5.6, 9), floor: 4 },
 ];
 
 // Waiting room: two rows of chairs at the quiet north end of the hallway, facing south
@@ -369,7 +382,7 @@ const themeOf = (i) => BRANCH_THEMES[(i || 0) % BRANCH_THEMES.length];
 function sceneryBlocked(x, z) {
   return (x > -10.5 && x < 10.5 && z > -15.5 && z < 14.7) || (z > ROAD_Z - 2.4 && z < ROAD_Z + 2.4)
     || (x > 8.8 && x < 19.5 && z > -12.5 && z < 2.5) || (x > -12 && x < 20 && z > 18.5 && z < 28.5)
-    || (x > -27.5 && x < -10.5 && z > -13 && z < 15.5); // the city district west of the hospital
+    || (x > -43.5 && x < -10.5 && z > -25 && z < 15.5); // the city district west of the hospital
 }
 const leafGeo = new THREE.IcosahedronGeometry(1, 0);
 const flatMat = (color) => new THREE.MeshLambertMaterial({ color, flatShading: true });
@@ -689,7 +702,10 @@ let trashLid = null;
 const inWing = (p) => p.x > WING.x0 - 0.1 && p.z > WING.z0 && p.z < WING.z1;
 const wingRow = (z) => (z < WING_BOUNDS[0] ? WING_ROWS.eye : z < WING_BOUNDS[1] ? WING_ROWS.physio : WING_ROWS.lab);
 function route(from, to) {
-  if (inDistrict(from) && !inDistrict(to)) return Math.abs(from.x - DIST_ROAD_X) > 0.6 ? v(DIST_ROAD_X, from.z) : v(DIST_ROAD_X, 14.6);
+  if (inDistrict(from) && !inDistrict(to)) {
+    const rx = roadOf(from.x);
+    return Math.abs(from.x - rx) > 0.6 ? v(rx, from.z) : v(rx, 14.6);
+  }
   const outside = (p) => p.z > FLOOR.z1;
   // Going in or out: pass through the gate in two steps so nobody walks into the south wall
   if (outside(to) !== outside(from)) {
@@ -2100,7 +2116,7 @@ function makeTile(u) {
     mat(0x2b2d42), mat(0x2b2d42), new THREE.MeshBasicMaterial({ map: tex }), mat(0x2b2d42), mat(0x2b2d42), mat(0x2b2d42),
   ]);
   // Floor-2 tiles live in the floor-2 group so they hide and show with it
-  const parent = u.floor === 2 ? F3.group : u.floor ? F2.group : scene;
+  const parent = floorGroup(u.floor || 0);
   mesh.position.set(u.at.x, 0.16, u.at.z);
   mesh.receiveShadow = true;
   parent.add(mesh);
@@ -2213,6 +2229,18 @@ function applyUnlock(id, animate) {
     case 'paramedic': hireParamedic(animate); break;
     case 'icunurse': hireIcuNurse(animate); break;
     case 'icubeds': addIcuBeds(2, animate); break;
+    case 'floor3': buildUpperFloor(3, animate); buildUpperRoom(UPPER_ROOMS.psych, animate); break;
+    case 'psychologist': hireUpperStaff(UPPER_ROOMS.psych, animate); break;
+    case 'massage': buildUpperRoom(UPPER_ROOMS.massage, animate); break;
+    case 'masseuse': hireUpperStaff(UPPER_ROOMS.massage, animate); break;
+    case 'nutrition': buildUpperRoom(UPPER_ROOMS.nutrition, animate); break;
+    case 'nutritionist': hireUpperStaff(UPPER_ROOMS.nutrition, animate); break;
+    case 'floor4': buildUpperFloor(4, animate); buildUpperRoom(UPPER_ROOMS.prenatal, animate); break;
+    case 'obgyn': hireUpperStaff(UPPER_ROOMS.prenatal, animate); break;
+    case 'delivery': buildUpperRoom(UPPER_ROOMS.delivery, animate); break;
+    case 'midwife': hireUpperStaff(UPPER_ROOMS.delivery, animate); break;
+    case 'nursery': buildUpperRoom(UPPER_ROOMS.nursery, animate); break;
+    case 'nurserynurse': hireUpperStaff(UPPER_ROOMS.nursery, animate); break;
     case 'waiting': buildWaitingRoom(animate); break;
     case 'elevator': buildElevator(animate); buildFloor2(animate); buildBasket(); break;
     case 'kitchen': buildKitchen(animate); break;
@@ -2364,8 +2392,9 @@ function updateElevator(dt) {
   lift.wait = near && lift.armed && still ? lift.wait + dt : 0;
   // With the roof built there are three stops: AUTO knows where it's going, a player picks
   const autoDriving = autoBadge.classList.contains('show');
-  showLiftPicker(F3.built && near && lift.armed && !autoDriving);
-  if (lift.wait > 0.5 && (!F3.built || autoDriving)) {
+  const manyStops = liftStops().length > 2;
+  showLiftPicker(manyStops && near && lift.armed && !autoDriving);
+  if (lift.wait > 0.5 && (!manyStops || autoDriving)) {
     const ride = auto.task?.at === ELEVATOR ? auto.task.ride : undefined;
     startRide(ride ?? (player.floor === 0 ? 1 : 0));
   }
@@ -2873,6 +2902,8 @@ function floor2Tasks() {
     tasks.push({ at: W.ivPickup, keep: () => stack.countOf('iv') < 3 && F2.ivPile.count > 0 });
   }
   if (roofNeedsPlayer()) tasks.push({ at: ELEVATOR, ride: 2, keep: () => player.floor === 1 });
+  const upNeed = upperNeedsPlayer();
+  if (upNeed) tasks.push({ at: ELEVATOR, ride: upNeed, keep: () => player.floor === 1 });
   // Nothing to do up here: go down (cash waits in the basket pile)
   tasks.push({ at: ELEVATOR, ride: 0, keep: () => player.floor === 1 });
   return tasks;
@@ -3967,8 +3998,9 @@ function outdoorPerSecond() {
 }
 
 // ---------- rooftop: helipad and ICU, the third elevator stop ----------
-const F3Y = 12;
-const FLOOR_Y = [0, F2Y, F3Y];
+// Floor indexes: 0 ground, 1 floor 2, 2 roof (on top), 3 floor 3, 4 floor 4
+const F3Y = 24;
+const FLOOR_Y = [0, F2Y, F3Y, 12, 18];
 const H_PAD = v(2.5, -6.0);
 const H_DROP = v(2.5, -2.4);
 const H_ZONE = v(5.0, -2.4); // stand here to wheel the stretcher in
@@ -3980,11 +4012,13 @@ const F3 = { group: new THREE.Group(), built: false, icu: false, beds: [], heli:
 F3.group.position.y = F3Y;
 F3.group.visible = false;
 scene.add(F3.group);
-const visibleFloor = () => (F3.group.visible ? 2 : F2.group.visible ? 1 : 0);
-const floorOfY = (y) => (y >= F3Y - 1 ? 2 : y >= F2Y - 1 ? 1 : 0);
+const visibleFloor = () => (F3.group.visible ? 2 : UPPER[4].group.visible ? 4 : UPPER[3].group.visible ? 3 : F2.group.visible ? 1 : 0);
+const floorOfY = (y) => (y >= F3Y - 1 ? 2 : y >= FLOOR_Y[4] - 1 ? 4 : y >= FLOOR_Y[3] - 1 ? 3 : y >= F2Y - 1 ? 1 : 0);
 function showFloor(f) {
   F2.group.visible = f === 1;
   F3.group.visible = f === 2;
+  UPPER[3].group.visible = f === 3;
+  UPPER[4].group.visible = f === 4;
 }
 
 function helicopterModel() {
@@ -4315,6 +4349,8 @@ function roofTasks() {
   }
   if (stretcherWaiting() && !F3.paramedic && freeIcuBed()) tasks.push({ at: H_ZONE, keep: () => stretcherWaiting() });
   if (icuNeedsCare() && !F3.nurse) tasks.push({ at: ICU_ST, keep: () => icuNeedsCare() });
+  const upNeed = upperNeedsPlayer();
+  if (upNeed) tasks.push({ at: ELEVATOR, ride: upNeed, keep: () => player.floor === 2 });
   tasks.push({ at: ELEVATOR, ride: 0, keep: () => player.floor === 2 });
   return tasks;
 }
@@ -4325,7 +4361,9 @@ function roofPerSecond() {
 
 // Elevator floor picker: with three stops the player chooses where to go
 const liftPick = document.getElementById('liftpick');
-const FLOOR_NAMES = ['🏥 ชั้น 1', '🍲 ชั้น 2', '🚁 ดาดฟ้า'];
+const FLOOR_NAMES = ['🏥 ชั้น 1', '🍲 ชั้น 2', '🚁 ดาดฟ้า', '🧠 ชั้น 3', '🤰 ชั้น 4'];
+// Lift stops from the top down: only floors that exist
+const liftStops = () => [2, 4, 3, 1, 0].filter((f) => f === 0 || (f === 1 ? F2.built : f === 2 ? F3.built : UPPER[f].built));
 function showLiftPicker(show) {
   if (!show) {
     if (liftPick.style.display !== 'none') liftPick.style.display = 'none';
@@ -4334,7 +4372,8 @@ function showLiftPicker(show) {
   if (liftPick.style.display === 'flex' && liftPick.dataset.floor === String(player.floor)) return;
   liftPick.dataset.floor = String(player.floor);
   liftPick.innerHTML = '';
-  FLOOR_NAMES.forEach((name, f) => {
+  liftStops().forEach((f) => {
+    const name = FLOOR_NAMES[f];
     if (f === player.floor) return;
     const b = document.createElement('button');
     b.className = 'btn';
@@ -4405,11 +4444,12 @@ const CITY_BUILDINGS = [
 ];
 const CITY_PLOTS = 8;
 const PLACE_MAX = 3;
-const defaultEmpire = () => ({ tier: 0, plots: Array(CITY_PLOTS).fill(null), nodes: {}, buys: 0 });
+const defaultEmpire = () => ({ tier: 0, plots: Array(CITY_PLOTS).fill(null), nodes: {}, buys: 0, land: 0 });
 const emp = () => state.empire;
 const cityLevel = (type) => (emp()?.plots || []).reduce((a, p) => a + (p?.type === type ? p.lvl : 0), 0);
 const marketRate = (l) => Math.round([0, 3, 9, 20][l] * (1 + 0.5 * (emp()?.tier || 0)));
-const plotCost = () => Math.round((4000 * 1.25 ** emp().buys) / 10) * 10;
+// Steep for the first 24 builds, gentler after so a big city stays affordable
+const plotCost = () => Math.round((4000 * 1.25 ** Math.min(emp().buys, 24) * 1.08 ** Math.max(0, emp().buys - 24)) / 10) * 10;
 const nodeLevels = (t) => {
   const e = emp();
   if (!e.nodes[t]) e.nodes[t] = Array(EMPIRE_NODES[t].length - 1).fill(0);
@@ -4434,7 +4474,7 @@ function empireRate() {
 }
 // Is the current tier's map filled in (everything built at least once)?
 function tierFilled(t) {
-  if (t === 0) return emp().plots.every(Boolean);
+  if (t === 0) return emp().plots.slice(0, CITY_PLOTS).every(Boolean);
   return nodeLevels(t).every((l) => l > 0);
 }
 function advanceCheck() {
@@ -4452,6 +4492,7 @@ function cheapestEmpireCost() {
   const e = emp();
   const costs = [];
   if (e.plots.some((p) => !p || p.lvl < PLACE_MAX)) costs.push(plotCost());
+  if (LAND_COSTS[e.land || 0] !== undefined) costs.push(LAND_COSTS[e.land || 0]);
   for (let t = 1; t <= e.tier; t++) nodeLevels(t).forEach((l, i) => { if (l < PLACE_MAX) costs.push(nodeCost(t, i + 1, l)); });
   const adv = advanceCheck();
   if (adv && adv.reqs[0].ok && adv.reqs[1].ok) costs.push(adv.next.cost);
@@ -4568,8 +4609,8 @@ function emButton(label, disabled, onClick) {
 function renderCity() {
   const e = emp();
   const grid = emEl('div', 'citygrid');
-  // 3x3: the hospital in the middle, building plots around it
-  const order = [0, 1, 2, 3, -1, 4, 5, 6, 7];
+  // The hospital first, then every plot; bought land adds more
+  const order = [-1, ...e.plots.map((_, i) => i)];
   for (const i of order) {
     if (i < 0) {
       grid.append(emEl('div', 'plot hq', `🏥<small>โรงพยาบาล ×${state.branches.length}</small>`));
@@ -4589,6 +4630,12 @@ function renderCity() {
   const go = emButton('🚶 ไปดูเมืองจริง', false, visitDistrict);
   go.classList.add('emgo');
   emPage.append(go);
+  const landCost = LAND_COSTS[e.land || 0];
+  if (landCost !== undefined) {
+    const land = emButton(`🗺️ ซื้อที่ดินเพิ่ม +4 แปลง · 💵${landCost.toLocaleString()}`, state.money < landCost, buyLand);
+    land.classList.add('emgo');
+    emPage.append(land);
+  }
   if (empireSel === null) {
     emPage.append(emEl('p', 'emhint', 'แตะที่ว่างเพื่อสร้าง แตะสิ่งก่อสร้างเพื่ออัปเลเวล · ราคาเพิ่มขึ้นทุกครั้งที่สร้าง'));
     return;
@@ -4668,28 +4715,26 @@ function renderAdvance() {
 // ---------- the empire made real: a 3D city district beside the hospital, and 3D maps ----------
 // The 8 city plots from the 🌏 panel stand west of the hospital along their own road.
 const DIST_ROAD_X = -19.5;
+const DIST_ROAD2_X = -35.5; // second road, opened with the first land purchase
+const CITY_COLS = [-15.5, -23.5, -31.5, -39.5];
+// 8 starting plots, then 4 more per land purchase: two new columns, then two rows further north
 const DISTRICT_PLOTS = [
-  v(-15.5, -9), v(-15.5, -3), v(-15.5, 3), v(-15.5, 9),
-  v(-23.5, -9), v(-23.5, -3), v(-23.5, 3), v(-23.5, 9),
+  ...[-15.5, -23.5].flatMap((x) => [-9, -3, 3, 9].map((z) => v(x, z))),
+  ...[-9, -3, 3, 9].map((z) => v(-31.5, z)),
+  ...[-9, -3, 3, 9].map((z) => v(-39.5, z)),
+  ...CITY_COLS.map((x) => v(x, -15)),
+  ...CITY_COLS.map((x) => v(x, -21)),
 ];
+const LAND_COSTS = [50000, 200000, 800000, 3200000];
+const roadOf = (x) => (x > -27.5 ? DIST_ROAD_X : DIST_ROAD2_X);
 // Where to stand to manage a plot: on the plot's road side
-const plotZone = (p) => v(p.x + (p.x > DIST_ROAD_X ? -2.3 : 2.3), p.z);
+const plotZone = (p) => v(p.x + (p.x > roadOf(p.x) ? -2.3 : 2.3), p.z);
 const inDistrict = (p) => p.x < FLOOR.x0 - 1.2 && p.z < ROAD_Z - 1.8;
 const district = { built: false, plots: [], residents: [], standing: -1, stand: 0, opened: -1 };
 
 function buildDistrict() {
   const g = new THREE.Group();
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 28), mat(0x55606e));
-  road.rotation.x = -Math.PI / 2;
-  road.position.set(DIST_ROAD_X, 0.021, 1.5);
-  road.receiveShadow = true;
-  g.add(road);
-  for (let z = -11; z < 15; z += 3) {
-    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 1.3), mat(0xffffff));
-    dash.rotation.x = -Math.PI / 2;
-    dash.position.set(DIST_ROAD_X, 0.03, z);
-    g.add(dash);
-  }
+  g.add(districtRoad(DIST_ROAD_X));
   // A sidewalk joining the district to the hospital's front path
   const walk = new THREE.Mesh(new THREE.PlaneGeometry(DIST_ROAD_X * -1 + 5, 1.3), mat(0xe8dcc8));
   walk.rotation.x = -Math.PI / 2;
@@ -4704,18 +4749,55 @@ function buildDistrict() {
     g.add(post);
   }
   scene.add(g);
-  DISTRICT_PLOTS.forEach((at, i) => {
+  district.built = true;
+  addDistrictLots();
+  syncDistrict();
+}
+function districtRoad(x) {
+  const g = new THREE.Group();
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 40), mat(0x55606e));
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(x, 0.021, -4.5);
+  road.receiveShadow = true;
+  g.add(road);
+  for (let z = -23; z < 15; z += 3) {
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 1.3), mat(0xffffff));
+    dash.rotation.x = -Math.PI / 2;
+    dash.position.set(x, 0.03, z);
+    g.add(dash);
+  }
+  return g;
+}
+// Lay out lots for every plot the empire owns (more after each land purchase)
+function addDistrictLots(animate = false) {
+  const n = emp().plots.length;
+  if (n > 8 && !district.road2) {
+    district.road2 = districtRoad(DIST_ROAD2_X);
+    scene.add(district.road2);
+  }
+  for (let i = district.plots.length; i < n; i++) {
+    const at = DISTRICT_PLOTS[i];
     const lot = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 5.2), mat(0xc8b48a));
     lot.rotation.x = -Math.PI / 2;
     lot.position.set(at.x, 0.015, at.z);
     lot.receiveShadow = true;
     scene.add(lot);
-    const ring = zoneRing(plotZone(at), 0x3d8bfd);
-    scene.add(ring);
+    scene.add(zoneRing(plotZone(at), 0x3d8bfd));
     district.plots[i] = { at, lot, group: null, sign: null, key: '', collider: null };
-  });
-  district.built = true;
+    if (animate) popIn(lot);
+  }
+}
+function buyLand() {
+  const e = emp();
+  const cost = LAND_COSTS[e.land || 0];
+  if (cost === undefined || !empireSpend(cost)) return;
+  e.land = (e.land || 0) + 1;
+  for (let k = 0; k < 4; k++) e.plots.push(null);
+  addDistrictLots(true);
   syncDistrict();
+  toast(`🗺️ <b>ซื้อที่ดินเพิ่มแล้ว!</b><br>เมืองหมอมี ${e.plots.length} แปลง`, 3500);
+  save();
+  renderEmpire();
 }
 
 // 3D models for each building type; level adds more and taller pieces
@@ -4897,7 +4979,7 @@ function syncDistrict(animate = false) {
     } else {
       slot.group = CITY_MODELS[p.type](p.lvl);
       // Face the road
-      slot.group.rotation.y = slot.at.x > DIST_ROAD_X ? -Math.PI / 2 : Math.PI / 2;
+      slot.group.rotation.y = slot.at.x > roadOf(slot.at.x) ? -Math.PI / 2 : Math.PI / 2;
       if (p.type !== 'garden') {
         addCollider(slot.at.x, slot.at.z, 3.2, 3.2);
         slot.collider = colliders[colliders.length - 1];
@@ -4916,10 +4998,10 @@ function syncDistrict(animate = false) {
 // Residents stroll along the district road once there are homes
 function updateDistrict(dt) {
   if (!district.built) return;
-  const want = Math.min(6, cityLevel('homes') * 2);
+  const want = Math.min(12, cityLevel('homes') * 2);
   while (district.residents.length < want) {
     const person = makePerson({ shirt: pick(SHIRTS) });
-    person.group.position.set(DIST_ROAD_X + rand(-0.8, 0.8), 0, rand(-10, 12));
+    person.group.position.set((district.road2 && Math.random() < 0.5 ? DIST_ROAD2_X : DIST_ROAD_X) + rand(-0.8, 0.8), 0, rand(-10, 12));
     scene.add(person.group);
     district.residents.push({ person, target: null, wait: rand(0, 3) });
   }
@@ -4927,7 +5009,7 @@ function updateDistrict(dt) {
     if (!r.target) {
       r.wait -= dt;
       animatePerson(r.person, false, dt);
-      if (r.wait <= 0) r.target = Math.random() < 0.5 ? plotZone(pick(DISTRICT_PLOTS)) : v(DIST_ROAD_X + rand(-1, 1), rand(-10, 12));
+      if (r.wait <= 0) r.target = Math.random() < 0.5 ? plotZone(pick(district.plots).at) : v(roadOf(r.person.group.position.x) + rand(-1, 1), rand(-20, 12));
       continue;
     }
     const arrived = walkTo(r.person, r.target, 1.8, dt);
@@ -4940,7 +5022,7 @@ function updateDistrict(dt) {
   // Standing on a plot's ring for a moment opens the city panel on that plot
   let here = -1;
   if (player.floor === 0 && !autoBadge.classList.contains('show')) {
-    here = DISTRICT_PLOTS.findIndex((p) => flatDist(player.group.position, plotZone(p)) < ZONE_R);
+    here = district.plots.findIndex((p) => flatDist(player.group.position, plotZone(p.at)) < ZONE_R);
   }
   if (here !== district.standing) {
     district.standing = here;
@@ -4971,6 +5053,8 @@ function visitDistrict() {
   toast('🏙️ <b>เมืองหมอ</b> ยืนในวงฟ้าหน้าแปลงเพื่อสร้างหรืออัปเลเวล<br><small>กด 🏥 มุมขวาบนเพื่อกลับโรงพยาบาล</small>', 5000);
 }
 const homeBtn = document.getElementById('homebtn');
+const zoomBtn = document.getElementById('zoombtn');
+zoomBtn.addEventListener('click', () => setZoom(camZoom > 1.5 ? 1 : 2.8));
 homeBtn.addEventListener('click', () => {
   player.group.position.copy(PLAYER_START);
   updateCamera(0, true);
@@ -5281,6 +5365,250 @@ mvCanvas.addEventListener('wheel', (e) => {
 }, { passive: true });
 document.getElementById('mvclose').addEventListener('click', closeMapView);
 
+// ---------- floors 3 and 4: more services between floor 2 and the roof ----------
+// Floor index 3 = ชั้น 3 (specialist clinics), 4 = ชั้น 4 (mother & child). Their patients
+// arrive by the elevator, queue for a room, get treated and ride back down.
+const UPPER = {
+  3: { name: 'ชั้น 3 คลินิกเฉพาะทาง', floorColor: 0xece4ff, group: new THREE.Group(), built: false, timer: 3 },
+  4: { name: 'ชั้น 4 แม่และเด็ก', floorColor: 0xffe8f1, group: new THREE.Group(), built: false, timer: 3 },
+};
+for (const f of [3, 4]) {
+  UPPER[f].group.position.y = FLOOR_Y[f];
+  UPPER[f].group.visible = false;
+  scene.add(UPPER[f].group);
+}
+const UP_BED_X = -3.5;
+const UP_OP_X = -5.6;
+const UP_QUEUE = 4;
+const UPPER_ROOMS = {
+  psych: { floor: 3, row: -6, icon: '🧠', name: 'ห้องจิตวิทยา', price: 120, time: 3.2, staffLook: { shirt: 0x6d6875, coat: 0xffffff } },
+  massage: { floor: 3, row: 1.5, icon: '💆', name: 'ห้องนวดแผนไทย', price: 150, time: 3.6, staffLook: { shirt: 0x9c6644, apron: 0xddb892 } },
+  nutrition: { floor: 3, row: 9, icon: '🥗', name: 'ห้องโภชนาการ', price: 180, time: 3.0, staffLook: { shirt: 0x8ac926, coat: 0xffffff } },
+  prenatal: { floor: 4, row: -6, icon: '🤰', name: 'ห้องฝากครรภ์', price: 220, time: 3.4, staffLook: { shirt: 0xff8fab, coat: 0xffffff }, mothers: true },
+  delivery: { floor: 4, row: 1.5, icon: '👶', name: 'ห้องคลอด', price: 320, time: 4.5, staffLook: { shirt: 0x48cae4, pants: 0x48cae4, cap: true }, mothers: true },
+  nursery: { floor: 4, row: 9, icon: '🍼', name: 'ห้องเด็กแรกเกิด', price: 260, time: 3.2, staffLook: { shirt: 0xffd6ff, pants: 0xffd6ff, cap: true }, mothers: true },
+};
+for (const [id, r] of Object.entries(UPPER_ROOMS)) Object.assign(r, { id, active: false, staff: null, queue: [], scan: 0, bed: v(UP_BED_X, r.row), op: v(UP_OP_X, r.row) });
+const upSlot = (r, i) => (i === 0 ? r.bed.clone() : v(r.bed.x + 1.4 + (i - 1) * 1.1, r.row));
+const floorGroup = (f) => (f === 1 ? F2.group : f === 2 ? F3.group : f >= 3 ? UPPER[f].group : scene);
+
+function buildUpperFloor(f, animate) {
+  const U = UPPER[f];
+  const g = U.group;
+  const tex = canvasTexture(256, 256, (c) => {
+    const col = `#${U.floorColor.toString(16).padStart(6, '0')}`;
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        c.fillStyle = (x + y) % 2 ? col : '#ffffff';
+        c.fillRect(x * 32, y * 32, 32, 32);
+      }
+    }
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  const fw = FLOOR.x1 - FLOOR.x0 + 0.6;
+  const fd = FLOOR.z1 - FLOOR.z0 + 0.6;
+  tex.repeat.set(fw / 8, fd / 8);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(fw, 0.4, fd), [mat(0xc9d6df), mat(0xc9d6df), new THREE.MeshLambertMaterial({ map: tex }), mat(0x9aa8b5), mat(0xc9d6df), mat(0xc9d6df)]);
+  deck.position.set(0, -0.2, (FLOOR.z0 + FLOOR.z1) / 2);
+  deck.receiveShadow = true;
+  g.add(deck);
+  const rail = (cx, cz, w, d) => {
+    const r = box(w, 0.7, d, f === 3 ? 0x9b5de5 : 0xff8fab);
+    r.position.set(cx, 0.35, cz);
+    g.add(r);
+    addCollider(cx, cz, w, d, f);
+  };
+  const cz = (FLOOR.z0 + FLOOR.z1) / 2;
+  rail(FLOOR.x0 - 0.15, cz, 0.2, fd);
+  rail(FLOOR.x1 + 0.15, cz, 0.2, fd);
+  rail(0, FLOOR.z0 - 0.15, fw, 0.2);
+  rail(0, FLOOR.z1 + 0.15, fw, 0.2);
+  g.add(zoneRing(ELEVATOR, 0x7b61ff));
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 0.8), new THREE.MeshBasicMaterial({ map: signTex(U.name, f === 3 ? '#7b3fbe' : '#d6336c'), side: THREE.DoubleSide }));
+  sign.position.set(3.2, 2.6, -10.6);
+  g.add(sign);
+  // A few plants and benches by the lift so the floor feels lived in
+  for (const [x, z] of [[8.2, -10.2], [8.2, 12.6], [3.4, 12.6]]) {
+    const p = pottedPlant();
+    p.position.set(x, 0, z);
+    g.add(p);
+  }
+  // Taller elevator shaft reaching this floor (the roof's shaft already covers it once the roof exists)
+  if (!F3.built) {
+    for (const [dx, dz] of [[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) {
+      const post = box(0.14, FLOOR_Y[f] - F2Y, 0.14, 0x7b61ff);
+      post.position.set(ELEVATOR.x + dx, F2Y + 2.2 + (FLOOR_Y[f] - F2Y) / 2, ELEVATOR.z + dz);
+      scene.add(post);
+    }
+  }
+  U.built = true;
+  if (animate) popIn(deck);
+}
+
+// Small furniture sets for each room, built around the bed spot
+function upperModel(r) {
+  const g = new THREE.Group();
+  const add = (m, x, y, z) => { m.position.set(x, y, z); g.add(m); return m; };
+  switch (r.id) {
+    case 'psych':
+      add(box(1.0, 0.5, 2.0, 0x9b5de5), 0, 0.25, 0);
+      add(box(0.3, 0.6, 2.0, 0x7b3fbe), -0.4, 0.55, 0);
+      add(box(0.7, 0.8, 0.7, 0xb5838d), -1.3, 0.4, -1.4);
+      break;
+    case 'massage':
+      add(box(0.9, 0.55, 2.0, 0xddb892), 0, 0.28, 0);
+      add(box(0.8, 0.06, 0.6, 0xffffff), 0, 0.58, 0.6);
+      for (let i = 0; i < 3; i++) add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.2, 8), mat(0xffd166)), -0.8 + i * 0.2, 0.1, -1.2);
+      break;
+    case 'nutrition':
+      add(box(1.2, 0.75, 1.6, 0xf4f4f0), 0, 0.38, 0);
+      for (let i = 0; i < 5; i++) add(new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), mat(pick([0x8ac926, 0xe5484d, 0xff924c, 0xffd166]))), -0.4 + i * 0.2, 0.85, 0.2);
+      break;
+    case 'prenatal':
+      add(box(1.0, 0.55, 2.0, 0xffffff), 0, 0.28, 0);
+      add(box(0.9, 0.08, 1.8, 0xffc2d4), 0, 0.6, 0);
+      add(box(0.6, 0.45, 0.08, 0x1d2433), -1.0, 1.3, -0.9);
+      break;
+    case 'delivery':
+      add(box(1.0, 0.6, 2.1, 0xffffff), 0, 0.3, 0);
+      add(box(0.9, 0.08, 1.9, 0x8ecae6), 0, 0.64, 0);
+      add(new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.3, 0.15, 16), new THREE.MeshBasicMaterial({ color: 0xfff3c4 })), 0, 2.2, 0);
+      add(box(0.08, 1.6, 0.08, 0xdfe6ee), 0.7, 0.8, -0.8);
+      break;
+    case 'nursery':
+      for (const z of [-0.7, 0.7]) {
+        add(box(0.8, 0.5, 0.9, 0xffffff), 0, 0.5, z);
+        add(box(0.7, 0.06, 0.8, 0xffd6ff), 0, 0.78, z);
+        add(new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), mat(0xffdbac)), 0, 0.88, z);
+      }
+      break;
+    default:
+      break;
+  }
+  return g;
+}
+function buildUpperRoom(r, animate) {
+  const g = floorGroup(r.floor);
+  const rug = new THREE.Mesh(new THREE.PlaneGeometry(7.6, 5.4), mat(r.floor === 3 ? 0xddd0ff : 0xffd1e3));
+  rug.rotation.x = -Math.PI / 2;
+  rug.position.set(-3.6, 0.01, r.row);
+  g.add(rug);
+  const model = upperModel(r);
+  model.position.set(r.bed.x, 0, r.bed.z);
+  g.add(model);
+  addCollider(r.bed.x, r.bed.z, 1.1, 2.2, r.floor);
+  r.icon3d = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), new THREE.MeshBasicMaterial({ map: signTexture((c) => {
+    c.font = '72px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(r.icon, 64, 68);
+  }), side: THREE.DoubleSide }));
+  r.icon3d.position.set(r.bed.x, 3.0, r.bed.z);
+  g.add(r.icon3d);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.7), new THREE.MeshBasicMaterial({ map: signTex(`${r.icon} ${r.name}`, r.floor === 3 ? '#7b3fbe' : '#d6336c'), side: THREE.DoubleSide }));
+  sign.position.set(-3.6, 2.1, r.row - 2.5);
+  g.add(sign);
+  g.add(zoneRing(r.op, 0x3fbf5f));
+  r.active = true;
+  if (animate) popIn(model);
+}
+function hireUpperStaff(r, animate) {
+  const person = makePerson(r.staffLook);
+  person.group.position.copy(r.op);
+  person.group.rotation.y = Math.PI / 2;
+  floorGroup(r.floor).add(person.group);
+  r.staff = person;
+  if (animate) popIn(person.group);
+}
+function upperPay(amount, r) {
+  F2.bank += amount; // down in the cash basket with the other upstairs takings
+  missionProgress('serve', 1);
+  missionProgress('earn', amount);
+  floatText(r.bed.clone().setY(FLOOR_Y[r.floor] + 0.6), `+${amount}`, '#8be08f');
+  sfxCoin();
+}
+function updateUpperFloor(f, dt) {
+  const U = UPPER[f];
+  if (!U.built) return;
+  const rooms = Object.values(UPPER_ROOMS).filter((r) => r.floor === f && r.active);
+  U.timer -= dt;
+  if (U.timer <= 0) {
+    U.timer = (4.5 / arrivalMult()) * rand(0.7, 1.3);
+    const open = rooms.filter((r) => r.queue.length < UP_QUEUE);
+    if (open.length) {
+      const r = pick(open);
+      const person = makePerson({ shirt: r.mothers ? pick([0xff8fab, 0xffc2d4, 0xf28482]) : pick(SHIRTS) });
+      person.group.position.copy(ELEVATOR);
+      U.group.add(person.group);
+      r.queue.push({ person, arrived: false });
+    }
+  }
+  for (const r of rooms) {
+    r.icon3d.rotation.y += dt;
+    r.queue.forEach((p, i) => {
+      const there = walkTo(p.person, upSlot(r, i), 2.8, dt);
+      animatePerson(p.person, !there, dt);
+      p.arrived = there;
+      if (there) faceToward(p.person.group, -1, 0, dt);
+    });
+    const front = r.queue[0];
+    const staffed = r.staff || (player.floor === f && flatDist(player.group.position, r.op) < ZONE_R);
+    if (front?.arrived && staffed) {
+      r.scan += dt * (r.staff ? staffMult() : 1);
+      if (r.scan >= r.time) {
+        r.scan = 0;
+        upperPay(Math.round(r.price * priceMult() * eventPayMult()), r);
+        r.queue.shift();
+        U.leaving = U.leaving || [];
+        U.leaving.push(front);
+      }
+    }
+  }
+  // Treated patients head back to the lift and ride away
+  if (U.leaving) {
+    for (let i = U.leaving.length - 1; i >= 0; i--) {
+      const p = U.leaving[i];
+      const there = walkTo(p.person, ELEVATOR, 3.2, dt);
+      animatePerson(p.person, !there, dt);
+      if (there) {
+        U.group.remove(p.person.group);
+        U.leaving.splice(i, 1);
+      }
+    }
+  }
+}
+function updateUpper(dt) {
+  updateUpperFloor(3, dt);
+  updateUpperFloor(4, dt);
+}
+// A room upstairs has a patient waiting and nobody to treat them: which floor?
+function upperNeedsPlayer(except = -1) {
+  for (const r of Object.values(UPPER_ROOMS)) {
+    if (r.floor !== except && r.active && !r.staff && r.queue[0]?.arrived) return r.floor;
+  }
+  return 0;
+}
+function upperTasks(f) {
+  const tasks = [];
+  if (tile && state.money >= tile.u.price - state.paid) {
+    const t = tile;
+    tasks.push((t.u.floor || 0) === f ? { at: t.u.at, keep: () => tile === t && state.money > 0 } : { at: ELEVATOR, ride: t.u.floor || 0, keep: () => player.floor === f });
+  }
+  for (const r of Object.values(UPPER_ROOMS)) {
+    if (r.floor === f && r.active && !r.staff && r.queue[0]?.arrived) tasks.push({ at: r.op, keep: () => Boolean(r.queue[0]?.arrived) });
+  }
+  const other = upperNeedsPlayer(f);
+  if (other) tasks.push({ at: ELEVATOR, ride: other, keep: () => player.floor === f });
+  tasks.push({ at: ELEVATOR, ride: 0, keep: () => player.floor === f });
+  return tasks;
+}
+function upperPerSecond() {
+  let rate = 0;
+  for (const f of [3, 4]) {
+    const rooms = Object.values(UPPER_ROOMS).filter((r) => r.floor === f && r.active);
+    const each = rooms.length ? arrivalMult() / 4.5 / rooms.length : 0;
+    for (const r of rooms) if (r.staff) rate += Math.min(each, staffMult() / r.time) * r.price * priceMult();
+  }
+  return rate;
+}
+
 // ---------- player actions ----------
 let actTimer = 0;
 function playerActions(dt) {
@@ -5288,7 +5616,7 @@ function playerActions(dt) {
   if (actTimer > 0) return;
   const pos = player.group.position;
   const stack = player.stack;
-  if (player.floor === 2) return; // rooftop jobs are all stand-in-the-ring
+  if (player.floor >= 2) return; // roof and floors 3-4: all stand-in-the-ring jobs
   if (player.floor === 1) {
     if (floor2Actions(pos, stack)) {
       actTimer = 0.07;
@@ -5343,7 +5671,21 @@ const knob = document.getElementById('knob');
 let joyId = null;
 let joyOrigin = null;
 const touchVec = { x: 0, y: 0 };
+const pinchPts = new Map();
+let pinchFrom = null;
 renderer.domElement.addEventListener('pointerdown', (e) => {
+  pinchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinchPts.size === 2) {
+    // Second finger: stop walking and start pinching
+    const [a, b] = [...pinchPts.values()];
+    pinchFrom = { d: Math.hypot(a.x - b.x, a.y - b.y), z: camZoom };
+    joyId = null;
+    touchVec.x = touchVec.y = 0;
+    knob.style.transform = '';
+    joy.style.display = 'none';
+    renderer.domElement.setPointerCapture(e.pointerId);
+    return;
+  }
   if (joyId !== null) return;
   joyId = e.pointerId;
   joyOrigin = { x: e.clientX, y: e.clientY };
@@ -5354,6 +5696,12 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   renderer.domElement.setPointerCapture(e.pointerId);
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
+  if (pinchPts.has(e.pointerId)) pinchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinchFrom && pinchPts.size === 2) {
+    const [a, b] = [...pinchPts.values()];
+    setZoom(pinchFrom.z * (pinchFrom.d / Math.max(20, Math.hypot(a.x - b.x, a.y - b.y))));
+    return;
+  }
   if (e.pointerId !== joyId) return;
   let dx = e.clientX - joyOrigin.x;
   let dy = e.clientY - joyOrigin.y;
@@ -5374,6 +5722,13 @@ const endJoy = (e) => {
   knob.style.transform = '';
   joy.style.display = 'none';
 };
+const endPinch = (e) => {
+  pinchPts.delete(e.pointerId);
+  if (pinchPts.size < 2) pinchFrom = null;
+};
+renderer.domElement.addEventListener('pointerup', endPinch);
+renderer.domElement.addEventListener('pointercancel', endPinch);
+renderer.domElement.addEventListener('wheel', (e) => setZoom(camZoom * (e.deltaY > 0 ? 1.12 : 0.9)), { passive: true });
 renderer.domElement.addEventListener('pointerup', endJoy);
 renderer.domElement.addEventListener('pointercancel', endJoy);
 
@@ -5457,6 +5812,7 @@ function autoTasks() {
   }
   if (player.floor === 1) return floor2Tasks();
   if (player.floor === 2) return roofTasks();
+  if (player.floor >= 3) return upperTasks(player.floor);
   const stack = player.stack;
   const cap = bagCapacity();
   const lines = Object.values(LINES).filter((l) => l.active);
@@ -5497,6 +5853,8 @@ function autoTasks() {
   const piles = [...lines, ...rooms].map((x) => x.cash).concat(basket.pile ? [basket.pile] : [], outdoorPiles()).sort((a, b) => b.amount - a.amount);
   if (piles[0]?.amount >= 15) tasks.push({ at: piles[0].pos, keep: () => piles[0].amount > 0 });
   if (roofNeedsPlayer()) tasks.push({ at: ELEVATOR, ride: 2, keep: () => player.floor === 0 });
+  const upNeed = upperNeedsPlayer();
+  if (upNeed) tasks.push({ at: ELEVATOR, ride: upNeed, keep: () => player.floor === 0 });
   if (stack.total < cap) {
     for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
       if (!line.carrier && line.pile.count > 0 && line.shelf.total + stack.total < SHELF_MAX) {
@@ -5621,7 +5979,7 @@ function idleIncome(seconds) {
   rooms.forEach((room) => {
     if (room.staffHired) perSecond += Math.min(arrivals * (1 / totalW), staffMult() / room.time) * room.price * priceMult();
   });
-  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond();
+  perSecond += floor2PerSecond() + outdoorPerSecond() + roofPerSecond() + upperPerSecond();
   const t = Math.min(seconds, OFFLINE_CAP);
   return { amount: Math.floor(perSecond * t * OFFLINE_RATE), perHour: Math.round(perSecond * 3600 * OFFLINE_RATE), seconds: t };
 }
@@ -5686,6 +6044,7 @@ function guideTarget() {
   if (ev.boss) return player.floor !== 0 ? ELEVATOR : bossStand(ev.boss);
   if (player.floor === 1) return floor2Tasks()[0]?.at || null;
   if (player.floor === 2) return roofTasks()[0]?.at || null;
+  if (player.floor >= 3) return upperTasks(player.floor)[0]?.at || null;
   const stack = player.stack;
   const pill = LINES.pill;
   const piles = [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.cash);
@@ -5745,7 +6104,7 @@ function updateBag() {
 }
 function updateGoal() {
   const u = UNLOCKS[state.step];
-  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label}${u.floor === 2 ? ' (ดาดฟ้า)' : u.floor ? ' (ชั้น 2)' : ''} · 💵${u.price}`
+  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label}${u.floor ? ` (${['', 'ชั้น 2', 'ดาดฟ้า', 'ชั้น 3', 'ชั้น 4'][u.floor]})` : ''} · 💵${u.price}`
     : canOpenBranch() ? '🏆 ครบทุกแผนก! กด 🌏 เพื่อเปิดสาขาใหม่' : '🏆 สาขานี้ครบทุกแผนกแล้ว!';
 }
 
@@ -6293,7 +6652,7 @@ function load() {
   if (data.challenge?.date === todayKey()) state.challenge = data.challenge;
   state.room = typeof data.room === 'string' ? data.room : null;
   state.tips = Array.isArray(data.tips) ? data.tips : [];
-  while (state.empire.plots.length < CITY_PLOTS) state.empire.plots.push(null);
+  while (state.empire.plots.length < CITY_PLOTS + 4 * (state.empire.land || 0)) state.empire.plots.push(null);
   // Players from before the tutorial existed (or anyone who has earned money) skip it
   state.tutorial = data.tutorial ?? (state.earned > 0 || state.branches.some((b) => b?.step) ? TUTORIAL.length : 0);
   state.branches = Array.isArray(data.branches) && data.branches.length ? data.branches : [null];
@@ -6330,10 +6689,27 @@ function load() {
 // ---------- main loop ----------
 const camOffset = new THREE.Vector3(0, 14, 10.5);
 const camPos = new THREE.Vector3();
+// Zoom: 1 = normal; pinch, the wheel or the 🔍 button pull back for an overview
+let camZoom = 1;
+let fogZoom = 0;
+function setZoom(z) {
+  camZoom = Math.max(0.7, Math.min(4, z));
+  zoomBtn.textContent = camZoom > 1.5 ? '🔎' : '🔍';
+}
 function updateCamera(dt, snap = false) {
   // Portrait phones need the camera further back to see the same width
-  const k = camera.aspect < 1 ? 1.85 : 1.1;
+  const k = (camera.aspect < 1 ? 1.85 : 1.1) * camZoom;
   camPos.copy(player.group.position).addScaledVector(camOffset, k);
+  if (fogZoom !== camZoom) {
+    // Push the fog and the sun's shadow box out with the camera
+    fogZoom = camZoom;
+    const z = Math.max(1, camZoom);
+    scene.fog.near = 40 * z;
+    scene.fog.far = 75 * z * 1.2;
+    const box = 22 * Math.max(1, camZoom * 0.85);
+    Object.assign(sun.shadow.camera, { left: -box, right: box, top: box, bottom: -box, far: 60 + box });
+    sun.shadow.camera.updateProjectionMatrix();
+  }
   if (snap) camera.position.copy(camPos);
   else camera.position.lerp(camPos, Math.min(1, dt * 6));
   camera.lookAt(player.group.position.x, player.group.position.y + 0.5, player.group.position.z - 0.5);
@@ -6380,6 +6756,7 @@ function frame(now) {
     updateFloor2(dt);
     updateOutdoor(dt);
     updateRoof(dt);
+    updateUpper(dt);
     staff.forEach((s) => s.update(dt));
     updateAmbulance(dt);
     updateTile(dt);
@@ -6863,4 +7240,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
