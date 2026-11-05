@@ -103,6 +103,9 @@ const UNLOCKS = [
   { id: 'nurserynurse', label: 'จ้างพยาบาลเด็กแรกเกิด', icon: '👩‍⚕️', price: 170000, at: v(-5.6, 9), floor: 4 },
 ];
 
+// The first ten minutes decide whether people stay: the stretch up to the lift costs a quarter less
+for (let i = 7; i <= 16; i++) UNLOCKS[i].price = Math.round((UNLOCKS[i].price * 0.75) / 10) * 10;
+
 // Waiting room: two rows of chairs at the quiet north end of the hallway, facing south
 const SEATS = Array.from({ length: 8 }, (_, i) => ({ at: v(5.75 + (i % 4) * 0.85, -10.3 + Math.floor(i / 4) * 1.1), taken: null }));
 
@@ -118,7 +121,7 @@ const UPGRADES = [
 ];
 const upLevel = (id) => state.upgrades[id] || 0;
 const upCost = (u) => Math.round((u.base * u.growth ** upLevel(u.id)) / 10) * 10;
-const speedMult = () => 1 + 0.08 * upLevel('speed');
+const speedMult = () => (1 + 0.08 * upLevel('speed')) * (1 + 0.08 * perk('walk'));
 const staffMult = () => (1 + 0.1 * upLevel('staff')) * empireStaff() * prestigeSpeed();
 const machineMult = () => (1 + 0.1 * upLevel('machine')) * empireMachine() * prestigeSpeed() * (researched('machine2') ? 1.15 : 1);
 const branchMult = () => 1 + 0.5 * (state.branch || 0);
@@ -3198,7 +3201,7 @@ const RUSH_COOLDOWN = 240;
 const BOSS_TIME = 45;
 const serviceIcon = (kind) => (ROOMS[kind] ? ROOMS[kind].icon : PRODUCTS[kind].icon);
 const activeServices = () => [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.id);
-const eventPayMult = () => (ev.rush ? 1.5 : 1) * (state.style.outfit === 'crown' ? 1.1 : 1);
+const eventPayMult = () => (ev.rush ? 1.5 : 1) * (state.style.outfit === 'crown' ? 1.1 : 1) * seasonMult();
 const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.floor(sec % 60))).padStart(2, '0')}`;
 
 const toastEl = document.getElementById('toast');
@@ -3511,6 +3514,7 @@ function updateEventHud() {
   if (rushBtn.lastChild.textContent !== label) rushBtn.lastChild.textContent = label;
   rushBtn.classList.toggle('ready', cooling <= 0);
   let html = '';
+  if (season.cur) html += `<div class="chip special">${season.cur.icon} ${LANG === 'en' ? 'Festival' : 'เทศกาล' + season.cur.name} +20%</div>`;
   if (ev.rush) html += `<div class="chip rush">🚨 ${fmtClock(ev.rush.t)} · ${ev.rush.served}/${ev.rush.target} คน</div>`;
   if (ev.boss) html += `<div class="chip boss">🦠 ${Math.max(0, ev.boss.hp)}/${ev.boss.max} · ${fmtClock(ev.boss.t)}</div>`;
   if (BASE.defense) html += `<div class="chip boss">🛡️ โดรน ${BASE.drones.length + BASE.defense.left} · ฐาน ❤️${BASE.defense.hp}</div>`;
@@ -3560,6 +3564,7 @@ const OUTFITS = [
   { id: 'fancy', icon: '🎩', name: 'หมอสุดเท่', price: 3000, coat: 0x2b2d42, shirt: 0xffffff, pants: 0x2b2d42, hat: 'top' },
   { id: 'hero', icon: '🦸', name: 'ชุดฮีโร่นักล่าเชื้อโรค', rare: true, perk: 'ยิงเชื้อโรคแรง ×2', coat: 0xe5484d, shirt: 0xffd166, pants: 0x1d3a8a, hat: 'band', cape: 0xe5484d },
   { id: 'crown', icon: '👑', name: 'หมอมงกุฎทองคำ', rare: true, perk: 'รายได้ +10%', coat: 0xfff3c4, shirt: 0x9b5de5, pants: 0x6c4ab6, hat: 'crown' },
+  { id: 'diamond', icon: '💎', name: 'ชุดหมอเพชร', rare: true, event: true, perk: 'ได้จากเข้าเกมครบ 7 วัน', coat: 0xb9f2ff, shirt: 0x4fc3f7, pants: 0x1565c0, hat: 'crown' },
   { id: 'thai', icon: '🏮', name: 'ชุดไทยลอยกระทง', rare: true, event: true, perk: 'ชุดพิเศษเทศกาล', coat: 0xd4a373, shirt: 0xffd166, pants: 0x8a1c2b, hat: 'crown' },
 ];
 const RARE_ORDER = ['hero', 'statue', 'rainbow', 'crown'];
@@ -4812,6 +4817,7 @@ function advanceTier() {
   empireTab = e.tier;
   empireSel = null;
   burst(player.group.position);
+  offerShare(`ยกระดับเป็น${adv.next.name}แล้ว!`);
   toast(`${adv.next.icon} <b>ยกระดับเป็น${adv.next.name}แล้ว!</b><br>ตำแหน่งใหม่: ${adv.next.title}<br><small>รายได้ทุกสาขา +10%</small>`, 5000);
   save();
   renderEmpire();
@@ -5891,6 +5897,9 @@ const PERKS = [
   { id: 'speed', icon: '⚡', name: 'พนักงานและเครื่องผลิต', desc: (l) => `เร็ว +${10 * l}%`, max: 10, cost: 2 },
   { id: 'startcash', icon: '💼', name: 'เงินตั้งต้นรอบใหม่', desc: (l) => `💵${fmt((5000 * l * l))}`, max: 10, cost: 1 },
   { id: 'headstart', icon: '🚀', name: 'เริ่มรอบใหม่ที่ขั้น', desc: (l) => `ขั้น ${3 * l}`, max: 4, cost: 3 },
+  { id: 'walk', icon: '👟', name: 'หมอเดินเร็ว', desc: (l) => `+${8 * l}%`, max: 5, cost: 2 },
+  { id: 'offline', icon: '🌙', name: 'รายได้ตอนไม่อยู่', desc: (l) => `+${20 * l}%`, max: 5, cost: 2 },
+  { id: 'daily', icon: '🎁', name: 'รางวัลเข้าเกมรายวัน', desc: (l) => `+${50 * l}%`, max: 4, cost: 1 },
 ];
 const prs = () => state.prestige || defaultPrestige();
 const perk = (id) => prs().perks[id] || 0;
@@ -5922,6 +5931,7 @@ function doPrestige() {
     style: state.style, challenge: state.challenge, room: state.room, tips: state.tips, week: state.week,
     stats: state.stats, achievements: state.achievements, cards: state.cards, cardPulls: state.cardPulls, quiz: state.quiz,
     conquests: state.conquests, conquestRun: state.conquestRun,
+    login: state.login, welcomed: true, installAsked: state.installAsked, refUsed: state.refUsed, refClaimed: state.refClaimed, seasonSeen: state.seasonSeen,
     prestige: { ...p, stars: p.stars + gain, total: p.total + gain, runs: p.runs + 1, base: state.earned },
     empire: defaultEmpire(), research: { done: [], cur: null }, savedAt: data.savedAt,
   });
@@ -6020,7 +6030,7 @@ const RESEARCH = [
 ];
 RESEARCH.forEach((r, i) => Object.assign(r, { cost: Math.round((20000 * 1.6 ** i) / 100) * 100, time: 90 + i * 45 }));
 const researched = (id) => Boolean(state.research?.done?.includes(id));
-const offlineRate = () => (researched('offline') ? 0.5 : OFFLINE_RATE);
+const offlineRate = () => (researched('offline') ? 0.5 : OFFLINE_RATE) * (1 + 0.2 * perk('offline'));
 function startResearch(r) {
   const R = state.research;
   if (R.cur || researched(r.id) || state.money < r.cost) return;
@@ -8709,6 +8719,7 @@ function updateStory(dt) {
   storyTimer -= dt;
   if (storyTimer > 0) return;
   storyTimer = 0.5;
+  updateGoal();
   const s = story();
   // Saves from before the story skip the chapters they already finished, without rewards
   if (s.catchup) {
@@ -8721,6 +8732,8 @@ function updateStory(dt) {
     if (done.reward) addMoney(done.reward, false);
     sfxUnlock();
     logProgress(`ch${s.ch + 1}`);
+    if (s.ch === 3) setTimeout(() => offerInstall(), 8000);
+    if (s.ch >= 5 && s.ch < STORY.length) offerShare(`จบบทที่ ${s.ch}: ${done.name}!`);
     if (!storyDone()) {
       const next = curChapter();
       toast(`📖 <b>จบบทที่ ${s.ch}: ${done.name}</b>${done.reward ? ` · รางวัล 💵${fmt(done.reward)}` : ''}<br>${next.icon} บทที่ ${s.ch + 1}: <b>${next.name}</b><br><small>${next.story}</small>`, 7000);
@@ -9672,6 +9685,307 @@ function hospitalFacade() {
   scene.add(g);
 }
 
+// ---------- keeping players: daily streak, install, invites, seasons, share prompts, perf reports, English UI ----------
+
+const todayLocal = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+// A sheet built on the fly for small one-off prompts
+function promptSheet(id, html, buttons) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'sheet promptsheet';
+    el.innerHTML = '<div class="box"></div>';
+    document.body.append(el);
+    el.addEventListener('click', (e) => { if (e.target === el) el.style.display = 'none'; });
+  }
+  const box = el.querySelector('.box');
+  box.innerHTML = html;
+  for (const [label, fn, ghost] of buttons) {
+    const b = emEl('button', `btn${ghost ? ' ghost' : ''}`, label);
+    b.addEventListener('click', () => { el.style.display = 'none'; fn?.(); });
+    box.append(b);
+  }
+  el.style.display = 'flex';
+  return el;
+}
+
+// --- 1. a welcome gift when the tutorial ends, and a goal pill that says how close you are ---
+function welcomeGift() {
+  if (state.welcomed) return;
+  state.welcomed = true;
+  addMoney(800, false);
+  toast('🎁 <b>ของขวัญต้อนรับ!</b> 💵800<br><small>เปิดห้องฉีดวัคซีนได้เลย · กด 🤖 AUTO ให้เล่นแทนได้ทุกเมื่อ</small>', 4500);
+  save();
+}
+
+// --- 2. daily login streak: seven days, a bigger reward each day, a diamond outfit on day 7 ---
+const STREAK_MULT = [1, 1.5, 2, 3, 4, 6, 10];
+const streakBase = () => Math.round(Math.max(300, idleIncome(3600).perHour * 0.25) / 10) * 10 * (1 + 0.5 * perk('daily'));
+function checkDailyLogin() {
+  const L = (state.login = state.login || { day: '', streak: 0 });
+  const today = todayLocal();
+  if (L.day === today) return;
+  const gap = L.day ? dayDiff(L.day, today) : 99;
+  L.streak = gap === 1 ? (L.streak % 7) + 1 : 1;
+  L.day = today;
+  const day = L.streak;
+  const reward = Math.round(streakBase() * STREAK_MULT[day - 1]);
+  const tiles = STREAK_MULT.map((m, i) => `<div class="dtile${i + 1 < day ? ' got' : i + 1 === day ? ' now' : ''}"><small>วัน ${i + 1}</small><b>${i === 6 ? '💎' : '💵'}</b><small>${i === 6 ? 'ชุดพิเศษ' : fmt(streakBase() * m)}</small></div>`).join('');
+  const claim = () => {
+    addMoney(reward, false);
+    if (day === 7) {
+      grantStyle('diamond');
+      toast('💎 <b>ได้ชุดหมอเพชร!</b> ใส่ได้ที่ 🎨 ตกแต่ง', 4000);
+    }
+    burst(player.group.position);
+    sfxUnlock();
+    save();
+  };
+  const show = () => promptSheet('dailysheet', `<h3>🎁 รางวัลเข้าเกมรายวัน</h3><p class="sub">เข้าเกมต่อเนื่อง ${day} วัน${gap > 1 && L.day && day === 1 && gap < 99 ? ' (เริ่มนับใหม่)' : ''} · พรุ่งนี้ได้มากกว่านี้!</p><div class="dtiles">${tiles}</div>`,
+    [[`รับ 💵${fmt(reward)}${day === 7 ? ' + 💎' : ''}`, claim]]);
+  // Wait for the welcome-back panel to close first
+  const wait = () => (document.getElementById('away').style.display === 'flex' ? setTimeout(wait, 500) : show());
+  setTimeout(wait, 900);
+  save();
+}
+
+// --- 2b. add to home screen ---
+let installEvent = null;
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installEvent = e;
+  document.getElementById('installbtn').style.display = '';
+});
+function offerInstall(force = false) {
+  if (standalone()) return;
+  if (!force && (state.installAsked || storyDone())) return;
+  state.installAsked = true;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (installEvent) {
+    promptSheet('installsheet', '<h3>📲 เพิ่ม Dr. Quest World ลงหน้าจอโฮม</h3><p class="sub">เปิดเต็มจอเหมือนแอป เล่นต่อได้ทันที ไม่ต้องหาลิงก์</p>',
+      [['📲 ติดตั้งเลย', async () => { installEvent.prompt(); await installEvent.userChoice.catch(() => {}); installEvent = null; }], ['ไว้ทีหลัง', null, true]]);
+  } else if (ios) {
+    promptSheet('installsheet', '<h3>📲 เพิ่มลงหน้าจอโฮม (iPhone)</h3><p class="sub">1. แตะปุ่ม <b>แชร์</b> ⬆️ ด้านล่างของ Safari<br>2. เลือก <b>เพิ่มไปยังหน้าจอโฮม</b><br>3. กด <b>เพิ่ม</b> แล้วเปิดเกมจากไอคอนได้เลย</p>', [['เข้าใจแล้ว', null]]);
+  } else if (force) {
+    promptSheet('installsheet', '<h3>📲 เพิ่มลงหน้าจอโฮม</h3><p class="sub">เปิดเมนูของเบราว์เซอร์ (⋮) แล้วเลือก <b>เพิ่มไปยังหน้าจอหลัก</b> หรือ <b>ติดตั้งแอป</b></p>', [['เข้าใจแล้ว', null]]);
+  }
+  save();
+}
+
+// --- 3. invite friends: a personal link; both sides get a bonus ---
+function anonId() {
+  try {
+    let a = localStorage.getItem('drquest-anon') || '';
+    if (!a) {
+      a = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem('drquest-anon', a);
+    }
+    return a;
+  } catch {
+    return '';
+  }
+}
+const inviteCode = () => anonId().slice(0, 10);
+const inviteUrl = () => `https://niasmin.github.io/Quest-Finance/?ref=${inviteCode()}`;
+const inviteBonus = () => Math.round(Math.max(5000, idleIncome(3600).perHour * 0.5) / 100) * 100;
+async function inviteFriends() {
+  const text = '🌏 มาสร้างโลกของตัวเองใน Dr. Quest World กัน! กดลิงก์นี้ เราได้โบนัสทั้งคู่ 🎁';
+  try {
+    if (navigator.share) await navigator.share({ title: 'Dr. Quest World', text, url: inviteUrl() });
+    else {
+      await navigator.clipboard.writeText(`${text} ${inviteUrl()}`);
+      toast('📋 คัดลอกลิงก์ชวนเพื่อนแล้ว<br><small>ส่งให้เพื่อนทาง LINE หรือ Facebook ได้เลย</small>', 3500);
+    }
+  } catch {
+    // cancelled
+  }
+}
+// The friend's side: arriving through someone's link
+const refFromUrl = new URLSearchParams(location.search).get('ref');
+function handleReferralArrival() {
+  if (!refFromUrl || !/^[a-f0-9]{10}$/.test(refFromUrl) || refFromUrl === inviteCode() || state.refUsed) return;
+  if ((state.earned || 0) > 20000) return; // only for new players
+  state.refUsed = refFromUrl;
+  addMoney(3000, false);
+  toast('🎁 <b>เพื่อนชวนคุณมา!</b> รับโบนัส 💵3,000', 4000);
+  if (!CLOUD_OFF) rpc('register_referral', { p_ref: refFromUrl, p_anon: anonId() }).catch(() => {});
+  save();
+}
+// The inviter's side: friends who joined since last time
+async function claimReferrals() {
+  if (CLOUD_OFF) return;
+  try {
+    const n = Number(await rpc('referral_count', { p_ref: inviteCode() })) || 0;
+    const fresh = n - (state.refClaimed || 0);
+    if (fresh > 0) {
+      state.refClaimed = n;
+      const amount = inviteBonus() * fresh;
+      addMoney(amount, false);
+      toast(`👥 <b>เพื่อน ${fresh} คนมาเล่นตามลิงก์ของคุณ!</b><br>รับโบนัส 💵${fmt(amount)}`, 4500);
+      save();
+    }
+  } catch {
+    // backend not ready: nothing to claim
+  }
+}
+
+// --- 3b. offer to share at the big moments ---
+function offerShare(title) {
+  setTimeout(() => promptSheet('sharesheet', `<h3>📸 ${title}</h3><p class="sub">แชร์ภาพเมืองของคุณให้เพื่อนดู พร้อมลิงก์ชวนเล่น</p>`,
+    [['📸 แชร์เลย', shareHospital], ['👥 ส่งลิงก์ชวนเพื่อน', inviteFriends, true], ['ไว้ทีหลัง', null, true]]), 1800);
+}
+
+// --- 4. seasonal events: a chip, +20% income and something to see at the hospital front ---
+const SEASONS = [
+  { id: 'newyear', icon: '🎆', name: 'ปีใหม่', from: [12, 28], to: [1, 3] },
+  { id: 'valentine', icon: '💘', name: 'วาเลนไทน์', from: [2, 12], to: [2, 15] },
+  { id: 'songkran', icon: '💦', name: 'สงกรานต์', from: [4, 12], to: [4, 16] },
+  { id: 'halloween', icon: '🎃', name: 'ฮาโลวีน', from: [10, 25], to: [10, 31] },
+  { id: 'xmas', icon: '🎄', name: 'คริสต์มาส', from: [12, 20], to: [12, 27] },
+];
+function currentSeason() {
+  const forced = new URLSearchParams(location.search).get('event');
+  if (forced) return SEASONS.find((s) => s.id === forced) || null;
+  const d = new Date();
+  const md = (d.getMonth() + 1) * 100 + d.getDate();
+  return SEASONS.find((s) => {
+    const a = s.from[0] * 100 + s.from[1];
+    const b = s.to[0] * 100 + s.to[1];
+    return a <= b ? md >= a && md <= b : md >= a || md <= b;
+  }) || null;
+}
+const season = { cur: null, built: false, t: 0, items: [] };
+const seasonMult = () => (season.cur ? 1.2 : 1);
+function buildSeason() {
+  const s = season.cur;
+  if (!s || season.built) return;
+  season.built = true;
+  const g = new THREE.Group();
+  const spots = [[-6, 15.2], [-2, 15.2], [3, 15.2], [11, 15.2], [14, 15.2]];
+  for (const [x, z] of spots) {
+    let m;
+    if (s.id === 'halloween') {
+      m = new THREE.Group();
+      m.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), mat(0xff8c1a)), 0, 0.38, 0), at3(box(0.08, 0.2, 0.08, 0x2e7d32), 0, 0.85, 0));
+      m.children[0].scale.y = 0.8;
+    } else if (s.id === 'xmas') {
+      m = treeModel('cone');
+      m.add(at3(new THREE.Mesh(new THREE.OctahedronGeometry(0.22), new THREE.MeshBasicMaterial({ toneMapped: false, color: 0xffd166 })), 0, 2.85, 0));
+      for (let i = 0; i < 6; i++) m.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ toneMapped: false, color: pick([0xe5484d, 0xffd166, 0x3d8bfd]) })), Math.cos(i) * 0.5, 1.5 + (i % 3) * 0.35, Math.sin(i) * 0.5));
+    } else if (s.id === 'songkran') {
+      m = new THREE.Group();
+      m.add(at3(cylM(0.35, 0.3, 0.6, 0x4fc3f7, 14), 0, 0.3, 0), at3(cylM(0.3, 0.3, 0.05, 0x81d4fa, 14), 0, 0.62, 0));
+    } else if (s.id === 'valentine') {
+      m = new THREE.Group();
+      for (const dx of [-0.16, 0.16]) m.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), mat(0xff4d6d)), dx, 1.4, 0));
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.31, 0.45, 12), mat(0xff4d6d));
+      tip.rotation.z = Math.PI;
+      m.add(at3(tip, 0, 1.15, 0), at3(cylM(0.02, 0.02, 1.2, 0xdfe6ee, 6), 0, 0.6, 0));
+    } else {
+      m = new THREE.Group();
+      m.add(at3(cylM(0.05, 0.05, 2.2, 0xdfe6ee, 6), 0, 1.1, 0), at3(new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), new THREE.MeshBasicMaterial({ toneMapped: false, color: pick([0xff4d6d, 0xffd166, 0x4fc3f7]) })), 0, 2.3, 0));
+    }
+    g.add(at3(m, x, 0, z));
+  }
+  scene.add(g);
+  season.items.push(g);
+}
+function updateSeason(dt) {
+  if (!season.cur) return;
+  buildSeason();
+  season.t -= dt;
+  if (season.t > 0) return;
+  season.t = season.cur.id === 'newyear' ? 1.2 : 3;
+  // Fireworks for the new year, a water splash for Songkran, sparkles otherwise
+  if (season.cur.id === 'newyear') burst(v(rand(-8, 14), 0, rand(-14, 6)).setY(rand(9, 14)));
+  else if (Math.random() < 0.5) burst(v(rand(-6, 14), 0, 15.2));
+}
+function seasonStart() {
+  season.cur = currentSeason();
+  if (!season.cur) return;
+  const key = `${season.cur.id}:${todayLocal()}`;
+  if (state.seasonSeen !== key) {
+    state.seasonSeen = key;
+    setTimeout(() => toast(`${season.cur.icon} <b>เทศกาล${season.cur.name}มาแล้ว!</b><br><small>รายได้ทุกอย่าง +20% ตลอดเทศกาล</small>`, 4500), 2500);
+  }
+}
+
+// --- 5. how smooth is it on real phones? one anonymous fps report per browser ---
+const perf = { t0: 0, n: 0, sent: false };
+function trackPerf(now) {
+  if (perf.sent || !running) return;
+  if (!perf.t0) perf.t0 = now;
+  perf.n++;
+  const sec = (now - perf.t0) / 1000;
+  if (sec < 40) return;
+  perf.sent = true;
+  const fps = perf.n / sec;
+  const bucket = fps >= 55 ? 60 : fps >= 40 ? 45 : fps >= 28 ? 30 : fps >= 18 ? 20 : 10;
+  const mobile = matchMedia('(pointer: coarse)').matches ? 'm' : 'd';
+  logProgress(`fps${bucket}_${mobile}_${LITE ? 'lite' : 'full'}`);
+}
+
+// --- 6. English for the main interface (the world's signs and story stay Thai for now) ---
+let LANG = 'th';
+try {
+  LANG = localStorage.getItem('drquest-lang') || 'th';
+} catch {
+  LANG = 'th';
+}
+const UI_EN = {
+  '#start .tagline': 'Build your hospital, grow it into a city, a campus and an army base<br>until your empire covers the whole world 🌏',
+  '#startbtn': '▶ Play',
+  '#start .foot': 'Free on web and mobile · Cloud save',
+  '#autobtn .dl': 'AUTO', '#upbtn .dl': 'Upgrade', '#missionbtn .dl': 'Missions', '#branchbtn .dl': 'Empire', '#citybtn .dl': 'City', '#leaderbtn .dl': 'Ranks',
+  '#menu h3': '⚙️ Menu', '#resume': 'Resume', '#menushare': '📸 Share my hospital', '#savenow': '💾 Save now', '#claimcode': '📲 Enter transfer code', '#namebtn': '✏️ Set name', '#reset': 'Start over',
+  '#missions h3': '📋 Today\'s missions', '#upgrades h3': '⬆️ Hospital upgrades', '#board h3': '🏆 Leaderboard', '#style h3': '🎨 Decorate',
+  '#mclose': 'Close', '#upclose': 'Close', '#bclose': 'Close', '#boardclose': 'Close', '#styleclose': 'Close',
+  '#installbtn': '📲 Add to home screen', '#invitebtn': '👥 Invite friends (bonus)',
+};
+const UI_TH = {};
+const TOGGLE_EN = [['เสียง: เปิด', 'Sound: on'], ['เสียง: ปิด', 'Sound: off'], ['โหมดประหยัด: เปิด', 'Low-power mode: on'], ['โหมดประหยัด: ปิด', 'Low-power mode: off'], ['กลางวัน-กลางคืนตามเวลาจริง: เปิด', 'Day & night from your clock: on'], ['กลางวัน-กลางคืนตามเวลาจริง: ปิด', 'Day & night from your clock: off']];
+function trToggles() {
+  for (const id of ['soundbtn', 'litebtn', 'daynightbtn']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    for (const [th, en] of TOGGLE_EN) {
+      if (LANG === 'en' && el.textContent.includes(th)) el.textContent = el.textContent.replace(th, en);
+      if (LANG !== 'en' && el.textContent.includes(en)) el.textContent = el.textContent.replace(en, th);
+    }
+  }
+}
+function applyLang() {
+  for (const [sel, en] of Object.entries(UI_EN)) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    if (!(sel in UI_TH)) UI_TH[sel] = el.innerHTML;
+    el.innerHTML = LANG === 'en' ? en : UI_TH[sel];
+  }
+  const name = document.getElementById('startname');
+  if (name) name.placeholder = LANG === 'en' ? '✏️ Doctor name (optional)' : '✏️ ตั้งชื่อหมอ (ไม่บังคับ)';
+  document.getElementById('langbtn').textContent = LANG === 'en' ? '🌐 Language: English' : '🌐 ภาษา: ไทย';
+  trToggles();
+  document.documentElement.lang = LANG;
+}
+document.getElementById('langbtn').addEventListener('click', () => {
+  LANG = LANG === 'en' ? 'th' : 'en';
+  try {
+    localStorage.setItem('drquest-lang', LANG);
+  } catch {
+    // just this session
+  }
+  applyLang();
+});
+document.getElementById('installbtn').addEventListener('click', () => { menu.style.display = 'none'; running = true; offerInstall(true); });
+document.getElementById('invitebtn').addEventListener('click', inviteFriends);
+if (standalone()) document.getElementById('installbtn').style.display = 'none';
+
 // ---------- player actions ----------
 let actTimer = 0;
 function playerActions(dt) {
@@ -10203,7 +10517,8 @@ function updateBag() {
 function updateGoal() {
   const u = UNLOCKS[state.step];
   goalEl.classList.toggle('none', !u);
-  goalEl.textContent = u ? `🎯 ถัดไป: ${u.icon} ${u.label}${u.floor ? ` (${['', 'ชั้น 2', 'ดาดฟ้า', 'ชั้น 3', 'ชั้น 4'][u.floor]})` : ''} · 💵${u.price}`
+  const left = u ? u.price - state.paid - state.money : 0;
+  goalEl.textContent = u ? `${left > 0 ? '🎯' : '✅'} ${u.icon} ${u.label}${u.floor ? ` (${['', 'ชั้น 2', 'ดาดฟ้า', 'ชั้น 3', 'ชั้น 4'][u.floor]})` : ''} · ${left > 0 ? `อีก 💵${fmt(left)}` : 'พร้อมซื้อแล้ว! ไปที่ป้าย 👉'}`
     : canOpenBranch() ? '🏆 ครบทุกแผนก! กด 🌏 เพื่อเปิดสาขาใหม่' : '🏆 สาขานี้ครบทุกแผนกแล้ว!';
 }
 
@@ -10527,6 +10842,7 @@ function updateTutorial() {
     sfxCoin();
     if (tutorialDone()) {
       floatText(player.group.position, '🎉 เก่งมาก! ปลดล็อกปุ่มใหม่แล้ว', '#ffd166');
+      welcomeGift();
       goalEl.style.display = 'block';
       save();
     }
@@ -10678,6 +10994,7 @@ function setSound(on) {
   soundOn = on;
   if (master) master.gain.value = on ? 1 : 0;
   document.getElementById('soundbtn').textContent = on ? '🔊 เสียง: เปิด' : '🔇 เสียง: ปิด';
+  if (typeof trToggles === 'function' && LANG === 'en') trToggles();
   try {
     localStorage.setItem('drquest-sound', on ? 'on' : 'off');
   } catch {
@@ -10729,6 +11046,7 @@ function saveData() {
     challenge: state.challenge, room: state.room, tips: state.tips,
     prestige: state.prestige, cards: state.cards, cardPulls: state.cardPulls, research: state.research,
     stats: state.stats, achievements: state.achievements, quiz: state.quiz, week: state.week,
+    login: state.login, welcomed: state.welcomed, installAsked: state.installAsked, refUsed: state.refUsed, refClaimed: state.refClaimed, seasonSeen: state.seasonSeen,
     city: state.city, story: state.story, conquests: state.conquests || 0, conquestRun: state.conquestRun ?? -1,
     base: { ...state.base, cash: BASE.pile?.amount || 0 },
     current: state.branch, branches: state.branches,
@@ -10808,6 +11126,7 @@ function load() {
   state.week = data.week || null;
   state.story = data.story ? { ...defaultStory(), ...data.story } : { ch: 0, catchup: true };
   state.conquests = data.conquests || 0;
+  Object.assign(state, { login: data.login || null, welcomed: data.welcomed ?? (data.tutorial >= 6), installAsked: data.installAsked || false, refUsed: data.refUsed || null, refClaimed: data.refClaimed || 0, seasonSeen: data.seasonSeen || '' });
   state.city = { ...defaultCity(), ...(data.city || {}) };
   state.conquestRun = data.conquestRun ?? -1;
   state.base = { ...defaultBase(), ...(data.base || {}) };
@@ -10927,6 +11246,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (running) for (let k = 0; k < gameSpeed; k++) simulate(dt);
+  trackPerf(now);
   updateCityHud();
   frameRest(dt, now);
 }
@@ -10956,6 +11276,7 @@ function simulate(dt) {
     updateEvents(dt);
     updateStory(dt);
     updateCityLife(dt);
+    updateSeason(dt);
     updateGuide();
     saveTimer += dt;
     if (saveTimer > 5) {
@@ -11027,6 +11348,7 @@ requestAnimationFrame(frame);
 // Probe storage up front so a browser that can't keep saves is flagged right away
 save();
 setTimeout(() => logProgress('open'), 0); // after the cloud settings below are defined
+applyLang();
 // Panels open as bottom sheets; tapping the dimmed backdrop closes them like their own close button
 const SHEETS = { missions: 'mclose', upgrades: 'upclose', branches: 'bclose', style: 'styleclose', board: 'boardclose', menu: 'resume', military: null, quiz: null, share: null, storypanel: null, cityhub: null };
 for (const [id, closeId] of Object.entries(SHEETS)) {
@@ -11068,6 +11390,10 @@ function start() {
   if (!storageOK) showSaveStatus(false);
   offerIdleEarnings(awayOnLoad);
   awayOnLoad = 0;
+  if (tutorialDone()) checkDailyLogin();
+  handleReferralArrival();
+  claimReferrals();
+  seasonStart();
   updateWakeLock();
 }
 const liteBtn = document.getElementById('litebtn');
