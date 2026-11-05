@@ -375,6 +375,17 @@
   .sheet > .box::before { content: ''; position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 44px; height: 5px; border-radius: 3px; background: #d6dbe6; }
   .sheet > .box h3 { margin-top: 2px; }
   @keyframes sheetup { from { transform: translateY(60%); opacity: .4; } to { transform: none; opacity: 1; } }
+  .dtiles { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 8px 0; }
+  .dtile { background: #f1f3f8; border-radius: 10px; padding: 6px 2px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .dtile b { font-size: 20px; }
+  .dtile small { font-size: 10.5px; color: #5a6274; }
+  .dtile.got { background: #e3f5e1; opacity: .7; }
+  .dtile.now { background: #ffd166; box-shadow: 0 0 0 3px #f5a623; }
+  .promptsheet { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; justify-content: center; z-index: 14; }
+  .sheet > .box { color: #1d2433; }
+  .promptsheet h3 { text-align: center; margin: 4px 0; }
+  .promptsheet .sub { text-align: center; color: #5a6274; font-size: 14px; line-height: 1.5; }
+  .promptsheet .btn { display: block; width: 100%; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -446,7 +457,10 @@
     <button id="resume" class="btn ghost">เล่นต่อ</button>
     <button id="soundbtn" class="btn ghost">🔊 เสียง: เปิด</button>
     <button id="litebtn" class="btn ghost">⚡ โหมดประหยัด: ปิด</button>
+    <button id="invitebtn" class="btn">👥 ชวนเพื่อน (ได้โบนัสทั้งคู่)</button>
     <button id="menushare" class="btn ghost">📸 แชร์โรงพยาบาลของฉัน</button>
+    <button id="installbtn" class="btn ghost">📲 เพิ่มลงหน้าจอโฮม</button>
+    <button id="langbtn" class="btn ghost">🌐 ภาษา: ไทย</button>
     <button id="daynightbtn" class="btn ghost">🌗 กลางวัน-กลางคืนตามเวลาจริง: เปิด</button>
     <button id="savenow" class="btn ghost">💾 บันทึกตอนนี้</button>
     <p id="cloudstatus"></p>
