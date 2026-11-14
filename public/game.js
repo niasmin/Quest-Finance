@@ -10132,22 +10132,22 @@ function buildAirportStop() {
 // --- the airport grounds ---
 function buildAirportGround() {
   const g = new THREE.Group();
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(140, 80), mat(0x7ccf5a));
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(260, 240), mat(0x7ccf5a));
   grass.rotation.x = -Math.PI / 2;
-  g.add(at3(grass, 465, 0.005, -20));
+  g.add(at3(grass, 465, 0, -20)); // reaches well past the camera's view so there's no edge
   const apron = new THREE.Mesh(new THREE.PlaneGeometry(118, 34), mat(0x5b6573));
   apron.rotation.x = -Math.PI / 2;
-  g.add(at3(apron, 463, 0.012, -38));
+  g.add(at3(apron, 463, 0.04, -38));
   const runway = new THREE.Mesh(new THREE.PlaneGeometry(118, 5), mat(0x3d4552));
   runway.rotation.x = -Math.PI / 2;
-  g.add(at3(runway, 463, 0.02, RUNWAY_Z));
-  for (let x = 408; x < 520; x += 5) g.add(at3(box(2.2, 0.01, 0.25, 0xffffff, { shadow: false }), x, 0.03, RUNWAY_Z));
-  for (const z of [RUNWAY_Z - 2.2, RUNWAY_Z + 2.2]) g.add(at3(box(118, 0.01, 0.12, 0xffffff, { shadow: false }), 463, 0.03, z));
-  for (let x = 410; x < 518; x += 4) g.add(at3(box(1.6, 0.01, 0.12, 0xffd166, { shadow: false }), x, 0.03, TAXI_Z));
+  g.add(at3(runway, 463, 0.08, RUNWAY_Z));
+  for (let x = 408; x < 520; x += 5) g.add(at3(box(2.2, 0.01, 0.25, 0xffffff, { shadow: false }), x, 0.11, RUNWAY_Z));
+  for (const z of [RUNWAY_Z - 2.2, RUNWAY_Z + 2.2]) g.add(at3(box(118, 0.01, 0.12, 0xffffff, { shadow: false }), 463, 0.11, z));
+  for (let x = 410; x < 518; x += 4) g.add(at3(box(1.6, 0.01, 0.12, 0xffd166, { shadow: false }), x, 0.07, TAXI_Z));
   // A plaza and road in front of the terminal
   const plaza = new THREE.Mesh(new THREE.PlaneGeometry(56, 10), mat(0xd9d4c7));
   plaza.rotation.x = -Math.PI / 2;
-  g.add(at3(plaza, 460, 0.012, 5));
+  g.add(at3(plaza, 460, 0.04, 5));
   for (let x = 412; x < 520; x += 9) {
     const t = treeModel(x % 2 ? 'round' : 'cone');
     g.add(at3(t, x, 0, 10.5));
