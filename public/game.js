@@ -829,6 +829,12 @@ function districtRoute(from, to) {
   return to;
 }
 function route(from, to) {
+  // The airport: by shuttle bus from the stop on the main road
+  if (inAirport(from) || inAirport(to)) {
+    if (inAirport(from) && inAirport(to)) return airportRoute(from, to);
+    if (inAirport(from)) return airportRoute(from, AIR_STOP_IN);
+    return flatDist(from, AIR_STOP) < 0.3 ? AIR_STOP : route(from, AIR_STOP);
+  }
   // The military base, north of the campus: in and out by the campus avenue and its main road
   if (inBase(to) || inBase(from)) {
     if (inBase(to) && inBase(from)) return baseRoute(from, to);
@@ -2249,7 +2255,7 @@ function makeHousekeeper() {
 const collectors = [];
 // Every pile on the ground: counters, rooms, the cash basket and the lot across the road
 const groundPiles = () => [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.cash)
-  .concat(basket.pile ? [basket.pile] : [], outdoorPiles());
+  .concat(basket.pile ? [basket.pile] : [], townPiles());
 const COLLECTOR_HOME = v(7.6, 11.2);
 function syncCollectors(animate = false) {
   while (collectors.length < upLevel('collector')) {
@@ -3217,6 +3223,8 @@ const TIPS = {
   outdoor: '💡 <b>ฝั่งตรงข้ามถนน</b> เดินออกประตูหน้า แล้วข้ามถนนไปเก็บค่าจอดรถ',
   boss: '💡 <b>เชื้อโรคยักษ์!</b> แค่ยืนใกล้ ๆ หมอยิงยาใส่เอง<br>ถ้าเปิด AUTO หมอจะวิ่งไปเอง',
   interior: '💡 <b>ข้างในศูนย์</b> มีผู้ใช้บริการเข้ามาเอง<br>ยืนวงเขียวเพื่อให้บริการ หรือยืนบนป้าย 🧑‍⚕️ เพื่อจ้างเจ้าหน้าที่ · ออกที่วงเหลือง 🚪',
+  airport: '💡 <b>✈️ สนามบิน</b> มาถึงแล้ว! ยืนบนป้ายน้ำเงินเพื่อสร้าง<br>ยืนวงเขียวหลังเคาน์เตอร์เพื่อเช็คอินผู้โดยสาร · ยืนวงเขียวที่ป้ายรถเพื่อกลับเมือง',
+  airportOpen: '💡 <b>✈️ รถรับส่งสนามบิน</b> เปิดแล้ว! ป้ายรถอยู่ริมถนนใหญ่ ข้างสวนพักฟื้น<br>ยืนนิ่งบนวงน้ำเงินเพื่อขึ้นรถไปสนามบิน',
   base: '💡 <b>🎖️ ค่ายทหาร</b> เปิดแล้ว! ขึ้นถนนวิทยาเขตไปทางเหนือสุด<br>ยืนบนป้ายเพื่อสร้าง · ยืนวงเขียวเพื่อฝึกทหาร · วงเหลืองคือกองบัญชาการ',
   campus: '💡 <b>วิทยาเขต Healthcare Empire</b> เปิดแล้ว!<br>เดินออกประตูหน้า ไปทางขวาตามถนนวิทยาเขต แล้วยืนบนป้ายราคาเพื่อซื้อตึก',
   citybtn: '💡 <b>🏙️ เมือง</b> (ปุ่มด้านล่าง)<br>ดูชีวิตชาวเมือง การจราจร นักท่องเที่ยว และคำแนะนำจากที่ปรึกษา',
@@ -3959,7 +3967,8 @@ const OUT = {
   cars: [], walkers: [], visitors: [], kioskQueue: [], carTimer: 3, walkTimer: 1, kioskTimer: 0,
   parkingCash: null, kioskCash: null, parkCash: null,
 };
-const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash, KT.cash, BASE.pile, ...campusPiles()].filter(Boolean);
+const outdoorPiles = () => [OUT.parkingCash, OUT.kioskCash, OUT.parkCash, KT.cash, BASE.pile, ...campusPiles(), ...airportPiles()].filter(Boolean);
+const townPiles = () => outdoorPiles().filter((p) => !inAirport(p.pos)); // the airport's piles stay there for you
 const kioskSlot = (i) => v(KIOSK.x - i * 0.95, 19.75);
 
 function stripeLine(x, z, w, d) {
@@ -7392,7 +7401,7 @@ const INT = {}; // live interiors by lot id
 let inside = null; // lot id the player is in
 const doorState = { still: 0, armed: true };
 const interiorOrigin = (k) => v(150 + k * 32, 0);
-const inInterior = (p) => p.x > 120;
+const inInterior = (p) => p.x > 120 && p.x < 400; // the airport lies beyond x = 400
 const interiorAt = (p) => Object.values(INT).find((it) => Math.abs(p.x - it.o.x) < INT_W && Math.abs(p.z - it.o.z) < INT_D);
 const doorOf = (lot) => lot.front.clone().add(v(-1.6, 0));
 
@@ -9095,7 +9104,7 @@ function buyTraffic(id) {
 const FLAGS = ['🇯🇵', '🇨🇳', '🇰🇷', '🇺🇸', '🇬🇧', '🇩🇪', '🇫🇷', '🇦🇺', '🇮🇳', '🇸🇬', '🇦🇪', '🇸🇪'];
 function tourismScore() {
   return Math.max(0, Math.round(
-    cityLevel('garden') * 1.5 + cityLevel('market') + (OUT.park ? 2 : 0) + (OUT.kiosk ? 1 : 0)
+    cityLevel('garden') * 1.5 + cityLevel('market') + airportTourism() + (OUT.park ? 2 : 0) + (OUT.kiosk ? 1 : 0)
     + comfort() / 4 + Math.max(0, state.rating - 3.5) * 4 + campusCount() * 0.6 + emp().tier * 2 - jam() * 4,
   ));
 }
@@ -9986,6 +9995,689 @@ document.getElementById('installbtn').addEventListener('click', () => { menu.sty
 document.getElementById('invitebtn').addEventListener('click', inviteFriends);
 if (standalone()) document.getElementById('installbtn').style.display = 'none';
 
+// ---------- the airport: reached by shuttle bus, it flies medical tourists in from all over the world ----------
+// Passengers check in at counters (served by you or hired staff, paying a ticket), pass security, wait at a
+// gate, and board the plane parked there. Planes land, taxi to the gate, board, push back and take off.
+// Built in stages like the military base; everything lives far east (x 405-525) behind a shuttle-bus stop.
+const AIR_X0 = 405;
+const inAirport = (p) => p.x > AIR_X0 - 5;
+const AIR_STOP = v(21, 19.3); // bus stop on the main road, between the recovery park and the temple
+const AIR_STOP_IN = v(460, 5.5); // bus stop at the terminal entrance
+const COUNTER_Z = -8;
+const GATE_WALL_Z = -20;
+const RUNWAY_Z = -46;
+const TAXI_Z = -38;
+const AIRPORT_UNLOCKS = [
+  { id: 'terminal', icon: '🛫', name: 'อาคารผู้โดยสาร + เคาน์เตอร์ 1 + ประตู 1', price: 80000, at: v(456, 2.6) },
+  { id: 'checkin2', icon: '🧾', name: 'เคาน์เตอร์เช็คอิน 2', price: 120000, at: v(454, -3.8) },
+  { id: 'security', icon: '🛂', name: 'จุดตรวจความปลอดภัย', price: 160000, at: v(470, -3.8) },
+  { id: 'gate2', icon: '🚪', name: 'ประตูขึ้นเครื่อง 2', price: 250000, at: v(473, -12.5) },
+  { id: 'tower', icon: '🗼', name: 'หอบังคับการบิน', price: 350000, at: v(478, 2.6) },
+  { id: 'lounge', icon: '🛋️', name: 'ห้องรับรอง VIP', price: 450000, at: v(482, -3.8) },
+  { id: 'medevac', icon: '🚁', name: 'เฮลิคอปเตอร์พยาบาลทางอากาศ', price: 700000, at: v(441, 2.6) },
+];
+const COUNTERS = [
+  { id: 'c1', x: 446, needs: 'terminal', hire: 20000 },
+  { id: 'c2', x: 454, needs: 'checkin2', hire: 35000 },
+];
+const GATES = [
+  { id: 'g1', x: 447, needs: 'terminal' },
+  { id: 'g2', x: 473, needs: 'gate2' },
+];
+const FLAG_ORIGINS = ['🇯🇵', '🇨🇳', '🇰🇷', '🇸🇬', '🇦🇺', '🇬🇧', '🇺🇸', '🇩🇪', '🇮🇳', '🇦🇪'];
+const defaultAirport = () => ({ step: 0, paid: 0, hired: [], cash: {}, flights: 0 });
+const AP = () => {
+  if (!state.airport) state.airport = defaultAirport();
+  return state.airport;
+};
+const airHas = (id) => AIRPORT_UNLOCKS.findIndex((u) => u.id === id) < AP().step;
+const airportOpen = () => baseOpen() && (state.base?.step || 0) >= 1; // opens once the base HQ stands
+const AIR = { built: false, tile: null, counters: {}, gates: {}, pax: [], spawnT: 2, piles: {}, stop: null, stopRing: null, armed: true, still: 0, heli: null, heliT: 20, opened: false };
+
+// --- models ---
+function airlinerModel(color) {
+  const g = new THREE.Group();
+  g.rotation.order = 'YXZ';
+  const body = cylM(1.0, 1.0, 10, 0xf7f7f2, 16);
+  body.rotation.x = Math.PI / 2;
+  g.add(at3(body, 0, 1.6, 0));
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(1.0, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xf7f7f2));
+  nose.rotation.x = Math.PI / 2;
+  g.add(at3(nose, 0, 1.6, 5));
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.6, 16), mat(0xf7f7f2));
+  tail.rotation.x = -Math.PI / 2;
+  g.add(at3(tail, 0, 1.75, -6.2));
+  g.add(at3(box(0.16, 2.2, 1.8, color), 0, 3.2, -6.2)); // fin
+  g.add(at3(box(4, 0.12, 1.1, 0xe0e0e0), 0, 1.9, -6.4)); // tailplane
+  g.add(at3(box(11, 0.16, 2.0, 0xe0e0e0), 0, 1.2, 0.3)); // wings
+  for (const x of [-2.6, 2.6]) g.add(at3(cylM(0.38, 0.32, 1.6, 0x90a4ae, 12).rotateX(Math.PI / 2), x, 0.75, 1.0));
+  // Livery stripe, a row of windows and the cockpit
+  for (const s of [-1, 1]) {
+    g.add(at3(box(0.04, 0.32, 9.4, color, { shadow: false }), s * 1.0, 1.25, -0.2));
+    g.add(at3(box(0.04, 0.14, 8.0, 0x37474f, { shadow: false }), s * 1.0, 1.9, -0.2));
+  }
+  g.add(at3(box(1.1, 0.25, 0.4, 0x263238, { shadow: false }), 0, 2.15, 5.3));
+  for (const z of [-1.6, 2.2]) g.add(at3(cylM(0.1, 0.1, 0.9, 0x37474f, 6), 0, 0.45, z));
+  return g;
+}
+function stairsModel() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 6; i++) g.add(at3(box(1.0, 0.12, 0.4, 0xeceff1), 0, 0.2 + i * 0.28, -i * 0.38));
+  for (const x of [-0.55, 0.55]) {
+    const rail = box(0.06, 0.06, 2.6, 0xffd166);
+    rail.rotation.x = 0.63;
+    g.add(at3(rail, x, 1.3, -0.95));
+  }
+  g.add(at3(box(1.3, 0.3, 2.4, 0xffd166), 0, 0.15, -1.1));
+  return g;
+}
+function busModel(color = 0x1e88e5) {
+  const g = new THREE.Group();
+  g.add(at3(box(1.6, 1.4, 4.2, color), 0, 0.95, 0), at3(box(1.62, 0.5, 3.6, 0x9fd8ff, { shadow: false }), 0, 1.35, 0.1));
+  for (const z of [-1.4, 1.4]) for (const x of [-0.8, 0.8]) g.add(at3(cylM(0.3, 0.3, 0.2, 0x222222, 10).rotateZ(Math.PI / 2), x, 0.3, z));
+  return g;
+}
+function airTile(u, at, label, price) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 256;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 2.2), [mat(0x0d47a1), mat(0x0d47a1), new THREE.MeshBasicMaterial({ toneMapped: false, map: tex }), mat(0x0d47a1), mat(0x0d47a1), mat(0x0d47a1)]);
+  mesh.position.set(at.x, 0.07, at.z);
+  scene.add(mesh);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 0.78), new THREE.MeshBasicMaterial({ toneMapped: false, map: signTex(label, '#0d47a1'), side: THREE.DoubleSide }));
+  sign.position.set(at.x, 2.0, at.z - 1.3);
+  scene.add(sign);
+  const t = { u, at, mesh, sign, paid: 0, price };
+  t.draw = (paid) => {
+    const g = c.getContext('2d');
+    g.fillStyle = '#0b2e66';
+    g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#42a5f5';
+    g.fillRect(0, 256 - (256 * paid) / price, 256, (256 * paid) / price);
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 10;
+    g.setLineDash([22, 14]);
+    g.strokeRect(10, 10, 236, 236);
+    g.setLineDash([]);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '84px sans-serif';
+    g.fillText(u.icon, 128, 92);
+    g.fillStyle = '#ffffff';
+    fitText(g, `💵${fmt(price - paid)}`, 128, 190, 228, 42);
+    tex.needsUpdate = true;
+  };
+  t.remove = () => scene.remove(mesh, sign);
+  t.draw(0);
+  return t;
+}
+
+// --- the bus stop by the main road (always there once the airport opens) ---
+function buildAirportStop() {
+  if (AIR.stop) return;
+  const g = new THREE.Group();
+  const shelter = campusProp('busstop');
+  g.add(shelter);
+  g.add(at3(signBoard('✈️ รถรับส่งสนามบิน', '#0d47a1', 3.0, 0.55), 0, 2.9, 0.2));
+  g.position.set(AIR_STOP.x, 0, AIR_STOP.z + 1.6);
+  scene.add(g, at3(busModel(), 25, 0, 18.4).rotateY(Math.PI / 2));
+  AIR.stopRing = zoneRing(AIR_STOP, 0x3d8bfd);
+  scene.add(AIR.stopRing);
+  AIR.stop = g;
+  tip('airportOpen');
+}
+
+// --- the airport grounds ---
+function buildAirportGround() {
+  const g = new THREE.Group();
+  const grass = new THREE.Mesh(new THREE.PlaneGeometry(140, 80), mat(0x7ccf5a));
+  grass.rotation.x = -Math.PI / 2;
+  g.add(at3(grass, 465, 0.005, -20));
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(118, 34), mat(0x5b6573));
+  apron.rotation.x = -Math.PI / 2;
+  g.add(at3(apron, 463, 0.012, -38));
+  const runway = new THREE.Mesh(new THREE.PlaneGeometry(118, 5), mat(0x3d4552));
+  runway.rotation.x = -Math.PI / 2;
+  g.add(at3(runway, 463, 0.02, RUNWAY_Z));
+  for (let x = 408; x < 520; x += 5) g.add(at3(box(2.2, 0.01, 0.25, 0xffffff, { shadow: false }), x, 0.03, RUNWAY_Z));
+  for (const z of [RUNWAY_Z - 2.2, RUNWAY_Z + 2.2]) g.add(at3(box(118, 0.01, 0.12, 0xffffff, { shadow: false }), 463, 0.03, z));
+  for (let x = 410; x < 518; x += 4) g.add(at3(box(1.6, 0.01, 0.12, 0xffd166, { shadow: false }), x, 0.03, TAXI_Z));
+  // A plaza and road in front of the terminal
+  const plaza = new THREE.Mesh(new THREE.PlaneGeometry(56, 10), mat(0xd9d4c7));
+  plaza.rotation.x = -Math.PI / 2;
+  g.add(at3(plaza, 460, 0.012, 5));
+  for (let x = 412; x < 520; x += 9) {
+    const t = treeModel(x % 2 ? 'round' : 'cone');
+    g.add(at3(t, x, 0, 10.5));
+  }
+  scene.add(g);
+  // Shuttle stop at the entrance, back to town
+  const stop = campusProp('busstop');
+  stop.position.set(AIR_STOP_IN.x, 0, AIR_STOP_IN.z + 1.6);
+  scene.add(stop, at3(signBoard('🏥 รถรับส่ง → กลับเมือง', '#2e7d32', 3.2, 0.55), AIR_STOP_IN.x, 2.9, AIR_STOP_IN.z + 1.8));
+  scene.add(zoneRing(AIR_STOP_IN, 0x3fbf5f));
+}
+function buildTerminal() {
+  const g = new THREE.Group();
+  const floorTex = canvasTexture(256, 256, (c) => {
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      c.fillStyle = (x + y) % 2 ? '#e8eef5' : '#f8fafc';
+      c.fillRect(x * 32, y * 32, 32, 32);
+    }
+  });
+  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+  floorTex.repeat.set(6, 2.5);
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(50, 0.04, 20), surface({ map: floorTex }));
+  floor.position.set(460, 0.02, -10);
+  floor.receiveShadow = true;
+  g.add(floor);
+  const wall = (x, z, w, d, h = 1.2) => {
+    g.add(at3(box(w, h, d, 0xeceff1), x, h / 2, z));
+    addCollider(x, z, w, d);
+  };
+  // South wall with the entrance in the middle, side walls, and a glass north wall with two gate doors
+  wall(445.5, 0.15, 21, 0.3);
+  wall(474.5, 0.15, 21, 0.3);
+  wall(435.15, -10, 0.3, 20);
+  wall(484.85, -10, 0.3, 20);
+  for (const [a, b] of [[435, 445.6], [448.4, 471.6], [474.4, 485]]) {
+    const w = b - a;
+    g.add(at3(box(w, 2.4, 0.2, 0x9fd8ff, { shadow: false }), (a + b) / 2, 1.2, GATE_WALL_Z));
+    addCollider((a + b) / 2, GATE_WALL_Z, w, 0.3);
+  }
+  g.add(at3(signBoard('✈️ ท่าอากาศยาน Dr. Quest International', '#0d47a1', 9, 0.9), 460, 3.4, 0.4));
+  // A departures board
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(5, 1.4), new THREE.MeshBasicMaterial({ toneMapped: false, map: canvasTexture(512, 144, (c) => {
+    c.fillStyle = '#10151f';
+    c.fillRect(0, 0, 512, 144);
+    c.fillStyle = '#ffd166';
+    c.font = '700 28px Mitr, sans-serif';
+    c.fillText('✈️ DEPARTURES · ขาออก', 16, 34);
+    c.fillStyle = '#e0f2f1';
+    c.font = '24px Mitr, sans-serif';
+    c.fillText('DQ101  Tokyo     ประตู 1  ON TIME', 16, 76);
+    c.fillText('DQ208  Singapore  ประตู 2  BOARDING', 16, 112);
+  }) }));
+  g.add(at3(board, 460, 2.6, -19.7));
+  scene.add(g);
+  // Clear the starting money piles' spots, and gate areas with seats
+}
+function buildCounter(C) {
+  const g = new THREE.Group();
+  g.add(at3(box(2.4, 1.0, 0.8, 0x1e88e5), 0, 0.5, 0), at3(box(2.5, 0.08, 0.9, 0xffffff), 0, 1.04, 0));
+  g.add(at3(box(0.5, 0.36, 0.05, 0x263238, { shadow: false }), -0.5, 1.3, -0.2), at3(box(1.0, 0.14, 0.6, 0x546e7a), 0.9, 0.62, 0.65));
+  g.add(at3(signBoard(`🧾 เช็คอิน ${C.id === 'c1' ? 1 : 2}`, '#1565c0', 2.2, 0.45), 0, 2.4, -0.2));
+  // Queue rope posts
+  for (let i = 0; i < 4; i++) g.add(at3(cylM(0.05, 0.05, 0.9, 0xb0bec5, 6), -0.9, 0.45, 1.3 + i * 0.9), at3(cylM(0.05, 0.05, 0.9, 0xb0bec5, 6), 0.9, 0.45, 1.3 + i * 0.9));
+  g.add(at3(box(0.04, 0.04, 2.7, 0xd32f2f, { shadow: false }), -0.9, 0.85, 2.65), at3(box(0.04, 0.04, 2.7, 0xd32f2f, { shadow: false }), 0.9, 0.85, 2.65));
+  g.position.set(C.x, 0.04, COUNTER_Z);
+  scene.add(g);
+  addCollider(C.x, COUNTER_Z, 2.4, 0.8);
+  const ring = v(C.x, COUNTER_Z - 1.6);
+  scene.add(zoneRing(ring, 0x3fbf5f));
+  const st = { C, ring, queue: [], progress: 0, staffed: AP().hired.includes(C.id), hireTile: null, staff: null };
+  AIR.counters[C.id] = st;
+  AIR.piles[C.id] = AIR.piles[C.id] || new MoneyPile(v(C.x + 2.1, COUNTER_Z - 1.2));
+  if (st.staffed) postAirStaff(st);
+  else {
+    st.hireTile = airTile({ icon: '🧑‍✈️' }, v(C.x - 2.4, COUNTER_Z - 2.6), `🧑‍✈️ จ้างพนักงานเช็คอิน`, C.hire);
+  }
+}
+function postAirStaff(st) {
+  const p = makePerson({ shirt: 0x1565c0, pants: 0x0d47a1, hair: pick(HAIR) });
+  p.group.position.set(st.C.x, 0.04, COUNTER_Z - 0.9);
+  scene.add(p.group);
+  st.staff = p;
+}
+function buildGate(G) {
+  const seats = [];
+  for (let r = 0; r < 2; r++) for (let i = 0; i < 8; i++) {
+    const at = v(G.x - 3.5 + i, -15.4 - r * 1.3);
+    scene.add(at3(box(0.7, 0.45, 0.6, 0x26a69a), at.x, 0.35, at.z), at3(box(0.7, 0.5, 0.12, 0x00897b), at.x, 0.6, at.z - 0.3));
+    seats.push({ at: at.clone().add(v(0, 0.35)), who: null });
+  }
+  scene.add(at3(signBoard(`🚪 ประตู ${G.id === 'g1' ? 1 : 2}`, '#00695c', 2.0, 0.5), G.x, 2.8, GATE_WALL_Z + 0.2));
+  // Jet-bridge stub beside the door and the stairs down to the plane
+  const st = stairsModel();
+  st.rotation.y = Math.PI / 2;
+  scene.add(at3(st, G.x + 3.2, 0, GATE_WALL_Z - 5.5));
+  const plane = airlinerModel(pick([0xe5484d, 0x1e88e5, 0x7b1fa2, 0x00897b, 0xf57c00]));
+  plane.visible = false;
+  scene.add(plane);
+  const gate = { G, seats, plane, state: 'away', t: rand(2, 6), path: [], boarded: 0, flag: pick(FLAG_ORIGINS) };
+  AIR.gates[G.id] = gate;
+  AIR.piles[G.id] = AIR.piles[G.id] || new MoneyPile(v(G.x + 4.6, -13.6));
+}
+function buildTower() {
+  const g = new THREE.Group();
+  g.add(at3(cylM(0.8, 1.1, 9, 0xeceff1, 14), 0, 4.5, 0), at3(cylM(1.8, 1.4, 1.6, 0x4fc3f7, 14), 0, 9.6, 0), at3(cylM(1.9, 1.9, 0.3, 0x37474f, 14), 0, 10.5, 0));
+  g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8), new THREE.MeshBasicMaterial({ toneMapped: false, color: 0xe5484d })), 0, 11, 0));
+  g.position.set(500, 0, -10);
+  scene.add(g);
+  addCollider(500, -10, 2.2, 2.2);
+}
+function buildSecurity() {
+  const g = new THREE.Group();
+  g.add(at3(box(0.25, 2.2, 0.4, 0x90a4ae), -0.8, 1.1, 0), at3(box(0.25, 2.2, 0.4, 0x90a4ae), 0.8, 1.1, 0), at3(box(1.85, 0.3, 0.42, 0x90a4ae), 0, 2.25, 0));
+  g.add(at3(box(0.8, 0.9, 2.4, 0x546e7a), 2.0, 0.45, 0.4), at3(box(0.7, 0.05, 2.4, 0x263238, { shadow: false }), 2.0, 0.92, 0.4));
+  g.add(at3(signBoard('🛂 จุดตรวจความปลอดภัย', '#455a64', 3.2, 0.5), 0, 2.9, 0));
+  g.position.set(470, 0.04, COUNTER_Z - 1);
+  scene.add(g);
+  addCollider(471.2, COUNTER_Z - 1, 0.3, 0.4);
+  addCollider(468.8, COUNTER_Z - 1, 0.3, 0.4);
+  addCollider(472, COUNTER_Z - 0.6, 0.8, 2.4);
+  const guard = makePerson({ shirt: 0x37474f, pants: 0x263238, hair: 0x1f1f1f });
+  guard.group.position.set(469, 0.04, COUNTER_Z - 2.6);
+  scene.add(guard.group);
+}
+function buildLounge() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const s = equipModel('sofa');
+    s.scale.setScalar(0.8);
+    g.add(at3(s, i * 2, 0, 0));
+  }
+  g.add(at3(signBoard('🛋️ VIP Lounge', '#6a1b9a', 2.6, 0.5), 2, 2.4, -0.6));
+  g.position.set(478, 0.04, -11.5);
+  scene.add(g);
+}
+function buildMedevac() {
+  const pad = cylM(2.2, 2.2, 0.05, 0x37474f, 24);
+  scene.add(at3(pad, 425, 0.04, -8));
+  const H = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, map: signTexture((c) => {
+    c.fillStyle = '#ffffff'; c.font = '700 96px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('H', 64, 70);
+  }) }));
+  H.rotation.x = -Math.PI / 2;
+  scene.add(at3(H, 425, 0.08, -8));
+  // Reuse the rooftop helicopter's look: a white body with a red cross
+  const heli = new THREE.Group();
+  heli.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.9, 14, 10), mat(0xffffff)), 0, 1.0, 0), at3(box(0.3, 0.3, 2.4, 0xffffff), 0, 1.1, -1.6));
+  heli.add(at3(box(0.5, 0.12, 0.14, 0xe5484d, { shadow: false }), 0, 1.3, 0.85), at3(box(0.14, 0.5, 0.14, 0xe5484d, { shadow: false }), 0, 1.3, 0.86));
+  const rotor = box(4, 0.04, 0.2, 0x263238, { shadow: false });
+  heli.add(at3(rotor, 0, 2.0, 0));
+  heli.userData.rotor = rotor;
+  heli.position.set(425, 0, -8);
+  scene.add(heli);
+  AIR.heli = { g: heli, t: 0, flying: false };
+}
+const AIR_BUILD = { terminal: () => { buildTerminal(); buildCounter(COUNTERS[0]); buildGate(GATES[0]); }, checkin2: () => buildCounter(COUNTERS[1]), security: buildSecurity, gate2: () => buildGate(GATES[1]), tower: buildTower, lounge: buildLounge, medevac: buildMedevac };
+
+function buildAirport() {
+  if (AIR.built) return;
+  AIR.built = true;
+  buildAirportGround();
+  for (let i = 0; i < AP().step; i++) AIR_BUILD[AIRPORT_UNLOCKS[i].id]?.();
+  for (const [id, amt] of Object.entries(AP().cash || {})) AIR.piles[id]?.add(amt);
+  showAirTile();
+}
+function showAirTile() {
+  if (AIR.tile) {
+    AIR.tile.remove();
+    AIR.tile = null;
+  }
+  const u = AIRPORT_UNLOCKS[AP().step];
+  if (!u) return;
+  AIR.tile = airTile(u, u.at, `${u.icon} ${u.name}`, u.price);
+  AIR.tile.paid = AP().paid;
+  AIR.tile.draw(AP().paid);
+}
+
+// --- passengers ---
+const ticketPrice = () => Math.round(120 * priceMult() * (airHas('security') ? 1.3 : 1));
+const boardingPay = () => Math.round(80 * priceMult() * (airHas('tower') ? 1.15 : 1) * (airHas('lounge') ? 1.5 : 1));
+function spawnPassenger() {
+  const counters = Object.values(AIR.counters);
+  if (!counters.length) return;
+  const st = counters.sort((a, b) => a.queue.length - b.queue.length)[0];
+  if (st.queue.length >= 5) return;
+  const p = makePerson({ shirt: pick(SHIRTS) });
+  const bag = box(0.4, 0.5, 0.25, pick([0x37474f, 0xe5484d, 0x1e88e5, 0xffd166]));
+  bag.position.set(0.45, 0.25, 0);
+  p.group.add(bag);
+  p.group.position.set(rand(457, 463), 0.04, 3.2);
+  scene.add(p.group);
+  const pax = { p, st, stage: 'queue', path: [], seat: null, gate: null };
+  st.queue.push(pax);
+  AIR.pax.push(pax);
+}
+function paxWalk(pax, dt, speed = 2.4) {
+  const target = pax.path[0];
+  if (!target) {
+    animatePerson(pax.p, false, dt);
+    return true;
+  }
+  const arrived = walkTo(pax.p, target, speed, dt);
+  pax.p.group.position.y = 0.04;
+  animatePerson(pax.p, true, dt);
+  if (arrived) pax.path.shift();
+  return pax.path.length === 0 && arrived;
+}
+function afterCheckIn(pax) {
+  const gates = Object.values(AIR.gates);
+  const gate = gates.sort((a, b) => a.seats.filter((s) => s.who).length - b.seats.filter((s) => s.who).length)[0];
+  const seat = gate?.seats.find((s) => !s.who);
+  if (!seat) {
+    pax.stage = 'leave';
+    pax.path = [v(pax.p.group.position.x, 3.5)];
+    return;
+  }
+  seat.who = pax;
+  pax.seat = seat;
+  pax.gate = gate;
+  pax.stage = 'toGate';
+  const x = pax.st.C.x + 1.6;
+  pax.path = airHas('security') ? [v(x, COUNTER_Z + 1), v(470, COUNTER_Z + 1), v(470, COUNTER_Z - 2.6)] : [v(x, COUNTER_Z + 1), v(x, COUNTER_Z - 2.4)];
+  pax.path.push(seat.at.clone().add(v(0, 0.8)), seat.at.clone());
+}
+function updatePassengers(dt) {
+  AIR.spawnT -= dt;
+  const cap = 10 + Object.keys(AIR.counters).length * 6 + Object.keys(AIR.gates).length * 6;
+  if (AIR.spawnT <= 0 && AIR.pax.length < cap && Object.keys(AIR.counters).length) {
+    AIR.spawnT = (3.2 / Object.keys(AIR.counters).length) * rand(0.7, 1.3) / arrivalMult();
+    spawnPassenger();
+  }
+  const pp = player.group.position;
+  for (const st of Object.values(AIR.counters)) {
+    // Queue slots line up south of the counter
+    st.queue.forEach((pax, i) => {
+      const slot = v(st.C.x, COUNTER_Z + 1.2 + i * 0.9);
+      pax.arrived = flatDist(pax.p.group.position, slot) < 0.12;
+      if (!pax.arrived) walkTo(pax.p, slot, 2.4, dt);
+      animatePerson(pax.p, !pax.arrived, dt);
+      if (pax.arrived) pax.p.group.rotation.y = Math.PI;
+    });
+    const front = st.queue[0];
+    const playerHere = inAirport(pp) && flatDist(pp, st.ring) < ZONE_R;
+    if (front?.arrived && (st.staffed || playerHere)) {
+      st.progress += dt * (st.staffed ? staffMult() : 1.25);
+      if (st.progress >= 1.6) {
+        st.progress = 0;
+        st.queue.shift();
+        const amt = ticketPrice();
+        AIR.piles[st.C.id].add(amt);
+        missionProgress('earn', amt);
+        if (inAirport(pp)) floatText(front.p.group.position, `🧾 +${fmt(amt)}`, '#8be08f');
+        afterCheckIn(front);
+      }
+    }
+    // Hire tile
+    const t = st.hireTile;
+    if (t && inAirport(pp) && flatDist(pp, t.at) < 1.1 && state.money > 0) {
+      const pay = Math.min(state.money, st.C.hire - t.paid, Math.max(1, Math.ceil(st.C.hire * dt * 0.8)));
+      state.money -= pay;
+      t.paid += pay;
+      t.draw(t.paid);
+      sfxTick();
+      if (t.paid >= st.C.hire) {
+        t.remove();
+        st.hireTile = null;
+        st.staffed = true;
+        AP().hired.push(st.C.id);
+        postAirStaff(st);
+        sfxUnlock();
+        toast('🧑‍✈️ จ้างพนักงานเช็คอินแล้ว · เคาน์เตอร์ทำงานเองได้', 3000);
+        save();
+      }
+    }
+  }
+  for (let i = AIR.pax.length - 1; i >= 0; i--) {
+    const pax = AIR.pax[i];
+    if (pax.stage === 'queue') continue;
+    if (pax.stage === 'toGate') {
+      if (paxWalk(pax, dt)) {
+        pax.stage = 'wait';
+        pax.p.group.rotation.y = Math.PI;
+      }
+    } else if (pax.stage === 'wait') {
+      animatePerson(pax.p, false, dt);
+    } else if (pax.stage === 'board' || pax.stage === 'leave') {
+      if (paxWalk(pax, dt, 2.8)) {
+        scene.remove(pax.p.group);
+        AIR.pax.splice(i, 1);
+        if (pax.stage === 'board') {
+          const amt = boardingPay();
+          AIR.piles[pax.gate.G.id].add(amt);
+          missionProgress('earn', amt);
+        }
+      }
+    }
+  }
+}
+
+// --- planes: land, taxi to the gate, board, push back, take off ---
+function planePath(gate, kind) {
+  const gx = gate.G.x;
+  const P = (x, z, y = 0, sp = 9) => ({ p: new THREE.Vector3(x, y, z), sp });
+  if (kind === 'arrive') return [P(398, RUNWAY_Z, 7, 26), P(430, RUNWAY_Z, 0, 24), P(gx + 12, RUNWAY_Z, 0, 10), P(gx, TAXI_Z, 0, 6), P(gx, -30, 0, 4)];
+  if (kind === 'push') return [P(gx, TAXI_Z, 0, 3)];
+  return [P(414, TAXI_Z, 0, 7), P(410, RUNWAY_Z, 0, 6), P(470, RUNWAY_Z, 0, 22), P(530, RUNWAY_Z, 12, 30)];
+}
+function updatePlanes(dt) {
+  const fast = airHas('tower') ? 0.5 : 1;
+  for (const gate of Object.values(AIR.gates)) {
+    const pl = gate.plane;
+    if (gate.state === 'away') {
+      gate.t -= dt;
+      if (gate.t <= 0) {
+        gate.state = 'arrive';
+        gate.path = planePath(gate, 'arrive');
+        pl.position.copy(gate.path[0].p);
+        pl.visible = true;
+        gate.flag = pick(FLAG_ORIGINS);
+      }
+      continue;
+    }
+    if (gate.state === 'parked') {
+      gate.t -= dt;
+      // Board the passengers waiting at this gate, a few seconds apart
+      gate.boardT = (gate.boardT || 0) - dt;
+      const waiting = gate.seats.filter((s) => s.who && s.who.stage === 'wait');
+      if (waiting.length && gate.boardT <= 0 && gate.boarded < 16) {
+        gate.boardT = 0.6;
+        const s = waiting[0];
+        const pax = s.who;
+        s.who = null;
+        pax.stage = 'board';
+        pax.path = [v(gate.G.x, GATE_WALL_Z + 0.8), v(gate.G.x, GATE_WALL_Z - 1.5), v(gate.G.x + 3.4, GATE_WALL_Z - 5.5), v(gate.G.x + 1.3, GATE_WALL_Z - 5.5)];
+        gate.boarded++;
+      }
+      if (gate.t <= 0 && (!waiting.length || gate.boarded >= 16)) {
+        gate.state = 'push';
+        gate.path = planePath(gate, 'push');
+        gate.reverse = true;
+      }
+      continue;
+    }
+    // Moving along a path
+    const step = gate.path[0];
+    if (!step) continue;
+    const to = step.p;
+    const d = pl.position.distanceTo(to);
+    const mv = Math.min(d, step.sp * dt);
+    if (d > 0.01) {
+      const dir = to.clone().sub(pl.position).normalize();
+      pl.position.addScaledVector(dir, mv);
+      if (!gate.reverse && Math.hypot(dir.x, dir.z) > 0.2) pl.rotation.y = Math.atan2(dir.x, dir.z);
+      pl.rotation.x = gate.state === 'depart' && pl.position.y > 0.5 ? -0.18 : gate.state === 'arrive' && pl.position.y > 0.5 ? 0.06 : 0;
+    }
+    if (d - mv < 0.02) {
+      gate.path.shift();
+      if (!gate.path.length) {
+        if (gate.state === 'arrive') {
+          gate.state = 'parked';
+          gate.t = 14 * fast;
+          gate.boarded = 0;
+          pl.rotation.set(0, 0, 0);
+          AP().flights++;
+          if (inAirport(player.group.position)) floatText(pl.position.clone().add(v(0, 3)), `${gate.flag} เที่ยวบินลงจอด`, '#bfe9ff');
+        } else if (gate.state === 'push') {
+          gate.reverse = false;
+          gate.state = 'depart';
+          gate.path = planePath(gate, 'depart');
+        } else {
+          gate.state = 'away';
+          gate.t = rand(8, 14) * fast;
+          pl.visible = false;
+          pl.rotation.set(0, 0, 0);
+        }
+      }
+    }
+  }
+}
+function updateMedevac(dt) {
+  const H = AIR.heli;
+  if (!H) return;
+  H.g.userData.rotor.rotation.y += dt * (H.flying ? 30 : 4);
+  AIR.heliT -= dt;
+  if (!H.flying && AIR.heliT <= 0) {
+    H.flying = true;
+    H.t = 0;
+  }
+  if (H.flying) {
+    H.t += dt;
+    const k = H.t / 10;
+    H.g.position.y = Math.sin(Math.min(1, k) * Math.PI) * 9;
+    H.g.position.x = 425 - Math.sin(k * Math.PI) * 6;
+    if (k >= 1) {
+      H.flying = false;
+      H.g.position.set(425, 0, -8);
+      AIR.heliT = rand(25, 40);
+      // An air-ambulance run brings an emergency patient (and a bonus) to the hospital
+      const amt = Math.round(400 * priceMult());
+      AIR.piles.g1?.add(amt);
+    }
+  }
+}
+
+// --- moving between town and the airport on the shuttle ---
+function updateAirportShuttle(dt) {
+  if (!airportOpen() || player.floor !== 0 || lift.riding) return;
+  const p = player.group.position;
+  const there = inAirport(p);
+  const stop = there ? AIR_STOP_IN : AIR_STOP;
+  const near = flatDist(p, stop) < ZONE_R;
+  if (!near) {
+    AIR.armed = true;
+    AIR.still = 0;
+    return;
+  }
+  if (!AIR.armed) return;
+  const still = Math.hypot(input.x, input.z) < 0.08;
+  const autoOn = autoBadge.classList.contains('show') && auto.task;
+  const autoGo = autoOn && inAirport(auto.task.at) !== there;
+  AIR.still = still ? AIR.still + dt : 0;
+  if (!autoGo && AIR.still < 0.5) return;
+  AIR.armed = false;
+  AIR.still = 0;
+  if (there) p.copy(AIR_STOP).add(v(0, -0.2));
+  else {
+    if (!AIR.opened) {
+      AIR.opened = true;
+      tip('airport');
+    }
+    p.copy(AIR_STOP_IN).add(v(0, 0.1));
+  }
+  auto.task = null;
+  tone(520, 0.12, 'triangle', 0.05);
+  setTimeout(() => tone(780, 0.14, 'triangle', 0.05), 120);
+  updateCamera(0, true);
+}
+
+function updateAirport(dt) {
+  if (!airportOpen()) return;
+  buildAirportStop();
+  buildAirport();
+  updateAirportShuttle(dt);
+  // Stage tile: stand on it to pay toward the next building
+  const pp = player.group.position;
+  const t = AIR.tile;
+  if (t && inAirport(pp) && flatDist(pp, t.at) < 1.1 && state.money > 0) {
+    const u = t.u;
+    const pay = Math.min(state.money, u.price - t.paid, Math.max(1, Math.ceil(u.price * dt * 0.8)));
+    state.money -= pay;
+    t.paid += pay;
+    AP().paid = t.paid;
+    t.draw(t.paid);
+    sfxTick();
+    if (t.paid >= u.price) {
+      AP().step++;
+      AP().paid = 0;
+      AIR_BUILD[u.id]?.();
+      burst(u.at);
+      sfxUnlock();
+      toast(`${u.icon} <b>สร้าง${u.name}แล้ว!</b>`, 3500);
+      showAirTile();
+      save();
+    }
+  }
+  updatePassengers(dt);
+  updatePlanes(dt);
+  updateMedevac(dt);
+}
+// Medical tourists fly in through the airport
+const airportTourism = () => (AP().step ? Math.min(8, AP().step + Object.keys(AIR.gates).length) : 0);
+const airportPiles = () => Object.values(AIR.piles);
+function airportSnapshot() {
+  return { ...AP(), cash: Object.fromEntries(Object.entries(AIR.piles).map(([k, p]) => [k, p.amount])) };
+}
+
+// --- AUTO and routing ---
+function airportRoute(from, to) {
+  if (flatDist(from, to) < 1.2) return to;
+  // Crossing the row of check-in counters goes through the aisle beside the nearest counter
+  const south = (z) => z > COUNTER_Z + 0.6;
+  const north = (z) => z < COUNTER_Z - 0.6;
+  if ((south(from.z) && north(to.z)) || (north(from.z) && south(to.z))) {
+    const aisles = [441, 450, 462, 476, 481];
+    const ax = aisles.sort((a, b) => Math.abs(a - from.x) - Math.abs(b - from.x))[0];
+    if (Math.abs(from.x - ax) > 0.4) return v(ax, from.z);
+    return v(ax, south(to.z) ? COUNTER_Z + 1.4 : COUNTER_Z - 1.4);
+  }
+  // In and out of the terminal by the front entrance
+  const indoor = (p) => p.z < 0.15 && p.z > GATE_WALL_Z && p.x > 435 && p.x < 485;
+  const front = (p) => p.z >= 0.15;
+  if (front(from) !== front(to) && (indoor(from) || indoor(to))) {
+    if (Math.abs(from.x - 460) > 0.5) return v(460, from.z);
+    return v(460, to.z);
+  }
+  if (!indoor(from) && !indoor(to) && from.z < GATE_WALL_Z !== to.z < GATE_WALL_Z) {
+    // Between the plaza and the apron: around the east side of the terminal
+    if (from.x < 486.5 && Math.abs(from.z - to.z) > 1) return Math.abs(from.z - 4) > 0.5 && from.z > 0 ? v(from.x, 4) : v(487, from.z);
+    return to;
+  }
+  // Through the gate doors to reach the apron, and back
+  const inside = (z) => z > GATE_WALL_Z;
+  if (inside(from.z) !== inside(to.z)) {
+    const gx = [447, 473].sort((a, b) => Math.abs(a - from.x) - Math.abs(b - from.x))[0];
+    if (Math.abs(from.x - gx) > 0.4) return v(gx, from.z);
+    return v(gx, to.z);
+  }
+  return to;
+}
+function airportTask() {
+  if (!airportOpen()) return null;
+  const here = inAirport(player.group.position);
+  const u = AIRPORT_UNLOCKS[AP().step];
+  if (u && AIR.tile && state.money >= u.price - AP().paid) return { at: u.at, keep: () => AIRPORT_UNLOCKS[AP().step] === u && state.money > 0 };
+  for (const st of Object.values(AIR.counters)) {
+    if (st.hireTile && state.money >= st.C.hire) return { at: st.hireTile.at, keep: () => Boolean(st.hireTile) && state.money > 0 };
+  }
+  // While there, serve an unstaffed counter for a little while, then move on (hire staff to keep it running)
+  const now = performance.now();
+  for (const st of Object.values(AIR.counters)) {
+    if (here && !st.staffed && st.queue[0]?.arrived && now > (AIR.serveCool || 0)) {
+      AIR.serveCool = now + 45000;
+      const until = now + 15000;
+      return { at: st.ring, keep: () => st.queue.length > 0 && performance.now() < until };
+    }
+  }
+  const pile = airportPiles().filter((p) => p.amount > 0).sort((a, b) => b.amount - a.amount)[0];
+  if (pile && (here || pile.amount >= 2000 * priceMult())) return { at: pile.pos, keep: () => pile.amount > 0 };
+  return null;
+}
+
 // ---------- player actions ----------
 let actTimer = 0;
 function playerActions(dt) {
@@ -10143,7 +10835,7 @@ function collide(pos, r = 0.35) {
       }
     }
   }
-  pos.x = Math.max(-60, Math.min(pos.x > 120 ? 400 : 60, pos.x)); // campus centre interiors live beyond x = 140
+  pos.x = Math.max(-60, Math.min(pos.x > 400 ? 525 : pos.x > 120 ? 395 : 60, pos.x)); // campus centre interiors live beyond x = 140, the airport beyond 400
   pos.z = Math.max(-70, Math.min(32, pos.z)); // the military base reaches z = -64
   if (player.floor >= 1) {
     // Stay on the platform upstairs
@@ -10200,6 +10892,11 @@ function autoTasks() {
     const near = sick.map((i) => plotZone(district.plots[i].at)).sort((a, b) => flatDist(player.group.position, a) - flatDist(player.group.position, b))[0];
     return [{ at: near, keep: () => epiTargets().length > 0 && epiTargets().some((i) => flatDist(plotZone(district.plots[i].at), near) < 0.1) }];
   }
+  if (inAirport(player.group.position)) {
+    // At the airport: finish the work there, then take the shuttle back
+    const at = airportTask();
+    return [at || { at: AIR_STOP, keep: () => true }];
+  }
   if (player.floor === 1) return floor2Tasks();
   if (player.floor === 2) return roofTasks();
   if (player.floor >= 3) return upperTasks(player.floor);
@@ -10214,7 +10911,7 @@ function autoTasks() {
     if (t.u.floor) tasks.push({ at: ELEVATOR, ride: t.u.floor, keep: () => player.floor === 0 });
     else tasks.push({ at: t.u.at, keep: () => tile === t && state.money > 0 });
   } else {
-    const ct = campusTask() || baseTask();
+    const ct = campusTask() || baseTask() || airportTask();
     if (ct) tasks.push(ct);
   }
   for (const line of [...lines].sort((a, b) => a.shelf.total - b.shelf.total)) {
@@ -10243,7 +10940,7 @@ function autoTasks() {
     if (!room.staffHired && room.queue[0]?.arrived) tasks.push({ at: room.operator, keep: () => room.queue[0]?.arrived });
   }
   if (OUT.kiosk && !OUT.clerk && OUT.kioskQueue[0]?.arrived) tasks.push({ at: KIOSK_ZONE, keep: () => OUT.kioskQueue[0]?.arrived });
-  const piles = [...lines, ...rooms].map((x) => x.cash).concat(basket.pile ? [basket.pile] : [], outdoorPiles()).sort((a, b) => b.amount - a.amount);
+  const piles = [...lines, ...rooms].map((x) => x.cash).concat(basket.pile ? [basket.pile] : [], townPiles()).sort((a, b) => b.amount - a.amount);
   // With cash collectors on the job, serving people inside the campus centres comes first
   const inner = interiorTask();
   if (inner && upLevel('collector') > 0) tasks.push(inner);
@@ -10448,7 +11145,7 @@ function guideTarget() {
   const pill = LINES.pill;
   const piles = [...Object.values(LINES), ...Object.values(ROOMS)].filter((x) => x.active).map((x) => x.cash);
   if (basket.pile) piles.push(basket.pile);
-  piles.push(...outdoorPiles());
+  piles.push(...townPiles());
   if (tile && state.money >= tile.u.price - state.paid) return tile.u.floor ? ELEVATOR : tile.u.at;
   const quest = storyTarget();
   if (quest) return quest;
@@ -11049,6 +11746,7 @@ function saveData() {
     login: state.login, welcomed: state.welcomed, installAsked: state.installAsked, refUsed: state.refUsed, refClaimed: state.refClaimed, seasonSeen: state.seasonSeen,
     city: state.city, story: state.story, conquests: state.conquests || 0, conquestRun: state.conquestRun ?? -1,
     base: { ...state.base, cash: BASE.pile?.amount || 0 },
+    airport: airportSnapshot(),
     current: state.branch, branches: state.branches,
     // Summary fields the cloud uses for the leaderboard
     branch: state.branches.length - 1, step: state.step,
@@ -11130,6 +11828,7 @@ function load() {
   state.city = { ...defaultCity(), ...(data.city || {}) };
   state.conquestRun = data.conquestRun ?? -1;
   state.base = { ...defaultBase(), ...(data.base || {}) };
+  state.airport = { ...defaultAirport(), ...(data.airport || {}) };
   state.base.units = { ...defaultBase().units, ...(state.base.units || {}) };
   while (state.empire.plots.length < CITY_PLOTS + 4 * (state.empire.land || 0)) state.empire.plots.push(null);
   // Players from before the tutorial existed (or anyone who has earned money) skip it
@@ -11265,6 +11964,7 @@ function simulate(dt) {
     updateCampus(dt);
     updateInteriors(dt);
     updateBase(dt);
+    updateAirport(dt);
     updateExtras(dt);
     updateFloor2(dt);
     updateOutdoor(dt);
@@ -11839,4 +12539,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
