@@ -3441,6 +3441,10 @@ const fmtClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.max(0, Math.flo
 
 const toastEl = document.getElementById('toast');
 // One-time explanations the first time something new shows up; queued so they don't overlap
+const TIPS_EN = {
+  airport: '💡 <b>✈️ The airport</b> Stand on the blue tile to build<br>Stand in the green ring behind a counter to check passengers in · press 🚌 to go back to town',
+  airportOpen: '💡 <b>✈️ Airport shuttle</b> is open! Press the ✈️ button at the top right, or stand on the blue ring at the bus stop',
+};
 const TIPS = {
   rush: '💡 <b>ปุ่ม 🚨 เร่งด่วน</b> มาแล้ว (มุมขวาบน)<br>กดเมื่อพร้อม คนไข้แห่มา 75 วินาที รายได้ ×1.5',
   stylebtn: '💡 <b>🎨 ตกแต่ง</b> เปิดแล้ว (อยู่ในปุ่ม ⬆️ อัปเกรด)<br>ซื้อของตกแต่งให้คนไข้รอนานขึ้น และเปลี่ยนชุดหมอได้',
@@ -3452,8 +3456,8 @@ const TIPS = {
   outdoor: '💡 <b>ฝั่งตรงข้ามถนน</b> เดินออกประตูหน้า แล้วข้ามถนนไปเก็บค่าจอดรถ',
   boss: '💡 <b>เชื้อโรคยักษ์!</b> แค่ยืนใกล้ ๆ หมอยิงยาใส่เอง<br>ถ้าเปิด AUTO หมอจะวิ่งไปเอง',
   interior: '💡 <b>ข้างในศูนย์</b> มีผู้ใช้บริการเข้ามาเอง<br>ยืนวงเขียวเพื่อให้บริการ หรือยืนบนป้าย 🧑‍⚕️ เพื่อจ้างเจ้าหน้าที่ · ออกที่วงเหลือง 🚪',
-  airport: '💡 <b>✈️ สนามบิน</b> มาถึงแล้ว! ยืนบนป้ายน้ำเงินเพื่อสร้าง<br>ยืนวงเขียวหลังเคาน์เตอร์เพื่อเช็คอินผู้โดยสาร · ยืนวงเขียวที่ป้ายรถเพื่อกลับเมือง',
-  airportOpen: '💡 <b>✈️ รถรับส่งสนามบิน</b> เปิดแล้ว! ป้ายรถอยู่ริมถนนใหญ่ ข้างสวนพักฟื้น<br>ยืนนิ่งบนวงน้ำเงินเพื่อขึ้นรถไปสนามบิน',
+  airport: '💡 <b>✈️ สนามบิน</b> มาถึงแล้ว! ยืนบนป้ายน้ำเงินเพื่อสร้าง<br>ยืนวงเขียวหลังเคาน์เตอร์เพื่อเช็คอินผู้โดยสาร · กดปุ่ม 🚌 มุมขวาบนเพื่อกลับเมือง',
+  airportOpen: '💡 <b>✈️ รถรับส่งสนามบิน</b> เปิดแล้ว! กดปุ่ม ✈️ มุมขวาบนเพื่อไปได้ทันที<br>หรือยืนนิ่งบนวงน้ำเงินที่ป้ายรถริมถนนใหญ่',
   base: '💡 <b>🎖️ ค่ายทหาร</b> เปิดแล้ว! ขึ้นถนนวิทยาเขตไปทางเหนือสุด<br>ยืนบนป้ายเพื่อสร้าง · ยืนวงเขียวเพื่อฝึกทหาร · วงเหลืองคือกองบัญชาการ',
   campus: '💡 <b>วิทยาเขต Healthcare Empire</b> เปิดแล้ว!<br>เดินออกประตูหน้า ไปทางขวาตามถนนวิทยาเขต แล้วยืนบนป้ายราคาเพื่อซื้อตึก',
   citybtn: '💡 <b>🏙️ เมือง</b> (ปุ่มด้านล่าง)<br>ดูชีวิตชาวเมือง การจราจร นักท่องเที่ยว และคำแนะนำจากที่ปรึกษา',
@@ -3463,7 +3467,7 @@ const tipQueue = [];
 function tip(id) {
   if (!state.tips || state.tips.includes(id) || !TIPS[id]) return;
   state.tips.push(id);
-  tipQueue.push(TIPS[id]);
+  tipQueue.push((LANG === 'en' && TIPS_EN[id]) || TIPS[id]);
   if (tipQueue.length === 1) setTimeout(nextTip, 1500);
   save();
 }
@@ -3478,7 +3482,18 @@ function nextTip() {
 // Toasts slide down from the top one at a time; a busy moment queues them instead of stacking
 const toastQueue = [];
 let toastBusy = false;
+// A reward sheet or prompt on screen: banners wait their turn instead of piling on top
+const sheetOpen = () => [...document.querySelectorAll('.promptsheet')].some((e) => e.style.display && e.style.display !== 'none');
 function toast(html, ms = 3200) {
+  if (!toastBusy && sheetOpen()) {
+    if (!toastQueue.some((t) => t.html === html) && toastQueue.length < 4) toastQueue.push({ html, ms });
+    clearTimeout(toast.wait);
+    toast.wait = setTimeout(() => {
+      const next = toastQueue.shift();
+      if (next) toast(next.html, next.ms);
+    }, 1200);
+    return;
+  }
   if (toastBusy) {
     if (!toastQueue.some((t) => t.html === html) && toastQueue.length < 4) toastQueue.push({ html, ms });
     return;
@@ -5846,13 +5861,55 @@ function visitDistrict() {
 const homeBtn = document.getElementById('homebtn');
 const zoomBtn = document.getElementById('zoombtn');
 zoomBtn.addEventListener('click', () => setZoom(camZoom > 1.5 ? 1 : 2.8));
+const tx = (th, en) => (LANG === 'en' ? en : th);
 homeBtn.addEventListener('click', () => {
-  player.group.position.copy(PLAYER_START);
+  // From the airport the shuttle drops you at the town stop; from the district you go back to the hospital door
+  if (inAirport(player.group.position)) {
+    player.group.position.copy(AIR_STOP).add(v(0, -0.6));
+    AIR.armed = false;
+  } else player.group.position.copy(PLAYER_START);
+  auto.task = null;
   updateCamera(0, true);
 });
+const airBtn = document.getElementById('airbtn');
+airBtn.addEventListener('click', () => {
+  if (player.floor !== 0 || lift.riding || BASE.flight) return;
+  if (inside) inside = null;
+  player.group.position.copy(AIR_STOP_IN).add(v(0, -1.4));
+  AIR.armed = false;
+  auto.task = null;
+  tip('airport');
+  updateCamera(0, true);
+});
+const hudState = { home: '', air: '', atAirport: null, t: 0 };
 function updateHomeBtn() {
-  const show = running && player.floor === 0 && inDistrict(player.group.position);
-  if (homeBtn.style.display !== (show ? 'block' : 'none')) homeBtn.style.display = show ? 'block' : 'none';
+  const pp = player.group.position;
+  const there = inAirport(pp);
+  const show = running && player.floor === 0 && (inDistrict(pp) || there);
+  const label = !show ? '' : there ? tx('🚌 กลับเมือง', '🚌 Back to town') : tx('🏥 กลับ รพ.', '🏥 Hospital');
+  if (hudState.home !== label) {
+    hudState.home = label;
+    homeBtn.style.display = show ? 'block' : 'none';
+    homeBtn.textContent = label;
+  }
+  // In town: a shuttle button that also shows the cash waiting at the airport (refreshed twice a second)
+  hudState.t -= 1;
+  if (hudState.t <= 0) {
+    hudState.t = 30;
+    const open = running && airportOpen() && !there && player.floor === 0 && !BASE.flight && !lift.riding;
+    const cash = open ? airportPiles().reduce((a, p) => a + p.amount, 0) : 0;
+    const txt = !open ? '' : `✈️ ${tx('สนามบิน', 'Airport')}${cash >= 100 ? ` 💵${fmt(cash)}` : ''}`;
+    if (hudState.air !== txt) {
+      hudState.air = txt;
+      airBtn.style.display = open ? 'block' : 'none';
+      airBtn.textContent = txt;
+      airBtn.classList.toggle('ready', cash >= 2000 * priceMult());
+    }
+  }
+  if (hudState.atAirport !== there) {
+    hudState.atAirport = there;
+    updateGoal();
+  }
 }
 
 // ---------- 3D empire maps: province, region, country and a globe ----------
@@ -10091,6 +10148,28 @@ const todayLocal = () => {
 };
 const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
 // A sheet built on the fly for small one-off prompts
+const NEWS_ID = 'news3';
+function showWhatsNew() {
+  if (!state.tips || state.tips.includes(NEWS_ID)) return;
+  state.tips.push(NEWS_ID);
+  save();
+  if ((state.earned || 0) < 20000) return; // new players meet everything in the story anyway
+  const rows = LANG === 'en' ? [
+    ['✈️', 'Airport', 'Opens after the army base HQ. Press ✈️ at the top right to ride the shuttle.'],
+    ['🌉', 'River and bridge', 'South of town. The streets now join up into a loop.'],
+    ['🏙️', 'A more detailed town', 'Brick and glass buildings, tiled roofs, new cars and people.'],
+    ['🌙', 'Night lights', 'Street lamps, headlights and lit windows after dark.'],
+  ] : [
+    ['✈️', 'สนามบิน', 'เปิดหลังสร้างกองบัญชาการค่ายทหาร กดปุ่ม ✈️ มุมขวาบนเพื่อนั่งรถไป'],
+    ['🌉', 'แม่น้ำและสะพาน', 'อยู่ทางใต้ของเมือง ถนนในเมืองเชื่อมกันเป็นวงแล้ว'],
+    ['🏙️', 'เมืองละเอียดขึ้น', 'ตึกอิฐและกระจก หลังคากระเบื้อง รถและตัวละครแบบใหม่'],
+    ['🌙', 'แสงไฟกลางคืน', 'เสาไฟ ไฟหน้ารถ และหน้าต่างเปิดไฟตอนค่ำ'],
+  ];
+  const list = rows.map(([i, t, d]) => `<div class="newsrow"><span>${i}</span><div><b>${t}</b><br><small>${d}</small></div></div>`).join('');
+  // Wait for the daily reward sheet to be dealt with first
+  const show = () => (sheetOpen() ? setTimeout(show, 1500) : promptSheet('newssheet', `<h3>${tx('🆕 มีอะไรใหม่', "🆕 What's new")}</h3>${list}`, [[tx('ไปเล่นเลย', 'Got it')]]));
+  setTimeout(show, 2500);
+}
 function promptSheet(id, html, buttons) {
   let el = document.getElementById(id);
   if (!el) {
@@ -10397,13 +10476,13 @@ const GATE_WALL_Z = -20;
 const RUNWAY_Z = -46;
 const TAXI_Z = -38;
 const AIRPORT_UNLOCKS = [
-  { id: 'terminal', icon: '🛫', name: 'อาคารผู้โดยสาร + เคาน์เตอร์ 1 + ประตู 1', price: 80000, at: v(456, 2.6) },
-  { id: 'checkin2', icon: '🧾', name: 'เคาน์เตอร์เช็คอิน 2', price: 120000, at: v(454, -3.8) },
-  { id: 'security', icon: '🛂', name: 'จุดตรวจความปลอดภัย', price: 160000, at: v(470, -3.8) },
-  { id: 'gate2', icon: '🚪', name: 'ประตูขึ้นเครื่อง 2', price: 250000, at: v(473, -12.5) },
-  { id: 'tower', icon: '🗼', name: 'หอบังคับการบิน', price: 350000, at: v(478, 2.6) },
-  { id: 'lounge', icon: '🛋️', name: 'ห้องรับรอง VIP', price: 450000, at: v(482, -3.8) },
-  { id: 'medevac', icon: '🚁', name: 'เฮลิคอปเตอร์พยาบาลทางอากาศ', price: 700000, at: v(441, 2.6) },
+  { id: 'terminal', icon: '🛫', name: 'อาคารผู้โดยสาร + เคาน์เตอร์ 1 + ประตู 1', en: 'Terminal + counter 1 + gate 1', price: 80000, at: v(456, 2.6) },
+  { id: 'checkin2', icon: '🧾', name: 'เคาน์เตอร์เช็คอิน 2', en: 'Check-in counter 2', price: 120000, at: v(454, -3.8) },
+  { id: 'security', icon: '🛂', name: 'จุดตรวจความปลอดภัย', en: 'Security check', price: 160000, at: v(470, -3.8) },
+  { id: 'gate2', icon: '🚪', name: 'ประตูขึ้นเครื่อง 2', en: 'Gate 2', price: 250000, at: v(473, -12.5) },
+  { id: 'tower', icon: '🗼', name: 'หอบังคับการบิน', en: 'Control tower', price: 350000, at: v(478, 2.6) },
+  { id: 'lounge', icon: '🛋️', name: 'ห้องรับรอง VIP', en: 'VIP lounge', price: 450000, at: v(482, -3.8) },
+  { id: 'medevac', icon: '🚁', name: 'เฮลิคอปเตอร์พยาบาลทางอากาศ', en: 'Air ambulance helicopter', price: 700000, at: v(441, 2.6) },
 ];
 const COUNTERS = [
   { id: 'c1', x: 446, needs: 'terminal', hire: 20000 },
@@ -10825,7 +10904,7 @@ function updatePassengers(dt) {
         AP().hired.push(st.C.id);
         postAirStaff(st);
         sfxUnlock();
-        toast('🧑‍✈️ จ้างพนักงานเช็คอินแล้ว · เคาน์เตอร์ทำงานเองได้', 3000);
+        toast(tx('🧑‍✈️ จ้างพนักงานเช็คอินแล้ว · เคาน์เตอร์ทำงานเองได้', '🧑‍✈️ Check-in staff hired · the counter now runs itself'), 3000);
         save();
       }
     }
@@ -10919,7 +10998,7 @@ function updatePlanes(dt) {
           gate.boarded = 0;
           pl.rotation.set(0, 0, 0);
           AP().flights++;
-          if (inAirport(player.group.position)) floatText(pl.position.clone().add(v(0, 3)), `${gate.flag} เที่ยวบินลงจอด`, '#bfe9ff');
+          if (inAirport(player.group.position)) floatText(pl.position.clone().add(v(0, 3)), `${gate.flag} ${tx('เที่ยวบินลงจอด', 'Flight landed')}`, '#bfe9ff');
         } else if (gate.state === 'push') {
           gate.reverse = false;
           gate.state = 'depart';
@@ -11015,7 +11094,8 @@ function updateAirport(dt) {
       AIR_BUILD[u.id]?.();
       burst(u.at);
       sfxUnlock();
-      toast(`${u.icon} <b>สร้าง${u.name}แล้ว!</b>`, 3500);
+      toast(tx(`${u.icon} <b>สร้าง${u.name}แล้ว!</b>`, `${u.icon} <b>${u.en} built!</b>`), 3500);
+      updateGoal();
       showAirTile();
       save();
     }
@@ -11887,6 +11967,15 @@ function updateBag() {
   bagEl.classList.toggle('full', n >= cap);
 }
 function updateGoal() {
+  if (state.airport && inAirport(player.group.position)) {
+    // At the airport the goal line follows the airport's own build stages
+    const a = AIRPORT_UNLOCKS[AP().step];
+    goalEl.classList.toggle('none', !a);
+    const need = a ? a.price - AP().paid - state.money : 0;
+    goalEl.textContent = a ? `${need > 0 ? '🎯' : '✅'} ${a.icon} ${tx(a.name, a.en)} · ${need > 0 ? `${tx('อีก', 'need')} 💵${fmt(need)}` : tx('พร้อมสร้างแล้ว! ไปที่ป้ายน้ำเงิน 👉', 'Ready! Stand on the blue tile 👉')}`
+      : tx('✈️ สนามบินครบทุกส่วนแล้ว! เก็บเงินจากกองได้เรื่อยๆ', '✈️ The airport is complete! Keep collecting the cash');
+    return;
+  }
   const u = UNLOCKS[state.step];
   goalEl.classList.toggle('none', !u);
   const left = u ? u.price - state.paid - state.money : 0;
@@ -12759,7 +12848,9 @@ function start() {
   updateDock(true);
   if (tutorialDone()) {
     goalEl.style.display = 'block';
-    document.getElementById('hint').style.display = 'block';
+    // Only newcomers need reminding how to walk
+    if ((state.earned || 0) < 3000) document.getElementById('hint').style.display = 'block';
+    showWhatsNew();
   }
   initAudio();
   audio?.resume();
