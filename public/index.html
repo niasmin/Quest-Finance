@@ -366,6 +366,13 @@
   #uptabs #stylebtn.locked { display: none; }
   #toast { top: calc(8px + env(safe-area-inset-top)); width: min(360px, 92vw); box-sizing: border-box; transform: translate(-50%, -140%); transition: transform .35s cubic-bezier(.2, .9, .3, 1.2), opacity .25s; z-index: 15; }
   #toast.show { transform: translate(-50%, 0); }
+  /* Banners sit under the top bar, so the money and the buttons stay visible */
+  #toast { top: calc(64px + env(safe-area-inset-top)); }
+  .newsrow { display: flex; gap: 10px; align-items: flex-start; text-align: left; margin: 8px 2px; }
+  .newsrow span { font-size: 26px; line-height: 1.1; }
+  .newsrow small { color: #5a6274; }
+  #airbtn { background: linear-gradient(#42a5f5, #1e88e5); }
+  #airbtn.ready { background: linear-gradient(#ffc94d, #f5a623); color: #3a2a00; box-shadow: 0 0 12px rgba(255, 200, 80, .8); }
   #toast { font-size: 13.5px !important; line-height: 1.4 !important; padding: 8px 14px !important; }
   #start .startcard #startbtn { order: -1; font-size: 22px; padding: 14px 44px; }
   #startname { font-size: 15px; padding: 8px 12px; border-width: 2px; background: rgba(255,255,255,.92); }
@@ -402,6 +409,7 @@
   <div id="right">
     <div id="hudicons"><button id="speedbtn" class="hudbtn wide" aria-label="ความเร็ว" style="display:none">⏩1×</button><button id="zoombtn" class="hudbtn" aria-label="ซูม">🔍</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
     <button id="homebtn" class="evbtn ready" style="display:none">🏥 กลับ รพ.</button>
+    <button id="airbtn" class="evbtn" style="display:none">✈️ สนามบิน</button>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
     <div id="evchips"></div>
   </div>
