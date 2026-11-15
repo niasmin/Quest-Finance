@@ -221,24 +221,63 @@ float rq_n(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0
   return mix(mix(rq_h(i), rq_h(i + vec2(1.0, 0.0)), f.x), mix(rq_h(i + vec2(0.0, 1.0)), rq_h(i + vec2(1.0, 1.0)), f.x), f.y); }
 float rq_grain(vec3 w){ vec2 p = w.xz + w.y * 0.7;
   return rq_n(p * 0.35) * 0.5 + rq_n(p * 1.7) * 0.3 + rq_n(p * 7.0) * 0.2; }`;
-function addGrain(m, amount, grass = false) {
-  // Grass also gets broad lighter and darker patches and fine streaks, like mown turf
-  const extra = grass ? `
+// Surface patterns drawn from world position, so no texture or UV work is needed:
+// mown-turf patches for grass; block courses, bricks or planks for walls; rows of tiles for pitched roofs.
+// Lines fade out with distance (fwidth) so they never shimmer when the camera pulls back.
+const LOOKS = {
+  grass: `
   float rqP = rq_n(rqW.xz * 0.09) * 0.6 + rq_n(rqW.xz * 0.33 + 7.0) * 0.4;
   diffuseColor.rgb *= mix(vec3(0.84, 0.96, 0.78), vec3(1.10, 1.06, 0.90), rqP);
-  diffuseColor.rgb *= 0.92 + 0.16 * rq_n(vec2(rqW.x * 11.0 + rqW.z * 3.0, rqW.z * 11.0));` : '';
+  diffuseColor.rgb *= 0.92 + 0.16 * rq_n(vec2(rqW.x * 11.0 + rqW.z * 3.0, rqW.z * 11.0));`,
+  block: `
+  if (abs(rqN.y) < 0.6) {
+    float cy = rqW.y / 0.62; float row = floor(cy);
+    float hx = (rqW.x + rqW.z) / 1.3 + mod(row, 2.0) * 0.5;
+    float k = clamp(1.0 - fwidth(cy) * 2.2, 0.0, 1.0);
+    float jl = min(smoothstep(0.0, 0.04 + fwidth(cy), fract(cy)), smoothstep(0.0, 0.025 + fwidth(hx), fract(hx)));
+    diffuseColor.rgb *= mix(1.0, mix(0.84, 1.0, jl) * (0.96 + 0.08 * rq_h(vec2(row, floor(hx)))), k);
+    diffuseColor.rgb *= mix(0.86, 1.0, smoothstep(0.0, 0.45, rqW.y));
+  }`,
+  brick: `
+  if (abs(rqN.y) < 0.6) {
+    float cy = rqW.y / 0.17; float row = floor(cy);
+    float hx = (rqW.x + rqW.z) / 0.42 + mod(row, 2.0) * 0.5;
+    float k = clamp(1.0 - fwidth(cy) * 1.6, 0.0, 1.0);
+    float jl = min(smoothstep(0.0, 0.12 + fwidth(cy), fract(cy)), smoothstep(0.0, 0.06 + fwidth(hx), fract(hx)));
+    vec3 brick = diffuseColor.rgb * (0.84 + 0.3 * rq_h(vec2(row, floor(hx))));
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb * 0.55 + 0.4, brick, jl), k);
+  }`,
+  siding: `
+  if (abs(rqN.y) < 0.6) {
+    float cy = rqW.y / 0.24;
+    float k = clamp(1.0 - fwidth(cy) * 2.0, 0.0, 1.0);
+    diffuseColor.rgb *= mix(1.0, 0.86 + 0.16 * fract(cy), k);
+  }`,
+  tile: `
+  {
+    float cy = rqW.y / 0.15; float row = floor(cy);
+    float hx = (rqW.x + rqW.z) / 0.3 + mod(row, 2.0) * 0.5;
+    float k = clamp(1.0 - fwidth(cy) * 1.8, 0.0, 1.0);
+    float sh = (0.8 + 0.22 * fract(cy)) * mix(0.9, 1.0, smoothstep(0.0, 0.08 + fwidth(hx), fract(hx))) * (0.95 + 0.1 * rq_h(vec2(row, floor(hx))));
+    diffuseColor.rgb *= mix(1.0, sh, k);
+  }`,
+};
+function addGrain(m, amount, look = '') {
+  const extra = LOOKS[look] || '';
   m.onBeforeCompile = (sh) => {
     sh.uniforms.rqAmount = { value: amount };
-    sh.vertexShader = 'varying vec3 rqW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  rqW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    sh.fragmentShader = 'varying vec3 rqW;\nuniform float rqAmount;\n' + GRAIN_GLSL + '\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= 1.0 + (rq_grain(rqW) - 0.5) * rqAmount;' + extra);
+    sh.vertexShader = 'varying vec3 rqW;\nvarying vec3 rqN;\n' + sh.vertexShader
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n  rqN = normalize(mat3(modelMatrix) * objectNormal);')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  rqW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = 'varying vec3 rqW;\nvarying vec3 rqN;\nuniform float rqAmount;\n' + GRAIN_GLSL + '\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= 1.0 + (rq_grain(rqW) - 0.5) * rqAmount;' + extra);
   };
-  m.customProgramCacheKey = () => 'grain' + amount + grass;
+  m.customProgramCacheKey = () => 'grain' + amount + look;
 }
 const GLASS = new Set([0x9fd8ff, 0x64b5f6, 0x90caf9, 0x7fc8f8, 0xcfe8ff, 0xbfdbfe, 0xc8e6c9, 0xffc1e3, 0xd1c4e9, 0xffe082, 0x9fd8ff, 0xbfe9ff]);
 const METAL = new Set([0x37474f, 0x444444, 0xb0bec5, 0x90a4ae, 0x78909c, 0x607d8b, 0x7b61ff, 0x5a43d6, 0x222222]);
 const GRASS = new Set([0x79c850, 0x9bd67a, 0x8fcf6c, 0x7ccf5a, 0x4caf50, 0x3c9a46, 0x2f8f4a, 0x6b8e23]);
 const ASPHALT = new Set([0x55606e, 0x2b2d42, 0x3a3f4b]);
-function surface(o = {}) {
+function surface({ pattern = '', ...o } = {}) {
   if (!REAL) return new THREE.MeshLambertMaterial(o);
   const c = typeof o.color === 'number' ? o.color : null;
   const look = GLASS.has(c) ? { roughness: 0.12, metalness: 0.55 } : METAL.has(c) ? { roughness: 0.38, metalness: 0.65 } : { roughness: 0.86, metalness: 0.02 };
@@ -250,7 +289,7 @@ function surface(o = {}) {
     m.color.setHSL(hsl.h, Math.min(1, hsl.s * 1.18), hsl.l * (hsl.l > 0.8 ? 0.93 : 0.86));
   }
   m.envMapIntensity = 0.38;
-  if (!o.map && !o.transparent) addGrain(m, GRASS.has(c) ? 0.3 : ASPHALT.has(c) ? 0.34 : 0.07, GRASS.has(c));
+  if (!o.map && !o.transparent) addGrain(m, GRASS.has(c) ? 0.3 : ASPHALT.has(c) ? 0.34 : 0.07, pattern || (GRASS.has(c) ? 'grass' : ''));
   realMats.push(m);
   return m;
 }
@@ -306,8 +345,27 @@ resize();
 // ---------- helpers ----------
 const matCache = new Map();
 function mat(color) {
-  if (!matCache.has(color)) matCache.set(color, surface({ color }));
+  if (!matCache.has(color)) {
+    matCache.set(color, surface({ color }));
+    matCache.get(color).userData.c = color;
+  }
   return matCache.get(color);
+}
+// The same colour with a wall or roof pattern: 'block', 'brick', 'siding' or 'tile'
+function lookMat(color, pattern) {
+  const key = `${color}|${pattern}`;
+  if (!matCache.has(key)) matCache.set(key, surface({ color, pattern }));
+  return matCache.get(key);
+}
+// Give the big wall blocks of a building a pattern; small parts (doors, trims, props) are left alone
+function detailWalls(g, pattern = 'block', minH = 1.2) {
+  g.traverse((o) => {
+    const p = o.geometry?.parameters;
+    const c = o.material?.userData?.c;
+    if (!o.isMesh || o.geometry.type !== 'BoxGeometry' || c === undefined || GLASS.has(c)) return;
+    if (p.height >= minH && Math.max(p.width, p.depth) >= 1.4 && Math.min(p.width, p.depth) >= 0.25) o.material = lookMat(c, pattern);
+  });
+  return g;
 }
 
 function box(w, h, d, color, { shadow = true } = {}) {
@@ -373,6 +431,7 @@ function addCollider(cx, cz, w, d, floor = 0) {
 // Everything here is scenery. It is built once the game is running and costs nothing in low-power mode
 // beyond the roads themselves.
 const LOOK = { built: false, sky: null, stars: null, sunDisc: null, clouds: [], water: [], boat: null, link: null, linkWest: false, linkEast: false, night: -1 };
+const CITY_GLOW = []; // facade and window materials with a glow map: they light up at night
 const NIGHT_FX = []; // materials whose opacity follows the night: lamp halos, light pools, headlight beams
 const RIVER = { z0: 33, z1: 41 };
 const LINK_Z = -23.2;
@@ -526,6 +585,7 @@ function buildWorld() {
   // Low orange walls with a gap for the entrance at the bottom right
   const wall = (cx, cz, w, d) => {
     const m = box(w, 0.6, d, 0xf08a3c);
+    m.material = lookMat(0xf08a3c, 'brick');
     m.position.set(cx, 0.3, cz);
     scene.add(m);
     addCollider(cx, cz, w, d);
@@ -547,6 +607,7 @@ function buildWorld() {
 
   // Hospital building behind
   const building = box(22, 7, 3, 0xf7f7f2);
+  building.material = lookMat(0xf7f7f2, 'block');
   building.position.set(0, 3.5, -13.4);
   scene.add(building);
   const roof = box(22.6, 0.6, 3.4, 0xe5484d);
@@ -5260,7 +5321,6 @@ function roofHouse(w, h, d, wall, roof) {
 // ---------- detailed city buildings: brick and stone facades, lit windows at night, fire escapes, water towers ----------
 // Facades are painted on canvases (bricks, framed windows, a ground-floor base) and cached per style, so a whole
 // street shares a handful of textures. Each facade has a glow map of lit windows that brightens after dark.
-const CITY_GLOW = [];
 const FACADES = {
   brick: { base: '#b4553f', mortar: '#d9c3b0', brick: true, trim: '#efe7da', ground: '#d8d0c2' },
   tan: { base: '#d6b35e', mortar: '#ead8a8', brick: true, trim: '#f6efdc', ground: '#cfc6b5' },
@@ -5475,7 +5535,7 @@ function gableRoof(w, d, h, color) {
   shape.closePath();
   const geo = new THREE.ExtrudeGeometry(shape, { depth: d + 0.2, bevelEnabled: false });
   geo.translate(0, 0, -(d + 0.2) / 2);
-  const m = new THREE.Mesh(geo, mat(color));
+  const m = new THREE.Mesh(geo, lookMat(color, 'tile'));
   m.castShadow = true;
   return m;
 }
@@ -5728,9 +5788,6 @@ function syncDistrict(animate = false) {
 // Residents stroll along the district road once there are homes
 function updateDistrict(dt) {
   if (!district.built) return;
-  // Windows light up after dark
-  const glow = (1 - daylight()) * 1.6;
-  for (const m of CITY_GLOW) m.emissiveIntensity = glow;
   const want = Math.min(12, cityLevel('homes') * 2);
   while (district.residents.length < want) {
     const person = makePerson({ shirt: pick(SHIRTS) });
@@ -7061,24 +7118,80 @@ const at3 = (o, x, y, z) => {
   return o;
 };
 // Rows of windows on the front and back faces of a w×h×d block
+// Rows of windows on the front and back of a block. Each side is one plane with the frames, glazing bars
+// and sills painted on, and a glow map so some windows light up at night.
+const windowCache = new Map();
+function windowBand(cols, floors, cw, ch, color, frame) {
+  const key = [cols, floors, cw.toFixed(2), ch.toFixed(2), color, frame].join('|');
+  if (windowCache.has(key)) return windowCache.get(key);
+  const px = 64 / Math.max(cw, ch); // pixels per world unit, capped below
+  const W = Math.min(1024, Math.round(cols * cw * px));
+  const H = Math.min(512, Math.round(floors * ch * px));
+  const ux = W / (cols * cw);
+  const uy = H / (floors * ch);
+  const hex = (c) => `#${new THREE.Color(c).getHexString()}`;
+  const lit = [];
+  let sd = cols * 31 + floors * 17;
+  const rnd = () => ((sd = (sd * 9301 + 49297) % 233280) / 233280);
+  const map = canvasTexture(W, H, (g) => {
+    g.clearRect(0, 0, W, H);
+    for (let f = 0; f < floors; f++) for (let c = 0; c < cols; c++) {
+      const cx = (c + 0.5) * cw * ux;
+      const cy = (f + 0.5) * ch * uy;
+      const fw = 0.8 * ux;
+      const fh = 0.68 * uy;
+      g.fillStyle = 'rgba(0,0,0,0.22)';
+      g.fillRect(cx - fw / 2 - 2, cy + fh / 2, fw + 4, 0.07 * uy); // sill shadow
+      g.fillStyle = hex(frame);
+      g.fillRect(cx - fw / 2, cy - fh / 2, fw, fh);
+      const gw = 0.66 * ux;
+      const gh = 0.54 * uy;
+      const gg = g.createLinearGradient(0, cy - gh / 2, 0, cy + gh / 2);
+      const base = new THREE.Color(color);
+      gg.addColorStop(0, hex(base.clone().lerp(new THREE.Color(0xffffff), 0.35)));
+      gg.addColorStop(1, hex(base.clone().multiplyScalar(0.55)));
+      g.fillStyle = gg;
+      g.fillRect(cx - gw / 2, cy - gh / 2, gw, gh);
+      // A diagonal glint, then the glazing bars
+      g.fillStyle = 'rgba(255,255,255,0.28)';
+      g.beginPath();
+      g.moveTo(cx - gw / 2, cy + gh * 0.1);
+      g.lineTo(cx - gw * 0.05, cy - gh / 2);
+      g.lineTo(cx + gw * 0.15, cy - gh / 2);
+      g.lineTo(cx - gw / 2, cy + gh * 0.4);
+      g.fill();
+      g.fillStyle = hex(frame);
+      g.fillRect(cx - 1, cy - gh / 2, 2, gh);
+      g.fillRect(cx - gw / 2, cy - gh * 0.12, gw, 2);
+      lit.push([cx - gw / 2, cy - gh / 2, gw, gh, rnd() < 0.5]);
+    }
+  });
+  const glow = canvasTexture(W, H, (g) => {
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, W, H);
+    g.fillStyle = '#ffd08a';
+    for (const [x, y, w2, h2, on] of lit) if (on) g.fillRect(x, y, w2, h2);
+  });
+  const m = new THREE.MeshStandardMaterial({ map, alphaTest: 0.5, roughness: 0.3, metalness: 0.2, emissive: 0xffffff, emissiveMap: glow, emissiveIntensity: 0 });
+  if (REAL) realMats.push(m);
+  CITY_GLOW.push(m);
+  windowCache.set(key, m);
+  return m;
+}
 function windows(g, w, h, d, y0, floors, color = 0x9fd8ff, frame = 0xffffff) {
   const cols = Math.max(2, Math.floor(w / 1.3));
-  for (let f = 0; f < floors; f++) {
-    for (let c = 0; c < cols; c++) {
-      const x = -w / 2 + (w / cols) * (c + 0.5);
-      for (const side of [1, -1]) {
-        const fr = box(0.78, 0.66, 0.05, frame, { shadow: false });
-        const gl = box(0.64, 0.52, 0.06, color, { shadow: false });
-        at3(fr, x, y0 + 0.75 + f * (h / floors), side * (d / 2 + 0.02));
-        at3(gl, x, y0 + 0.75 + f * (h / floors), side * (d / 2 + 0.04));
-        g.add(fr, gl);
-      }
-    }
+  const ch = h / floors;
+  const m = windowBand(cols, floors, w / cols, ch, color, frame);
+  for (const side of [1, -1]) {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
+    p.position.set(0, y0 + 0.75 + (h - ch) / 2, side * (d / 2 + 0.03));
+    if (side < 0) p.rotation.y = Math.PI;
+    g.add(p);
   }
 }
 // A pitched roof (four-sided pyramid stretched over the block)
 function hipRoof(w, d, h, color) {
-  const r = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1), mat(color));
+  const r = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1), lookMat(color, 'tile'));
   r.rotation.y = Math.PI / 4;
   r.scale.set(w * 1.08, h, d * 1.08);
   r.castShadow = true;
@@ -7091,6 +7204,7 @@ function thaiRoof(w, d, h, color, trim = 0xffd166) {
   const ang = Math.atan2(h, d / 2);
   for (const s of [1, -1]) {
     const slab = box(w * 1.06, 0.14, slope + 0.25, color);
+    slab.material = lookMat(color, 'tile');
     slab.rotation.x = s * ang;
     slab.position.set(0, h / 2, (s * d) / 4);
     g.add(slab);
@@ -7212,7 +7326,7 @@ function campusProp(name, w = 2) {
       g.add(at3(box(4.4, 0.4, 3, 0xf4f4f0), 0, 0.2, 0), at3(box(3.6, 1.8, 2.4, 0xfff3e0), 0, 1.3, 0));
       g.add(at3(thaiRoof(3.8, 2.6, 1.3, 0xd35400), 0, 2.2, 0), at3(thaiRoof(3.0, 2.0, 1.0, 0x1e8449), 0, 3.0, 0));
       g.add(at3(box(0.8, 1.2, 0.06, 0xb8860b), 0, 0.95, 1.22));
-      return g;
+      return detailWalls(g, 'block');
     }
     case 'cafe': case 'shop1': case 'shop2': case 'store': {
       const col = { cafe: 0xf5cba7, shop1: 0xaed6f1, shop2: 0xd2b4de, store: 0xa9dfbf }[name];
@@ -7222,13 +7336,13 @@ function campusProp(name, w = 2) {
       awning.rotation.x = 0.35;
       g.add(at3(awning, 0, 1.75, 1.5), at3(box(1.6, 0.9, 0.05, 0x9fd8ff, { shadow: false }), -0.6, 1.0, 1.22), at3(box(0.7, 1.4, 0.05, 0x6d4c41, { shadow: false }), 1.1, 0.7, 1.22));
       g.add(at3(signBoard(label, '#5d4037', 2.2, 0.45), 0, 2.15, 1.23));
-      return g;
+      return detailWalls(g, name === 'cafe' ? 'brick' : 'siding');
     }
     default: { // houses
       const col = pick([0xfad7a0, 0xd6eaf8, 0xfadbd8, 0xd5f5e3]);
       g.add(at3(box(3, 2, 2.4, col), 0, 1, 0), at3(hipRoof(3, 2.4, 1.2, pick([0xc0392b, 0x7d3c98, 0x2874a6])), 0, 2.6, 0));
       g.add(at3(box(0.7, 1.3, 0.05, 0x6d4c41, { shadow: false }), 0.7, 0.65, 1.22), at3(box(0.8, 0.6, 0.05, 0x9fd8ff, { shadow: false }), -0.7, 1.2, 1.22));
-      return g;
+      return detailWalls(g, 'siding');
     }
   }
 }
@@ -7372,7 +7486,8 @@ function campusBuilding(lot) {
   }
   // Turn the front toward the lot's street
   if (lot.front.z < lot.at.z) g.rotation.y = Math.PI;
-  return g;
+  // Plaster blocks on the big walls; the spa and the villa-style centres get planks
+  return detailWalls(g, lot.id === 'tranquila' || lot.id === 'park' ? 'siding' : 'block');
 }
 
 // People on the campus and inside the centres
@@ -8450,6 +8565,7 @@ function buildingBox(x, z, w, h, d, wall, roof) {
   g.add(at3(box(1.2, 1.6, 0.06, 0x5d4037, { shadow: false }), 0, 0.8, d / 2 + 0.04), at3(box(1.6, 0.12, 0.8, roof), 0, 1.8, d / 2 + 0.4));
   g.add(at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, d / 2 + 0.2), at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, -d / 2 - 0.2));
   roofDetails(g, 0, w, d, h + 0.25, 0);
+  detailWalls(g, 'block');
   g.position.set(x, 0, z);
   scene.add(g);
   addCollider(x, z, w, d);
@@ -10426,6 +10542,17 @@ function buildAirportGround() {
     g.add(at3(t, x, 0, 10.5));
   }
   scene.add(g);
+  // The airport office beside the plaza, and service vehicles out on the apron
+  buildingBox(506, 5, 8, 3.4, 4, 0xeceff1, 0x1e88e5).add(at3(signBoard('🏢 สำนักงานท่าอากาศยาน', '#0d47a1', 4.2, 0.5), 0, 2.9, 2.06));
+  for (const [x, z, col] of [[440, -27, 0xffd166], [466, -27.5, 0xffffff], [481, -26, 0xffd166]]) {
+    const cart = new THREE.Group();
+    cart.add(at3(box(1.6, 0.5, 0.9, col), 0, 0.5, 0), at3(box(0.6, 0.5, 0.8, 0x9fd8ff, { shadow: false }), 0.5, 1.0, 0));
+    for (let i = 1; i <= 2; i++) cart.add(at3(box(1.1, 0.12, 0.8, 0x78909c), -1.0 - i * 1.3, 0.3, 0), at3(box(0.5, 0.4, 0.6, pick([0x37474f, 0xe5484d, 0x1e88e5])), -1.0 - i * 1.3, 0.56, 0));
+    for (const wx of [-0.5, 0.5]) for (const wz of [-0.45, 0.45]) cart.add(at3(cylM(0.16, 0.16, 0.12, 0x16181d, 8).rotateX(Math.PI / 2), wx, 0.16, wz));
+    g.add(at3(cart, x, 0.04, z));
+  }
+  // A windsock by the runway
+  g.add(at3(cylM(0.05, 0.05, 3, 0xeceff1, 6), 412, 1.5, -41), at3(new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.2, 8, 1, true).rotateZ(Math.PI / 2), mat(0xff7043)), 412.6, 2.9, -41));
   // Shuttle stop at the entrance, back to town
   const stop = campusProp('busstop');
   stop.position.set(AIR_STOP_IN.x, 0, AIR_STOP_IN.z + 1.6);
@@ -10447,7 +10574,9 @@ function buildTerminal() {
   floor.receiveShadow = true;
   g.add(floor);
   const wall = (x, z, w, d, h = 1.2) => {
-    g.add(at3(box(w, h, d, 0xeceff1), x, h / 2, z));
+    const wl = box(w, h, d, 0xeceff1);
+    wl.material = lookMat(0xeceff1, 'block');
+    g.add(at3(wl, x, h / 2, z));
     addCollider(x, z, w, d);
   };
   // South wall with the entrance in the middle, side walls, and a glass north wall with two gate doors
@@ -10526,6 +10655,12 @@ function buildGate(G) {
 function buildTower() {
   const g = new THREE.Group();
   g.add(at3(cylM(0.8, 1.1, 9, 0xeceff1, 14), 0, 4.5, 0), at3(cylM(1.8, 1.4, 1.6, 0x4fc3f7, 14), 0, 9.6, 0), at3(cylM(1.9, 1.9, 0.3, 0x37474f, 14), 0, 10.5, 0));
+  g.children[0].material = lookMat(0xeceff1, 'block');
+  // A walkway rail round the cab and a radar dish
+  g.add(at3(new THREE.Mesh(new THREE.TorusGeometry(1.95, 0.04, 6, 24).rotateX(Math.PI / 2), mat(0xb0bec5)), 0, 9.1, 0));
+  const dish = cylM(0.5, 0.1, 0.25, 0xeceff1, 12);
+  dish.rotation.z = 0.5;
+  g.add(at3(dish, 0.9, 11, 0), at3(cylM(0.04, 0.04, 0.6, 0x78909c, 6), 0.9, 10.75, 0));
   g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8), new THREE.MeshBasicMaterial({ toneMapped: false, color: 0xe5484d })), 0, 11, 0));
   g.position.set(500, 0, -10);
   scene.add(g);
@@ -11213,6 +11348,7 @@ function updateWorldLook(dt) {
     LOOK.night = n;
     const k = Math.max(0, (n - 0.35) / 0.65);
     for (const m of NIGHT_FX) m.opacity = m.userData.max * k;
+    for (const m of CITY_GLOW) m.emissiveIntensity = n * 1.6;
     headMat.color.setHex(n > 0.5 ? 0xffffff : 0xfff6d8);
   }
 }
