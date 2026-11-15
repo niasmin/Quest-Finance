@@ -5102,111 +5102,393 @@ function roofHouse(w, h, d, wall, roof) {
   g.add(body, top, door);
   return g;
 }
+// ---------- detailed city buildings: brick and stone facades, lit windows at night, fire escapes, water towers ----------
+// Facades are painted on canvases (bricks, framed windows, a ground-floor base) and cached per style, so a whole
+// street shares a handful of textures. Each facade has a glow map of lit windows that brightens after dark.
+const CITY_GLOW = [];
+const FACADES = {
+  brick: { base: '#b4553f', mortar: '#d9c3b0', brick: true, trim: '#efe7da', ground: '#d8d0c2' },
+  tan: { base: '#d6b35e', mortar: '#ead8a8', brick: true, trim: '#f6efdc', ground: '#cfc6b5' },
+  stone: { base: '#cfc8b8', mortar: '#bdb5a3', brick: false, trim: '#f4efe4', ground: '#b9b1a0' },
+  grey: { base: '#a9abaf', mortar: '#94969a', brick: false, trim: '#e6e7ea', ground: '#8f9196' },
+  cream: { base: '#efe3c8', mortar: '#e0d2b2', brick: false, trim: '#ffffff', ground: '#d9cdb2' },
+  mint: { base: '#bfd9cc', mortar: '#a9c8b8', brick: false, trim: '#f4fbf7', ground: '#9fbcae' },
+};
+const facadeCache = new Map();
+function facadeMat(kind, cols, rows, { shop = false, door = true, seed = 1 } = {}) {
+  const key = `${kind}|${cols}|${rows}|${shop}|${door}|${seed}`;
+  if (facadeCache.has(key)) return facadeCache.get(key);
+  const cell = 64;
+  const W = Math.min(512, cols * cell);
+  const H = Math.min(1024, rows * cell);
+  const cw = W / cols;
+  const ch = H / rows;
+  let s = seed * 9301 + cols * 49297 + rows * 233;
+  const rnd = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+  const lit = [];
+  const map = canvasTexture(W, H, (g) => {
+    if (kind === 'glass') {
+      const grad = g.createLinearGradient(0, 0, W, H);
+      grad.addColorStop(0, '#5f8fc9');
+      grad.addColorStop(0.5, '#2f5f9e');
+      grad.addColorStop(1, '#4a7dbb');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, W, H);
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        // Each pane catches the sky a little differently
+        g.fillStyle = `rgba(255,255,255,${0.05 + rnd() * 0.18})`;
+        g.beginPath();
+        g.moveTo(c * cw + 4, r * ch + ch - 4);
+        g.lineTo(c * cw + cw - 4, r * ch + 4);
+        g.lineTo(c * cw + cw - 4, r * ch + ch * 0.5);
+        g.closePath();
+        g.fill();
+        lit.push([c * cw + 3, r * ch + 3, cw - 6, ch - 6, rnd() < 0.35]);
+      }
+      g.fillStyle = '#e9eef4';
+      for (let c = 0; c <= cols; c++) g.fillRect(c * cw - 2, 0, 4, H);
+      for (let r = 0; r <= rows; r++) g.fillRect(0, r * ch - 2, W, 4);
+      return;
+    }
+    const f = FACADES[kind];
+    g.fillStyle = f.base;
+    g.fillRect(0, 0, W, H);
+    if (f.brick) {
+      // Bricks with a little colour variation, staggered every other course
+      for (let y = 0, row = 0; y < H; y += 8, row++) {
+        for (let x = (row % 2) * -8; x < W; x += 16) {
+          const k = 0.86 + rnd() * 0.24;
+          const c = new THREE.Color(f.base).multiplyScalar(k);
+          g.fillStyle = `#${c.getHexString()}`;
+          g.fillRect(x + 1, y + 1, 14, 6);
+        }
+      }
+    } else {
+      // Stone courses
+      g.fillStyle = f.mortar;
+      for (let y = 0; y < H; y += 16) g.fillRect(0, y, W, 1.5);
+      for (let i = 0; i < W * H / 900; i++) {
+        g.fillStyle = `rgba(0,0,0,${rnd() * 0.05})`;
+        g.fillRect(rnd() * W, rnd() * H, 6 + rnd() * 10, 3 + rnd() * 5);
+      }
+    }
+    // A soft weathering streak from the top
+    const wg = g.createLinearGradient(0, 0, 0, H);
+    wg.addColorStop(0, 'rgba(0,0,0,0.10)');
+    wg.addColorStop(0.3, 'rgba(0,0,0,0)');
+    g.fillStyle = wg;
+    g.fillRect(0, 0, W, H);
+    for (let r = 0; r < rows; r++) {
+      const ground = r === rows - 1;
+      // Floor band between storeys
+      g.fillStyle = f.trim;
+      g.fillRect(0, r * ch, W, 3);
+      for (let c = 0; c < cols; c++) {
+        const x = c * cw;
+        const y = r * ch;
+        if (ground) {
+          g.fillStyle = f.ground;
+          g.fillRect(x, y + 3, cw, ch - 3);
+          const isDoor = door && c === Math.floor(cols / 2);
+          if (isDoor) {
+            g.fillStyle = '#5a3a22';
+            g.fillRect(x + cw * 0.28, y + ch * 0.22, cw * 0.44, ch * 0.78);
+            g.fillStyle = '#e8c27a';
+            g.fillRect(x + cw * 0.62, y + ch * 0.6, 3, 3);
+            continue;
+          }
+          if (shop) {
+            g.fillStyle = '#2d3a4a';
+            g.fillRect(x + 4, y + ch * 0.2, cw - 8, ch * 0.62);
+            lit.push([x + 6, y + ch * 0.22, cw - 12, ch * 0.58, rnd() < 0.7]);
+            g.fillStyle = f.trim;
+            g.fillRect(x + 4, y + ch * 0.2, cw - 8, 3);
+            continue;
+          }
+        }
+        const wx = x + cw * 0.26;
+        const wy = y + ch * 0.2;
+        const ww = cw * 0.48;
+        const wh = ch * 0.6;
+        g.fillStyle = f.trim;
+        g.fillRect(wx - 3, wy - 3, ww + 6, wh + 6);
+        const gg = g.createLinearGradient(wx, wy, wx, wy + wh);
+        gg.addColorStop(0, '#6f8db0');
+        gg.addColorStop(1, '#25303f');
+        g.fillStyle = gg;
+        g.fillRect(wx, wy, ww, wh);
+        g.fillStyle = f.trim;
+        g.fillRect(wx + ww / 2 - 1, wy, 2, wh);
+        g.fillRect(wx, wy + wh * 0.45, ww, 2);
+        // Sill and lintel
+        g.fillStyle = 'rgba(0,0,0,0.18)';
+        g.fillRect(wx - 4, wy + wh + 3, ww + 8, 3);
+        lit.push([wx, wy, ww, wh, rnd() < 0.45]);
+      }
+    }
+  });
+  const glow = canvasTexture(W, H, (g) => {
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, W, H);
+    for (const [x, y, w, h, on] of lit) {
+      if (!on) continue;
+      g.fillStyle = rnd() < 0.2 ? '#bfe0ff' : '#ffd08a';
+      g.fillRect(x, y, w, h);
+    }
+  });
+  const m = surface({ map, emissive: 0xffffff, emissiveMap: glow, emissiveIntensity: 0, ...(kind === 'glass' ? { roughness: 0.15, metalness: 0.5 } : {}) });
+  CITY_GLOW.push(m);
+  facadeCache.set(key, m);
+  return m;
+}
+// A block with facades on all four sides and a flat roof
+function facadeBlock(w, h, d, kind, floors, opts = {}) {
+  const per = kind === 'glass' ? 0.42 : 0.62;
+  const front = facadeMat(kind, Math.max(1, Math.round(w / per)), floors, opts);
+  const side = facadeMat(kind, Math.max(1, Math.round(d / per)), floors, { ...opts, door: false, shop: false });
+  const roof = mat(kind === 'glass' ? 0x5d7186 : 0x8d8f93);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [side, side, roof, roof, front, side]);
+  m.position.y = h / 2;
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+function cornice(w, d, y, color = 0xefe7da) {
+  const g = new THREE.Group();
+  g.add(at3(box(w + 0.16, 0.12, d + 0.16, color), 0, y + 0.06, 0), at3(box(w + 0.06, 0.22, d + 0.06, color), 0, y + 0.23, 0));
+  return g;
+}
+function waterTower() {
+  const g = new THREE.Group();
+  for (const [x, z] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) g.add(at3(cylM(0.025, 0.025, 0.42, 0x4a3a2c, 5), x, 0.21, z));
+  g.add(at3(cylM(0.27, 0.27, 0.5, 0xa0703e, 12), 0, 0.67, 0));
+  for (const y of [0.52, 0.82]) g.add(at3(cylM(0.28, 0.28, 0.03, 0x3b3b3b, 12), 0, y, 0));
+  const top = new THREE.Mesh(new THREE.ConeGeometry(0.31, 0.24, 12), mat(0x7a5532));
+  g.add(at3(top, 0, 1.04, 0));
+  return g;
+}
+function fireEscape(floors, fh, x0) {
+  const g = new THREE.Group();
+  const c = 0x2a2a2e;
+  for (let i = 1; i < floors; i++) {
+    const y = i * fh;
+    g.add(at3(box(0.95, 0.035, 0.32, c, { shadow: false }), x0, y, 0.16), at3(box(0.95, 0.03, 0.02, c, { shadow: false }), x0, y + 0.24, 0.32));
+    for (const dx of [-0.46, 0.46]) g.add(at3(box(0.02, 0.24, 0.02, c, { shadow: false }), x0 + dx, y + 0.12, 0.32));
+    // Ladder down to the floor below
+    const ladder = new THREE.Group();
+    ladder.add(box(0.03, Math.hypot(fh, 0.6), 0.08, c, { shadow: false }));
+    ladder.rotation.z = Math.atan2(0.6, fh) * (i % 2 ? 1 : -1);
+    g.add(at3(ladder, x0, y - fh / 2, 0.2));
+  }
+  return g;
+}
+function rooftopBits(w, d, y, seed = 1) {
+  const g = new THREE.Group();
+  g.add(at3(box(0.5, 0.36, 0.5, 0xc9c4b8), -w / 4, y + 0.18, -d / 5));
+  if (seed % 2) g.add(at3(waterTower(), w / 4, y, -d / 5));
+  else for (let i = 0; i < 2; i++) g.add(at3(box(0.32, 0.22, 0.26, 0xdfe2e6), w / 6 + i * 0.4, y + 0.11, d / 6));
+  return g;
+}
+function awning(w, colors = ['#d8342c', '#ffffff']) {
+  const tex = canvasTexture(128, 32, (g) => {
+    for (let i = 0; i < 8; i++) {
+      g.fillStyle = colors[i % 2];
+      g.fillRect(i * 16, 0, 16, 32);
+    }
+  });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.55), surface({ map: tex, side: THREE.DoubleSide }));
+  m.rotation.x = -0.95;
+  m.castShadow = true;
+  return m;
+}
+function fence(len, along = 'x') {
+  const g = new THREE.Group();
+  const c = 0x8b5a2b;
+  const n = Math.max(2, Math.round(len / 0.55));
+  for (let i = 0; i <= n; i++) {
+    const t = -len / 2 + (len * i) / n;
+    g.add(at3(box(0.07, 0.42, 0.07, c, { shadow: false }), along === 'x' ? t : 0, 0.21, along === 'x' ? 0 : t));
+  }
+  for (const y of [0.16, 0.34]) g.add(at3(box(along === 'x' ? len : 0.04, 0.05, along === 'x' ? 0.04 : len, c, { shadow: false }), 0, y, 0));
+  return g;
+}
+function gableRoof(w, d, h, color) {
+  const shape = new THREE.Shape();
+  shape.moveTo(-w / 2 - 0.1, 0);
+  shape.lineTo(w / 2 + 0.1, 0);
+  shape.lineTo(0, h);
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: d + 0.2, bevelEnabled: false });
+  geo.translate(0, 0, -(d + 0.2) / 2);
+  const m = new THREE.Mesh(geo, mat(color));
+  m.castShadow = true;
+  return m;
+}
+// A small family house: walls, framed windows, a gable roof with chimney and a porch
+function cottage(w, d, wall, roof, seed = 1) {
+  const g = new THREE.Group();
+  const h = 0.95;
+  g.add(at3(box(w, h, d, wall), 0, h / 2, 0));
+  g.add(at3(gableRoof(w, d, 0.6, roof), 0, h, 0));
+  g.add(at3(box(0.16, 0.42, 0.16, 0xc9c4b8), w * 0.25, h + 0.42, -d * 0.15));
+  for (const x of [-w * 0.27, w * 0.27]) {
+    g.add(at3(box(0.36, 0.34, 0.03, 0xffffff, { shadow: false }), x, 0.55, d / 2 + 0.01), at3(box(0.28, 0.26, 0.03, 0x34495e, { shadow: false }), x, 0.55, d / 2 + 0.02));
+  }
+  g.add(at3(box(0.3, 0.55, 0.03, 0x7a4e2d, { shadow: false }), seed % 2 ? 0 : w * 0.05, 0.28, d / 2 + 0.02));
+  // Porch roof and step
+  g.add(at3(box(0.7, 0.05, 0.4, roof), 0, 0.72, d / 2 + 0.2), at3(box(0.7, 0.06, 0.4, 0xd9d4c7), 0, 0.03, d / 2 + 0.2));
+  return g;
+}
+function yardBits(g, seed) {
+  // Fence round the yard with a gap at the front gate, a vegetable bed and a clothesline
+  g.add(at3(fence(4.4, 'z'), -2.2, 0, 0), at3(fence(4.4, 'z'), 2.2, 0, 0), at3(fence(4.4), 0, 0, -2.2));
+  g.add(at3(fence(1.6), -1.4, 0, 2.2), at3(fence(1.6), 1.4, 0, 2.2));
+  const bed = box(1.0, 0.14, 0.5, 0x6d4a2e, { shadow: false });
+  g.add(at3(bed, seed % 2 ? 1.4 : -1.4, 0.07, -1.6));
+  for (let i = 0; i < 4; i++) g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), mat(0x4caf50)), (seed % 2 ? 1.4 : -1.4) - 0.36 + i * 0.24, 0.2, -1.6));
+  const lineX = seed % 2 ? -1.5 : 1.5;
+  for (const z of [-1.4, 0]) g.add(at3(box(0.04, 0.9, 0.04, 0xb0bec5, { shadow: false }), lineX, 0.45, z));
+  g.add(at3(box(0.015, 0.015, 1.4, 0xeeeeee, { shadow: false }), lineX, 0.86, -0.7));
+  ['#ffcdd2', '#bbdefb', '#fff59d'].forEach((c, i) => g.add(at3(box(0.02, 0.24, 0.22, new THREE.Color(c).getHex(), { shadow: false }), lineX, 0.72, -1.1 + i * 0.32)));
+}
+
 const CITY_MODELS = {
   homes(l) {
     const g = new THREE.Group();
-    const spots = [[-0.9, -0.9], [0.9, 0.9], [0.9, -0.9], [-0.9, 0.9]].slice(0, 1 + l);
-    spots.forEach(([x, z], k) => {
-      const hse = roofHouse(1.3, 1.1 + (k % 2) * 0.3, 1.3, pick([0xfff3c4, 0xffd6d6, 0xd6ecff, 0xd8f3dc]), pick([0xe5484d, 0x3d8bfd, 0x2e9e4f, 0xf5a623]));
-      hse.position.set(x, 0, z);
-      g.add(hse);
-    });
+    const seed = l + Math.floor(rand(0, 4));
+    yardBits(g, seed);
+    if (l >= 3) {
+      // A brick walk-up apartment with a fire escape, a water tower and a small house beside it
+      const floors = 4;
+      const fh = 0.72;
+      g.add(at3(facadeBlock(2.2, floors * fh, 1.7, pick(['brick', 'tan']), floors, { seed }), -0.45, 0, -0.4));
+      g.add(at3(cornice(2.2, 1.7, floors * fh, 0xefe7da), -0.45, 0, -0.4));
+      g.add(at3(fireEscape(floors, fh, 0.15), -0.45, 0, 0.45));
+      g.add(at3(rooftopBits(2.2, 1.7, floors * fh + 0.34, 1), -0.45, 0, -0.4));
+      g.add(at3(cottage(1.0, 0.9, 0xd6ecff, 0xe5484d, seed).rotateY(-Math.PI / 2), 1.5, 0, -0.6));
+      return g;
+    }
+    const walls = [0xfff3c4, 0xffd6d6, 0xd6ecff, 0xd8f3dc, 0xe8dcc8];
+    const roofs = [0xc0392b, 0x3d6fb6, 0x8d6e63, 0xe67e22];
+    if (l === 1) {
+      g.add(at3(cottage(1.6, 1.3, pick(walls), pick(roofs), seed), 0, 0, -0.5));
+      const t = TREES.round();
+      t.scale.setScalar(0.6);
+      g.add(at3(t, 1.5, 0, 1.2));
+    } else {
+      g.add(at3(cottage(1.2, 1.0, pick(walls), pick(roofs), seed), -0.95, 0, -0.9));
+      g.add(at3(cottage(1.2, 1.0, pick(walls), pick(roofs), seed + 1), 0.95, 0, 0.5));
+    }
     return g;
   },
   school(l) {
     const g = new THREE.Group();
-    const body = box(3.0, 1.4 + l * 0.5, 1.8, 0xffe0a3);
-    body.position.y = (1.4 + l * 0.5) / 2;
-    const roof = box(3.2, 0.2, 2.0, 0xe5484d);
-    roof.position.y = 1.4 + l * 0.5 + 0.1;
-    const clock = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 16), mat(0xffffff));
+    const floors = 2 + l;
+    const fh = 0.7;
+    const h = floors * fh;
+    g.add(facadeBlock(3.0, h, 1.8, 'cream', floors, { seed: 3 }));
+    g.add(cornice(3.0, 1.8, h, 0xffffff));
+    // Entrance portico with columns
+    g.add(at3(box(1.2, 0.1, 0.6, 0xffffff), 0, 1.0, 1.2));
+    for (const x of [-0.5, 0.5]) g.add(at3(cylM(0.06, 0.06, 1.0, 0xffffff, 8), x, 0.5, 1.42));
+    g.add(at3(signBoard('🏫 โรงเรียนแพทย์', '#1565c0', 2.0, 0.36), 0, h - 0.25, 0.92));
+    const clock = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.06, 18), mat(0xffffff));
     clock.rotation.x = Math.PI / 2;
-    clock.position.set(0, 1.0 + l * 0.5, 0.93);
-    const pole = box(0.06, 2.6, 0.06, 0xdfe6ee);
-    pole.position.set(1.8, 1.3, 1.2);
-    const flag = box(0.6, 0.35, 0.03, 0x3d8bfd, { shadow: false });
-    flag.position.set(2.1, 2.4, 1.2);
-    g.add(body, roof, clock, pole, flag);
-    for (let i = 0; i < 3; i++) {
-      for (let r = 0; r < l + 1; r++) {
-        const win = box(0.4, 0.3, 0.04, 0x7fc8f8, { shadow: false });
-        win.position.set(-1.0 + i * 1.0, 0.55 + r * 0.5, 0.92);
-        g.add(win);
-      }
-    }
+    g.add(at3(clock, 0, h + 0.62, 0.5));
+    g.add(at3(box(0.8, 0.7, 0.6, 0xefe3c8), 0, h + 0.35, 0.4), at3(gableRoof(0.8, 0.6, 0.35, 0xc0392b), 0, h + 0.7, 0.4));
+    g.add(at3(box(0.05, 2.4, 0.05, 0xdfe6ee), 1.8, 1.2, 1.3), at3(box(0.6, 0.35, 0.03, 0x3d8bfd, { shadow: false }), 2.1, 2.2, 1.3));
     return g;
   },
   factory(l) {
     const g = new THREE.Group();
-    const body = box(2.8, 1.3, 2.0, 0xb8c2cc);
-    body.position.y = 0.65;
-    g.add(body);
+    g.add(facadeBlock(2.8, 1.5, 2.0, 'brick', 2, { seed: 5, door: false }));
+    // A roll-up loading door and a sawtooth roof
+    g.add(at3(box(0.9, 0.8, 0.04, 0x9aa3ad), -0.7, 0.4, 1.01));
+    for (let i = 0; i < 6; i++) g.add(at3(box(0.86, 0.02, 0.05, 0x7d8690, { shadow: false }), -0.7, 0.08 + i * 0.13, 1.03));
     for (let i = 0; i < 3; i++) {
-      const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.55, 0.6, 3), mat(0x8792a0));
+      const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.5, 0.5, 3), mat(0x7d8690));
       saw.rotation.z = Math.PI / 2;
       saw.rotation.y = Math.PI / 2;
-      saw.position.set(-0.9 + i * 0.9, 1.55, 0);
-      g.add(saw);
+      g.add(at3(saw, -0.9 + i * 0.9, 1.72, 0));
     }
+    g.add(at3(cylM(0.06, 0.06, 2.6, 0x9e9e9e, 8).rotateZ(Math.PI / 2), 0, 1.2, -1.08));
     for (let k = 0; k < l; k++) {
-      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 2.2 + k * 0.6, 10), mat(0xe5484d));
-      stack.position.set(1.0 - k * 0.7, 1.1 + k * 0.3, -0.6);
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), surface({ color: 0xffffff, transparent: true, opacity: 0.75 }));
-      puff.position.set(stack.position.x, 2.6 + k * 0.6, -0.6);
+      const hgt = 2.4 + k * 0.6;
+      const stack = cylM(0.2, 0.27, hgt, 0x9c4a36, 10);
+      const x = 1.0 - k * 0.7;
+      g.add(at3(stack, x, hgt / 2, -0.6), at3(cylM(0.23, 0.23, 0.12, 0xefe7da, 10), x, hgt - 0.3, -0.6));
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.33, 8, 6), surface({ color: 0xffffff, transparent: true, opacity: 0.75 }));
+      puff.position.set(x, hgt + 0.3, -0.6);
       const base = puff.position.y;
       decorAnims.push((t) => {
         puff.position.y = base + ((t * 0.6 + k * 0.3) % 1) * 0.9;
         puff.material.opacity = 0.75 * (1 - ((t * 0.6 + k * 0.3) % 1));
       });
-      g.add(stack, puff);
+      g.add(puff);
     }
-    const cross = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.6), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTexture((c) => {
-      c.font = '72px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('💊', 64, 68);
-    }) }));
-    cross.position.set(0, 0.8, 1.02);
-    g.add(cross);
+    g.add(at3(signBoard('💊 โรงงานยา', '#2e7d32', 1.4, 0.32), 0.7, 1.25, 1.02));
     return g;
   },
   bank(l) {
     const g = new THREE.Group();
-    const h = 1.4 + l * 0.4;
-    const body = box(2.6, h, 1.8, 0xf4f4f0);
-    body.position.y = h / 2;
-    const pedi = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 1.7, 0.7, 4, 1), mat(0xdfe6ee));
-    pedi.scale.set(1, 1, 0.55);
-    pedi.rotation.y = Math.PI / 4;
-    pedi.position.y = h + 0.35;
-    g.add(body, pedi);
-    for (let i = 0; i < 4; i++) {
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, h, 10), mat(0xffffff));
-      col.position.set(-0.9 + i * 0.6, h / 2, 1.05);
-      g.add(col);
+    if (l === 1) {
+      const h = 1.6;
+      g.add(facadeBlock(2.6, h, 1.8, 'stone', 2, { seed: 7 }));
+      g.add(cornice(2.6, 1.8, h, 0xffffff));
+      const pedi = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 1.6, 0.55, 4, 1), mat(0xf1ece2));
+      pedi.scale.set(1, 1, 0.5);
+      pedi.rotation.y = Math.PI / 4;
+      g.add(at3(pedi, 0, h + 0.55, 0.3));
+      for (let i = 0; i < 4; i++) g.add(at3(cylM(0.1, 0.11, h, 0xffffff, 10), -0.9 + i * 0.6, h / 2, 1.05));
+      g.add(at3(box(2.4, 0.1, 0.5, 0xdcd6ca), 0, 0.05, 1.15));
+    } else if (l === 2) {
+      // A stone office tower with a copper roof
+      const floors = 7;
+      const h = floors * 0.62;
+      g.add(facadeBlock(2.3, h, 2.0, 'grey', floors, { seed: 8, shop: true }));
+      g.add(cornice(2.3, 2.0, h, 0xe6e7ea));
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(1.25, 1.3, 4), mat(0x5fa58e));
+      cap.rotation.y = Math.PI / 4;
+      g.add(at3(cap, 0, h + 0.95, 0));
+      g.add(at3(waterTower(), 0.75, h + 0.3, -0.6));
+    } else {
+      // A glass skyscraper on a stone podium, with a lit crown and an aircraft light
+      const floors = 22;
+      const h = floors * 0.42;
+      g.add(facadeBlock(2.6, 0.9, 2.4, 'stone', 1, { seed: 9, shop: true }));
+      g.add(at3(facadeBlock(2.3, h, 2.1, 'glass', floors, { seed: 9 }), 0, 0.9, 0));
+      g.add(at3(box(2.4, 0.3, 2.2, 0x2f5f9e), 0, h + 1.05, 0), at3(box(1.6, 0.5, 1.4, 0xe9eef4), 0, h + 1.45, 0));
+      for (const x of [-0.4, 0.4]) {
+        g.add(at3(cylM(0.03, 0.03, 1.4, 0xb0bec5, 6), x, h + 2.4, 0));
+        g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), new THREE.MeshBasicMaterial({ toneMapped: false, color: 0xff3b30 })), x, h + 3.12, 0));
+      }
     }
-    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.08, 18), mat(0xffd166));
-    coin.rotation.x = Math.PI / 2;
-    coin.position.set(0, h + 1.2, 0);
-    decorAnims.push((t) => { coin.rotation.z = t * 2; });
-    g.add(coin);
+    g.add(at3(signBoard('🏦 ธนาคาร', '#8d6e00', 1.4, 0.32), 0, 1.15, l === 1 ? 0.92 : 1.22));
     return g;
   },
   market(l) {
     const g = new THREE.Group();
-    const colors = [0xe5484d, 0x3d8bfd, 0xffd166, 0x2e9e4f, 0x9b5de5, 0xff8fab];
-    for (let k = 0; k < l + 1; k++) {
-      const x = -1.2 + k * 1.2;
-      const table = box(1.0, 0.6, 0.7, 0xa0703c);
-      table.position.set(x, 0.3, 0.3);
-      const top = new THREE.Mesh(new THREE.ConeGeometry(0.8, 0.5, 4), mat(colors[k % colors.length]));
-      top.rotation.y = Math.PI / 4;
-      top.position.set(x, 1.6, 0.3);
-      const pole = box(0.06, 1.4, 0.06, 0xdfe6ee);
-      pole.position.set(x, 0.7, 0.3);
-      g.add(table, top, pole);
-      for (let f = 0; f < 3; f++) {
-        const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), mat(pick([0xff924c, 0xe5484d, 0x8ac926, 0xffd166])));
-        fruit.position.set(x - 0.25 + f * 0.25, 0.68, 0.3);
-        g.add(fruit);
-      }
+    // A two-storey wooden shophouse with a striped awning, lanterns and street-food tables
+    const w = 2.8;
+    g.add(at3(box(w, 1.8, 1.4, 0x7b4a2a), 0, 0.9, -0.7));
+    g.add(at3(box(w + 0.1, 0.08, 1.5, 0xb03a2e), 0, 0.98, -0.7));
+    g.add(at3(gableRoof(w, 1.4, 0.45, 0x424a57).rotateY(Math.PI / 2), 0, 1.8, -0.7));
+    for (const x of [-0.85, 0, 0.85]) g.add(at3(box(0.4, 0.4, 0.03, 0xf3efe6, { shadow: false }), x, 1.4, 0.01), at3(box(0.32, 0.32, 0.03, 0x2d3a4a, { shadow: false }), x, 1.4, 0.02));
+    g.add(at3(box(w - 0.3, 0.7, 0.03, 0xe8c27a, { shadow: false }), 0, 0.4, 0.01));
+    g.add(at3(awning(w, ['#d8342c', '#ffffff']), 0, 1.0, 0.25));
+    g.add(at3(signBoard('🍜 ตลาด · STREET FOOD', '#b71c1c', 2.4, 0.34), 0, 1.25, 0.06));
+    for (let i = 0; i < 4; i++) g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), new THREE.MeshBasicMaterial({ toneMapped: false, color: 0xffe0a0 })), -1.05 + i * 0.7, 0.75, 0.52));
+    const stools = [0xe5484d, 0x3d8bfd, 0x2e9e4f, 0xffd166];
+    for (let t = 0; t < l + 1; t++) {
+      const x = -1.0 + t * (2.0 / Math.max(1, l));
+      g.add(at3(box(0.5, 0.05, 0.4, 0xdfe2e6), x, 0.42, 1.2), at3(cylM(0.06, 0.1, 0.4, 0x5d4037, 6), x, 0.2, 1.2));
+      g.add(at3(cylM(0.06, 0.07, 0.05, 0xd84315, 8), x, 0.47, 1.2));
+      for (const dz of [-0.35, 0.35]) g.add(at3(box(0.2, 0.22, 0.2, stools[(t + (dz > 0 ? 1 : 0)) % 4]), x, 0.11, 1.2 + dz));
+    }
+    if (l >= 2) {
+      // A fruit cart by the door
+      g.add(at3(box(0.7, 0.4, 0.4, 0xa0703c), 1.6, 0.3, 0.4));
+      for (let f = 0; f < 5; f++) g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), mat(pick([0xff924c, 0xe5484d, 0x8ac926, 0xffd166]))), 1.38 + f * 0.11, 0.56, 0.4));
     }
     return g;
   },
@@ -5215,25 +5497,30 @@ const CITY_MODELS = {
     const lawn = new THREE.Mesh(new THREE.CircleGeometry(2.3, 24), mat(0x8fd16b));
     lawn.rotation.x = -Math.PI / 2;
     lawn.position.y = 0.03;
-    g.add(lawn);
+    const path = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.35, 32), mat(0xe8dcc8));
+    path.rotation.x = -Math.PI / 2;
+    path.position.y = 0.04;
+    g.add(lawn, path);
     for (let k = 0; k < 1 + l; k++) {
       const t = TREES.round();
-      t.scale.setScalar(0.7);
-      const a = (k / (1 + l)) * Math.PI * 2;
-      t.position.set(Math.cos(a) * 1.5, 0, Math.sin(a) * 1.5);
-      g.add(t);
+      t.scale.setScalar(0.65);
+      const a = (k / (1 + l)) * Math.PI * 2 + 0.4;
+      g.add(at3(t, Math.cos(a) * 1.85, 0, Math.sin(a) * 1.85));
+    }
+    for (const sx of [-1, 1]) {
+      const b = benchModel();
+      b.scale.setScalar(0.7);
+      b.rotation.y = sx > 0 ? -Math.PI / 2 : Math.PI / 2; // facing the middle
+      g.add(at3(b, sx * 1.17, 0, 0));
     }
     if (l >= 2) {
-      const basin = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 0.3, 16), mat(0xdfe6ee));
-      basin.position.y = 0.15;
-      const water = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.05, 16), mat(0x5ec8f2));
-      water.position.y = 0.3;
-      g.add(basin, water);
+      g.add(at3(cylM(0.6, 0.7, 0.3, 0xdfe6ee, 16), 0, 0.15, 0), at3(cylM(0.5, 0.5, 0.05, 0x5ec8f2, 16), 0, 0.3, 0), at3(cylM(0.08, 0.1, 0.5, 0xdfe6ee, 8), 0, 0.5, 0));
     }
     for (let i = 0; i < 6 * l; i++) {
       const f = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), mat(pick([0xff8fab, 0xffd166, 0xffffff, 0xc77dff])));
-      f.position.set(rand(-2, 2), 0.1, rand(-2, 2));
-      g.add(f);
+      const a = rand(0, Math.PI * 2);
+      const r = rand(1.45, 2.1);
+      g.add(at3(f, Math.cos(a) * r, 0.1, Math.sin(a) * r));
     }
     return g;
   },
@@ -5286,6 +5573,9 @@ function syncDistrict(animate = false) {
 // Residents stroll along the district road once there are homes
 function updateDistrict(dt) {
   if (!district.built) return;
+  // Windows light up after dark
+  const glow = (1 - daylight()) * 1.6;
+  for (const m of CITY_GLOW) m.emissiveIntensity = glow;
   const want = Math.min(12, cityLevel('homes') * 2);
   while (district.residents.length < want) {
     const person = makePerson({ shirt: pick(SHIRTS) });
@@ -9319,172 +9609,6 @@ function updateCityLife(dt) {
 
 // ---------- detail pass: city buildings, base props, upstairs furniture, parking and the hospital front ----------
 
-// --- the city district: each building type looks like what it is, and grows with its level ---
-// Footprint stays within about ±2.1 × ±2 of the plot centre; the front (+z) turns to face the road.
-const pal = (list, i) => list[i % list.length];
-const NEW_CITY = {
-  homes(l) {
-    const g = new THREE.Group();
-    if (l >= 3) {
-      // A small apartment block with balconies
-      const blk = box(3.6, 4.2, 2.4, 0xf3e5d8);
-      blk.position.set(0, 2.1, -0.6);
-      g.add(blk, at3(box(3.8, 0.2, 2.6, 0xb5651d), 0, 4.3, -0.6));
-      windows(blk, 3.6, 4, 2.4, -2.0, 3, 0x9fd8ff, 0xffffff);
-      for (let f = 0; f < 2; f++) {
-        g.add(at3(box(3.0, 0.08, 0.6, 0xffffff), 0, 1.5 + f * 1.35, 0.9), at3(box(3.0, 0.4, 0.04, 0xffffff, { shadow: false }), 0, 1.72 + f * 1.35, 1.18));
-      }
-      g.add(at3(box(0.8, 1.2, 0.06, 0x8d6e63, { shadow: false }), 0, 0.6, 0.62));
-      roofDetails(g, 0, 3.6, 2.4, 4.4, 1);
-    } else {
-      const spots = l === 1 ? [[0, -0.4]] : [[-1.1, -0.5], [1.15, -0.2]];
-      spots.forEach(([x, z], k) => {
-        const h = new THREE.Group();
-        const w = l === 1 ? 2.6 : 1.9;
-        const wall = pal([0xfff3c4, 0xffd6d6, 0xd6ecff, 0xd8f3dc], x > 0 ? 1 : 0 + k);
-        const body = box(w, 1.5, 1.9, wall);
-        body.position.y = 0.75;
-        h.add(body, at3(hipRoof(w, 1.9, 1.0, pal([0xc0392b, 0x2874a6, 0x7d3c98, 0x1e8449], k + l)), 0, 1.5 + 0.5, 0));
-        h.add(at3(box(0.5, 0.9, 0.05, 0x8d6e63, { shadow: false }), w * 0.2, 0.45, 0.96));
-        for (const wx of [-w * 0.25, w * 0.42]) h.add(at3(box(0.45, 0.4, 0.05, 0x9fd8ff, { shadow: false }), wx, 0.95, 0.96));
-        h.position.set(x, 0, z);
-        g.add(h);
-      });
-      // Picket fence and a garden tree
-      for (let i = 0; i < 9; i++) g.add(at3(box(0.08, 0.45, 0.06, 0xffffff, { shadow: false }), -2 + i * 0.5, 0.22, 1.55));
-      g.add(at3(box(4.1, 0.05, 0.05, 0xffffff, { shadow: false }), 0, 0.36, 1.55));
-      const t = treeModel(l === 1 ? 'round' : 'sakura');
-      t.scale.setScalar(0.75);
-      g.add(at3(t, l === 1 ? 1.7 : 0, 0, l === 1 ? -1.4 : 0.9));
-    }
-    return g;
-  },
-  school(l) {
-    const g = new THREE.Group();
-    const h = 1.6 + l * 0.8;
-    const body = box(3.8, h, 1.8, 0xfff0c8);
-    body.position.set(0, h / 2, -0.9);
-    g.add(body, at3(box(4.0, 0.22, 2.0, 0xc0392b), 0, h + 0.11, -0.9));
-    windows(body, 3.8, h - 0.4, 1.8, -h / 2 + 0.1, l + 1, 0x9fd8ff, 0xffffff);
-    const clock = cylM(0.32, 0.32, 0.06, 0xffffff, 18);
-    clock.rotation.x = Math.PI / 2;
-    g.add(at3(clock, 0, h - 0.4, 0.02), at3(box(0.04, 0.22, 0.02, 0x222222, { shadow: false }), 0, h - 0.33, 0.06));
-    g.add(at3(signBoard('🏫 โรงเรียนแพทย์', '#c0392b', 2.2, 0.4), 0, h + 0.5, -0.9));
-    // A sports field with goals out front
-    const field = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 1.6), mat(0x66bb6a));
-    field.rotation.x = -Math.PI / 2;
-    g.add(at3(field, 0, 0.02, 1.0), at3(box(3.4, 0.01, 0.05, 0xffffff, { shadow: false }), 0, 0.03, 1.0));
-    for (const x of [-1.7, 1.7]) g.add(at3(box(0.05, 0.6, 0.7, 0xffffff, { shadow: false }), x, 0.3, 1.0));
-    g.add(at3(cylM(0.04, 0.04, 3, 0xdfe6ee, 6), 2.1, 1.5, -0.1), at3(box(0.7, 0.42, 0.02, 0x3d8bfd, { shadow: false }), 2.45, 2.7, -0.1));
-    return g;
-  },
-  factory(l) {
-    const g = new THREE.Group();
-    const body = box(3.6, 1.8, 2.4, 0xc5ccd3);
-    body.position.set(-0.2, 0.9, -0.6);
-    g.add(body);
-    for (let i = 0; i < 3; i++) {
-      const saw = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.7, 0.7, 3), mat(i % 2 ? 0x90a4ae : 0x78909c));
-      saw.rotation.z = Math.PI / 2;
-      saw.rotation.y = Math.PI / 2;
-      saw.castShadow = true;
-      g.add(at3(saw, -1.4 + i * 1.2, 2.05, -0.6));
-      g.add(at3(box(1.0, 0.5, 0.04, 0x9fd8ff, { shadow: false }), -1.4 + i * 1.2, 2.05, -0.25));
-    }
-    g.add(at3(box(1.4, 1.1, 0.06, 0x546e7a, { shadow: false }), 0.6, 0.55, 0.62));
-    for (let k = 0; k < l; k++) {
-      const stack = cylM(0.2, 0.26, 2.6 + k * 0.5, 0xe5484d, 10);
-      g.add(at3(stack, 1.8, 1.3 + k * 0.25, -1.4 + k * 0.7));
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), surface({ color: 0xffffff, transparent: true, opacity: 0.7 }));
-      const by = 2.8 + k * 0.5;
-      puff.position.set(1.8, by, -1.4 + k * 0.7);
-      decorAnims.push((t) => {
-        const f = (t * 0.6 + k * 0.3) % 1;
-        puff.position.y = by + f * 0.9;
-        puff.material.opacity = 0.7 * (1 - f);
-      });
-      g.add(puff);
-    }
-    // Storage tanks and a delivery truck
-    for (const z of [0.9, 1.6].slice(0, l >= 2 ? 2 : 1)) g.add(at3(cylM(0.35, 0.35, 0.9, 0xeceff1, 12), -1.6, 0.45, z));
-    const truck = vanCar();
-    truck.rotation.y = Math.PI / 2;
-    g.add(at3(truck, 0.6, 0, 1.4));
-    g.add(at3(signBoard('🏭 โรงงานยา', '#455a64', 1.8, 0.38), -0.2, 1.4, 0.62));
-    return g;
-  },
-  bank(l) {
-    const g = new THREE.Group();
-    const h = 1.7 + l * 0.6;
-    const body = box(3.2, h, 2.0, 0xf5f2ea);
-    body.position.set(0, h / 2 + 0.3, -0.8);
-    g.add(body, at3(box(3.6, 0.3, 2.6, 0xd7ccc8), 0, 0.15, -0.5));
-    for (let s = 0; s < 3; s++) g.add(at3(box(2.4 - s * 0.2, 0.1, 0.3, 0xe0d8cc), 0, 0.05 + s * 0.1, 1.05 - s * 0.3));
-    for (let i = 0; i < 4; i++) g.add(at3(cylM(0.13, 0.15, h, 0xffffff, 12), -1.2 + i * 0.8, h / 2 + 0.3, 0.35));
-    const pedi = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 2.0, 0.7, 3), mat(0xece6da));
-    pedi.rotation.set(0, 0, 0);
-    pedi.scale.set(1, 1, 0.5);
-    pedi.rotation.y = Math.PI / 2;
-    g.add(at3(box(3.4, 0.2, 1.4, 0xece6da), 0, h + 0.4, -0.15), at3(pedi, 0, h + 0.85, 0.2));
-    const coin = cylM(0.4, 0.4, 0.08, 0xffd166, 20);
-    coin.rotation.x = Math.PI / 2;
-    decorAnims.push((t) => { coin.rotation.z = t * 2; });
-    g.add(at3(coin, 0, h + 1.7, -0.3), at3(signBoard('🏦 ธนาคาร', '#8d6e63', 1.6, 0.36), 0, h + 0.15, 0.6));
-    g.add(at3(box(0.5, 0.8, 0.3, 0x455a64), 1.85, 0.4, 0.4), at3(box(0.36, 0.22, 0.02, 0x40c4ff, { shadow: false }), 1.85, 0.62, 0.56));
-    return g;
-  },
-  market(l) {
-    const g = new THREE.Group();
-    // A covered market hall with stalls under it
-    const roof = thaiRoof(4.0, 2.4, 0.9, 0xd35400);
-    g.add(at3(roof, 0, 2.2, -0.6));
-    for (const [x, z] of [[-1.85, -1.7], [1.85, -1.7], [-1.85, 0.5], [1.85, 0.5]]) g.add(at3(box(0.14, 2.2, 0.14, 0x8d6e63), x, 1.1, z));
-    const colors = [0xe5484d, 0x3d8bfd, 0xffd166, 0x2e9e4f, 0x9b5de5, 0xff8fab];
-    for (let k = 0; k < 1 + l; k++) {
-      const x = -1.35 + (k % 4) * 0.9;
-      g.add(at3(box(0.8, 0.6, 0.6, 0xa0703c), x, 0.3, -0.6));
-      for (let f = 0; f < 4; f++) {
-        const fr = new THREE.Mesh(new THREE.SphereGeometry(0.08, 7, 5), mat(pick([0xff924c, 0xe5484d, 0x8ac926, 0xffd166, 0xc77dff])));
-        g.add(at3(fr, x - 0.27 + f * 0.18, 0.67, -0.6));
-      }
-    }
-    // Umbrella stalls out front
-    for (let k = 0; k < Math.min(3, l + 1); k++) {
-      const x = -1.4 + k * 1.4;
-      const top = new THREE.Mesh(new THREE.ConeGeometry(0.62, 0.35, 8), mat(colors[k]));
-      g.add(at3(top, x, 1.55, 1.25), at3(cylM(0.03, 0.03, 1.4, 0xffffff, 6), x, 0.7, 1.25), at3(box(0.7, 0.45, 0.45, 0xbcaaa4), x, 0.22, 1.25));
-    }
-    g.add(at3(signBoard('🏪 ตลาด', '#d35400', 1.4, 0.36), 0, 2.05, 0.55));
-    return g;
-  },
-  garden(l) {
-    const g = new THREE.Group();
-    const lawn = new THREE.Mesh(new THREE.CircleGeometry(2.3, 24), mat(0x8fd16b));
-    lawn.rotation.x = -Math.PI / 2;
-    g.add(at3(lawn, 0, 0.03, 0));
-    const path = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.55, 24), mat(0xe8dcc8));
-    path.rotation.x = -Math.PI / 2;
-    g.add(at3(path, 0, 0.04, 0));
-    for (let k = 0; k < 2 + l; k++) {
-      const a = (k / (2 + l)) * Math.PI * 2 + 0.4;
-      const t = treeModel(k % 3 === 0 ? 'sakura' : k % 3 === 1 ? 'round' : 'cone');
-      t.scale.setScalar(0.7);
-      g.add(at3(t, Math.cos(a) * 1.95, 0, Math.sin(a) * 1.95));
-    }
-    if (l >= 2) g.add(campusProp('fountain'));
-    else g.add(at3(campusProp('flowers'), 0, 0, 0));
-    if (l >= 3) {
-      const sala = campusProp('sala');
-      sala.scale.setScalar(0.6);
-      g.add(at3(sala, 0, 0, -1.4));
-    }
-    const b = benchModel();
-    g.add(at3(b, 0, 0, 1.4));
-    g.add(at3(lampModel(), 1.6, 0, 1.2));
-    return g;
-  },
-};
-Object.assign(CITY_MODELS, NEW_CITY);
 
 // --- military base: props that make it read as a real camp ---
 function sandbags(n) {
@@ -12539,4 +12663,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
