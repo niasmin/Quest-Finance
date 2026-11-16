@@ -371,6 +371,10 @@
   #toast.show { transform: translate(-50%, 0); }
   /* Banners sit under the top bar, so the money and the buttons stay visible */
   #toast { top: calc(64px + env(safe-area-inset-top)); }
+  .movebar { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 12; display: none; flex-wrap: wrap; gap: 8px; justify-content: center; width: min(360px, 92vw); padding: 10px; border-radius: 16px; background: rgba(20, 28, 48, .9); color: #fff; box-sizing: border-box; }
+  .movebar .mvnote { width: 100%; text-align: center; font-size: 14px; }
+  .movebar .mvnote b { color: #ffd166; }
+  .movebar .btn { flex: 1; margin: 0; padding: 10px 8px; font-size: 15px; }
   .newsrow { display: flex; gap: 10px; align-items: flex-start; text-align: left; margin: 8px 2px; }
   .newsrow span { font-size: 26px; line-height: 1.1; }
   .newsrow small { color: #5a6274; }

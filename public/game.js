@@ -5016,9 +5016,47 @@ const CITY_BUILDINGS = [
 ];
 const CITY_PLOTS = 8;
 const PLACE_MAX = 3;
-const defaultEmpire = () => ({ tier: 0, plots: Array(CITY_PLOTS).fill(null), nodes: {}, buys: 0, land: 0 });
+const defaultEmpire = () => ({ tier: 0, plots: Array(CITY_PLOTS).fill(null), nodes: {}, buys: 0, land: 0, spots: {} });
 const emp = () => state.empire;
 const cityLevel = (type) => (emp()?.plots || []).reduce((a, p) => a + (p?.type === type ? p.lvl : 0), 0);
+// --- location: what stands next to a building changes how much it gives ---
+// Neighbours are the buildings beside it on the same street side and the one straight across the road.
+const NEAR = 8.6;
+const SYNERGY = {
+  homes: { garden: 0.5, market: 0.25, school: 0.25, factory: -0.5 },
+  market: { homes: 0.25, bank: 0.25 },
+  school: { garden: 0.25, homes: 0.1 },
+  factory: { factory: 0.25 },
+  bank: { market: 0.25, bank: 0.1 },
+  garden: { homes: 0.25 },
+};
+const spotOf = (i) => {
+  const sp = emp()?.spots?.[i];
+  return sp ? v(sp[0], sp[1]) : DISTRICT_PLOTS[i];
+};
+// The bonus a building of this type would get standing at `at` (plot i itself is left out)
+function synergyAt(i, type, at) {
+  const why = {};
+  let sum = 0;
+  (emp()?.plots || []).forEach((q, j) => {
+    const k = q && j !== i ? SYNERGY[type]?.[q.type] : 0;
+    if (!k || !DISTRICT_PLOTS[j] || flatDist(at, spotOf(j)) > NEAR) return;
+    sum += k;
+    why[q.type] = (why[q.type] || 0) + k;
+  });
+  return { sum: Math.max(-0.5, Math.min(1, sum)), why };
+}
+const multCache = { t: -1e9, m: [] };
+function plotMult(i) {
+  const now = performance.now();
+  if (now - multCache.t > 400) {
+    multCache.t = now;
+    multCache.m = (emp()?.plots || []).map((p, j) => (p && DISTRICT_PLOTS[j] ? 1 + synergyAt(j, p.type, spotOf(j)).sum : 1));
+  }
+  return multCache.m[i] ?? 1;
+}
+const cityPower = (type) => (emp()?.plots || []).reduce((a, p, i) => a + (p?.type === type ? p.lvl * plotMult(i) : 0), 0);
+const synergyText = (why) => Object.entries(why).map(([t, k]) => `${CITY_BUILDINGS.find((b) => b.id === t).icon}${k > 0 ? '+' : ''}${Math.round(k * 100)}%`).join(' ');
 const marketRate = (l) => Math.round([0, 3, 9, 20][l] * (1 + 0.5 * (emp()?.tier || 0)));
 // Steep for the first 24 builds, gentler after so a big city stays affordable
 const plotCost = () => Math.round((4000 * 1.25 ** Math.min(emp().buys, 24) * 1.08 ** Math.max(0, emp().buys - 24)) / 10) * 10;
@@ -5032,15 +5070,15 @@ const nodeCost = (t, i, lvl) => Math.round((nodeBase(t, i) * 2.5 ** lvl) / 10) *
 // Pays back the first level in ~45 minutes; taxes never count toward the leaderboard
 const nodeRate = (t, i, lvl) => Math.round((nodeBase(t, i) / 2700) * [0, 1, 3, 7][lvl]);
 // Boosts the city gives to every branch
-const empireArrival = () => 1 + 0.04 * cityLevel('homes');
-const empireStaff = () => 1 + 0.05 * cityLevel('school');
-const empireMachine = () => 1 + 0.05 * cityLevel('factory');
-const empirePrice = () => (1 + 0.04 * cityLevel('bank')) * (1 + 0.1 * (emp()?.tier || 0)); // each tier reached: +10%
-const empireComfort = () => 2 * cityLevel('garden');
+const empireArrival = () => 1 + 0.04 * cityPower('homes');
+const empireStaff = () => 1 + 0.05 * cityPower('school');
+const empireMachine = () => 1 + 0.05 * cityPower('factory');
+const empirePrice = () => (1 + 0.04 * cityPower('bank')) * (1 + 0.1 * (emp()?.tier || 0)); // each tier reached: +10%
+const empireComfort = () => Math.round(2 * cityPower('garden'));
 function empireRate() {
   const e = emp();
   if (!e) return 0;
-  let rate = e.plots.reduce((a, p) => a + (p?.type === 'market' ? marketRate(p.lvl) : 0), 0);
+  let rate = e.plots.reduce((a, p, i) => a + (p?.type === 'market' ? marketRate(p.lvl) * plotMult(i) : 0), 0);
   for (let t = 1; t <= e.tier; t++) nodeLevels(t).forEach((l, i) => { rate += nodeRate(t, i + 1, l); });
   return rate * prestigeTax() * (researched('tax') ? 1.2 : 1);
 }
@@ -5104,6 +5142,7 @@ function buildPlot(i, type) {
   if ((p && p.lvl >= PLACE_MAX) || !empireSpend(plotCost())) return;
   e.buys++;
   e.plots[i] = p ? { ...p, lvl: p.lvl + 1 } : { type, lvl: 1 };
+  multCache.t = -1e9;
   syncDistrict(true);
   save();
   renderEmpire();
@@ -5202,17 +5241,21 @@ function renderCity() {
     grid.append(cell);
   }
   emPage.append(grid);
-  const go = emButton('🚶 ไปดูเมืองจริง', false, visitDistrict);
-  go.classList.add('emgo');
-  emPage.append(go);
-  const landCost = LAND_COSTS[e.land || 0];
-  if (landCost !== undefined) {
-    const land = emButton(`🗺️ ซื้อที่ดินเพิ่ม +4 แปลง · 💵${fmt(landCost)}`, state.money < landCost, buyLand);
-    land.classList.add('emgo');
-    emPage.append(land);
-  }
+  // The selected lot's actions come first; the town-wide buttons sit below them
+  const tail = () => {
+    const go = emButton('🚶 ไปดูเมืองจริง', false, visitDistrict);
+    go.classList.add('emgo');
+    emPage.append(go);
+    const landCost = LAND_COSTS[e.land || 0];
+    if (landCost !== undefined) {
+      const land = emButton(`🗺️ ซื้อที่ดินเพิ่ม +4 แปลง · 💵${fmt(landCost)}`, state.money < landCost, buyLand);
+      land.classList.add('emgo');
+      emPage.append(land);
+    }
+  };
   if (empireSel === null) {
     emPage.append(emEl('p', 'emhint', 'แตะที่ว่างเพื่อสร้าง แตะสิ่งก่อสร้างเพื่ออัปเลเวล · ราคาเพิ่มขึ้นทุกครั้งที่สร้าง'));
+    tail();
     return;
   }
   const p = e.plots[empireSel];
@@ -5229,7 +5272,18 @@ function renderCity() {
     const row = emEl('div', 'uprow', `<div class="upico">${b.icon}</div><div class="upinfo"><b>${b.name}</b> <span class="lv">Lv.${p.lvl}/${PLACE_MAX}</span><br><small>${b.desc(p.lvl)}${maxed ? '' : ` → Lv.${p.lvl + 1}: ${b.desc(p.lvl + 1)}`}</small></div>`);
     row.append(emButton(maxed ? 'สูงสุด' : `💵${fmt(cost)}`, maxed || state.money < cost, () => buildPlot(empireSel, p.type)));
     emPage.append(row);
+    const sy = synergyAt(empireSel, p.type, spotOf(empireSel));
+    const pct = Math.round(sy.sum * 100);
+    emPage.append(emEl('p', 'emhint', `📍 ทำเล: <b>${pct >= 0 ? '+' : ''}${pct}%</b> ${synergyText(sy.why) || '(ยังไม่มีเพื่อนบ้านที่ส่งผล)'}`));
   }
+  if (district.built && district.plots[empireSel]) {
+    const sel = empireSel;
+    const mv = emButton('📍 ย้ายที่ตั้ง (ฟรี)', false, () => startMove(sel));
+    mv.classList.add('emgo');
+    emPage.append(mv);
+    emPage.append(emEl('p', 'emhint', 'ทำเลดี: 🏘️ ใกล้ 🌳🏪🏫 · 🏪 ใกล้ 🏘️🏦 · 🏫 ใกล้ 🌳 · 🏭 ใกล้ 🏭 · 🏦 ใกล้ 🏪<br>ระวัง: 🏘️ ติด 🏭 ได้ผลลดลงครึ่งหนึ่ง'));
+  }
+  tail();
 }
 function renderTierMap(t) {
   const nodes = EMPIRE_NODES[t];
@@ -5359,7 +5413,17 @@ function addDistrictLots(animate = false) {
     scene.add(district.road2);
   }
   for (let i = district.plots.length; i < n; i++) {
-    const at = DISTRICT_PLOTS[i];
+    let at = spotOf(i);
+    const taken = (q) => Array.from({ length: n }, (_, j) => j).some((j) => j !== i && Math.abs(spotOf(j).x - q.x) < 1 && Math.abs(spotOf(j).z - q.z) < 5);
+    if (!emp().spots?.[i] && taken(at)) {
+      // Its usual place is occupied by a building the player moved: take the first free one instead
+      const free = DISTRICT_PLOTS.find((q) => (n > 8 || q.x > -27.5) && !taken(q));
+      if (free) {
+        emp().spots = emp().spots || {};
+        emp().spots[i] = [free.x, free.z];
+        at = free;
+      }
+    }
     const lot = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 5.2), mat(0x8fcf6c));
     lot.rotation.x = -Math.PI / 2;
     lot.position.set(at.x, 0.015, at.z);
@@ -5369,8 +5433,9 @@ function addDistrictLots(animate = false) {
     apron.rotation.x = -Math.PI / 2;
     apron.position.set(at.x + (at.x > roadOf(at.x) ? -2.0 : 2.0), 0.018, at.z);
     scene.add(apron);
-    scene.add(zoneRing(plotZone(at), 0x3d8bfd));
-    district.plots[i] = { at, lot, group: null, sign: null, key: '', collider: null };
+    const ring = zoneRing(plotZone(at), 0x3d8bfd);
+    scene.add(ring);
+    district.plots[i] = { at, lot, apron, ring, group: null, sign: null, key: '', signKey: '', collider: null };
     if (animate) popIn(lot);
   }
 }
@@ -5829,19 +5894,26 @@ function syncDistrict(animate = false) {
   if (!district.built) return;
   district.plots.forEach((slot, i) => {
     const p = emp().plots[i];
-    const key = p ? `${p.type}:${p.lvl}` : '';
+    const pos = `${slot.at.x},${slot.at.z}`;
+    // The sign shows the building, its stars and the bonus from its neighbours; it is redrawn on its own
+    // so a neighbour moving in doesn't rebuild the whole building
+    const pct = p ? Math.round((1 + synergyAt(i, p.type, slot.at).sum - 1) * 100) : 0;
+    const label = p ? `${CITY_BUILDINGS.find((b) => b.id === p.type).icon} ${'★'.repeat(p.lvl)}${pct ? ` ${pct > 0 ? '+' : ''}${pct}%` : ''}` : '🏗️ ที่ว่าง';
+    if (label + pos !== slot.signKey) {
+      slot.signKey = label + pos;
+      if (slot.sign) scene.remove(slot.sign);
+      slot.sign = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 0.68), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(label, !p ? '#8a96a8' : pct < 0 ? '#c62828' : '#2e9e4f'), side: THREE.DoubleSide }));
+      const zone = plotZone(slot.at);
+      slot.sign.position.set(zone.x, 2.2, zone.z - 1.1);
+      slot.sign.rotation.y = Math.PI / 2;
+      scene.add(slot.sign);
+    }
+    const key = `${p ? `${p.type}:${p.lvl}` : ''}@${pos}`;
     if (key === slot.key) return;
     slot.key = key;
     if (slot.group) scene.remove(slot.group);
-    if (slot.sign) scene.remove(slot.sign);
     if (slot.collider) colliders.splice(colliders.indexOf(slot.collider), 1);
     slot.collider = null;
-    const label = p ? `${CITY_BUILDINGS.find((b) => b.id === p.type).icon} ${'★'.repeat(p.lvl)}` : '🏗️ ที่ว่าง';
-    slot.sign = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 0.68), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(label, p ? '#2e9e4f' : '#8a96a8'), side: THREE.DoubleSide }));
-    const zone = plotZone(slot.at);
-    slot.sign.position.set(zone.x, 2.2, zone.z - 1.1);
-    slot.sign.rotation.y = Math.PI / 2;
-    scene.add(slot.sign);
     if (!p) {
       slot.group = new THREE.Group();
       const post = box(0.1, 1.2, 0.1, 0xdfe6ee);
@@ -5869,9 +5941,107 @@ function syncDistrict(animate = false) {
   });
 }
 
+// --- moving a building: walk along a street, the outline follows you, then confirm ---
+const mover = { i: -1, ghost: null, at: null, ok: false, bar: null, note: null };
+const moveCols = () => (district.road2 ? CITY_COLS : CITY_COLS.slice(0, 2));
+function startMove(i) {
+  if (!district.built || !district.plots[i]) return;
+  branchPanel.style.display = 'none';
+  running = true;
+  mover.i = i;
+  if (!mover.ghost) {
+    mover.ghost = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.12, 4.6), new THREE.MeshBasicMaterial({ color: 0x3fbf5f, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false }));
+    mover.ghost.renderOrder = 3;
+    scene.add(mover.ghost);
+    const bar = emEl('div', 'movebar', '<div class="mvnote"></div>');
+    const ok = emEl('button', 'btn', tx('✅ วางตรงนี้', '✅ Place here'));
+    const no = emEl('button', 'btn ghost', tx('ยกเลิก', 'Cancel'));
+    ok.addEventListener('click', confirmMove);
+    no.addEventListener('click', endMove);
+    bar.append(ok, no);
+    document.body.append(bar);
+    mover.bar = bar;
+    mover.okBtn = ok;
+    mover.note = bar.querySelector('.mvnote');
+  }
+  mover.ghost.visible = true;
+  mover.bar.style.display = 'flex';
+  if (!inDistrict(player.group.position)) visitDistrict();
+  else if (flatDist(player.group.position, plotZone(district.plots[i].at)) < ZONE_R) district.opened = i; // don't reopen the panel at once
+}
+function endMove() {
+  mover.i = -1;
+  if (mover.ghost) mover.ghost.visible = false;
+  if (mover.bar) mover.bar.style.display = 'none';
+}
+function updateMove() {
+  if (mover.i < 0) return;
+  auto.idle = 0; // AUTO waits while you choose a spot
+  const pp = player.group.position;
+  const col = moveCols().slice().sort((a, b) => Math.abs(a - pp.x) - Math.abs(b - pp.x))[0];
+  const at = v(col, Math.max(-21, Math.min(10, Math.round(pp.z))));
+  // Free if no other lot on this side of the street is closer than a lot's width.
+  // Standing right on one other lot swaps places with it instead.
+  const hits = district.plots.map((sl, j) => j).filter((j) => j !== mover.i && Math.abs(district.plots[j].at.x - at.x) < 1 && Math.abs(district.plots[j].at.z - at.z) < 5);
+  const swap = hits.length === 1 && Math.abs(district.plots[hits[0]].at.z - at.z) <= 2.5 ? hits[0] : -1;
+  if (swap >= 0) at.copy(district.plots[swap].at);
+  const clash = hits.length > 0 && swap < 0;
+  mover.at = at;
+  mover.swap = swap;
+  mover.ok = !clash;
+  mover.ghost.position.set(at.x, 0.1, at.z);
+  mover.ghost.material.color.setHex(clash ? 0xe5484d : swap >= 0 ? 0xffc94d : 0x3fbf5f);
+  const p = emp().plots[mover.i];
+  let note = clash ? tx('❌ ชิดแปลงอื่นเกินไป เดินต่ออีกหน่อย', '❌ Too close to another lot') : tx('เดินไปตามถนนเพื่อเลือกที่', 'Walk along a street to pick a spot');
+  if (swap >= 0 && !p) note = tx('🔄 สลับที่กับแปลงนี้', '🔄 Swap with this lot');
+  if (p && !clash) {
+    const other = swap >= 0 ? emp().plots[swap] : null;
+    const pre = swap >= 0 ? `🔄 ${tx('สลับกับ', 'Swap with')} ${other ? CITY_BUILDINGS.find((b) => b.id === other.type).icon : tx('ที่ว่าง', 'empty lot')} · ` : '';
+    mover.pre = pre;
+    const sy = synergyAt(mover.i, p.type, at);
+    const pct = Math.round(sy.sum * 100);
+    note = `${mover.pre}${CITY_BUILDINGS.find((b) => b.id === p.type).icon} ${tx('ทำเลนี้', 'Here')}: <b>${pct >= 0 ? '+' : ''}${pct}%</b> ${synergyText(sy.why)}`;
+  }
+  if (mover.noteText !== note) {
+    mover.noteText = note;
+    mover.note.innerHTML = note;
+    mover.okBtn.disabled = clash;
+  }
+}
+function confirmMove() {
+  if (mover.i < 0 || !mover.ok) return;
+  const i = mover.i;
+  const slot = district.plots[i];
+  const e = emp();
+  e.spots = e.spots || {};
+  const put = (k, at) => {
+    const sl = district.plots[k];
+    e.spots[k] = [at.x, at.z];
+    sl.at = at.clone();
+    sl.lot.position.set(at.x, 0.015, at.z);
+    sl.apron.position.set(at.x + (at.x > roadOf(at.x) ? -2.0 : 2.0), 0.018, at.z);
+    const zn = plotZone(at);
+    sl.ring.position.set(zn.x, sl.ring.position.y, zn.z);
+  };
+  const from = slot.at.clone();
+  if (mover.swap >= 0) put(mover.swap, from);
+  put(i, mover.at);
+  const zone = plotZone(slot.at);
+  multCache.t = -1e9;
+  endMove();
+  syncDistrict(true);
+  // Never leave the player standing inside the building that just landed
+  const pp = player.group.position;
+  if (Math.abs(pp.x - slot.at.x) < 2.2 && Math.abs(pp.z - slot.at.z) < 2.2) pp.copy(zone);
+  district.opened = i;
+  sfxUnlock();
+  save();
+}
+
 // Residents stroll along the district road once there are homes
 function updateDistrict(dt) {
   if (!district.built) return;
+  updateMove();
   const want = Math.min(12, cityLevel('homes') * 2);
   while (district.residents.length < want) {
     const person = makePerson({ shirt: pick(SHIRTS) });
@@ -5908,7 +6078,7 @@ function updateDistrict(dt) {
     return;
   }
   district.stand += dt;
-  if (district.stand > 0.6 && district.opened !== here && branchPanel.style.display !== 'flex' && !epiTargets().includes(here)) {
+  if (mover.i < 0 && district.stand > 0.6 && district.opened !== here && branchPanel.style.display !== 'flex' && !epiTargets().includes(here)) {
     district.opened = here;
     empireTab = 0;
     empireSel = here;
@@ -13379,4 +13549,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
