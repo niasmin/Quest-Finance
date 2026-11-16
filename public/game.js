@@ -117,7 +117,6 @@ const UPGRADES = [
   { id: 'machine', icon: '⚙️', name: 'เครื่องผลิตยา', desc: (l) => `ผลิตเร็ว +${l * 10}%`, max: 10, base: 250, growth: 1.6 },
   { id: 'price', icon: '💰', name: 'ค่ารักษา', desc: (l) => `รายได้ +${l * 10}%`, max: 20, base: 400, growth: 1.55 },
   { id: 'ads', icon: '📣', name: 'ประชาสัมพันธ์', desc: (l) => `คนไข้มาเพิ่ม +${l * 8}%`, max: 10, base: 350, growth: 1.6 },
-  { id: 'collector', icon: '💰', name: 'จ้างพนักงานเก็บเงิน', desc: (l) => `คนเดินเก็บเงินให้ +${l} คน`, max: 3, base: 800, growth: 3 },
 ];
 const upLevel = (id) => state.upgrades[id] || 0;
 const upCost = (u) => Math.round((u.base * u.growth ** upLevel(u.id)) / 10) * 10;
@@ -1502,9 +1501,18 @@ class MoneyPile {
     this.stack.group.position.set(pos.x, 0.16, pos.z);
     this.timer = 0;
   }
+  // Money no longer waits on the floor: every sale goes straight into the balance, with a small
+  // "+amount" popping up where the pile used to be (grouped, so busy counters don't flood the screen)
   add(amount) {
-    this.amount += amount;
-    this.sync();
+    if (!(amount > 0)) return;
+    addMoney(amount);
+    this.shown = (this.shown || 0) + amount;
+    const now = performance.now();
+    if (now - (this.last || 0) > 900 && running && flatDist(player.group.position, this.pos) < 16) {
+      this.last = now;
+      floatText(new THREE.Vector3(this.pos.x, this.pos.y + 0.6, this.pos.z), `💵 +${fmt(this.shown)}`, '#8be08f');
+      this.shown = 0;
+    }
   }
   sync() {
     const want = Math.min(45, Math.ceil(this.amount / 5));
@@ -2487,6 +2495,7 @@ const groundPiles = () => [...Object.values(LINES), ...Object.values(ROOMS)].fil
   .concat(basket.pile ? [basket.pile] : [], townPiles());
 const COLLECTOR_HOME = v(7.6, 11.2);
 function syncCollectors(animate = false) {
+  if (animate || !animate) return; // money is credited directly now, so nobody needs to walk round collecting it
   while (collectors.length < upLevel('collector')) {
     const person = makePerson({ shirt: 0xffd166, pants: 0x2b2d42, cap: true });
     // A money bag on the back
@@ -6586,7 +6595,7 @@ const RESEARCH = [
   { id: 'machine2', icon: '⚙️', name: 'เครื่องผลิตรุ่นใหม่', desc: 'เครื่องผลิตเร็ว +15%' },
   { id: 'patience', icon: '😌', name: 'ห้องรอแอร์เย็น', desc: 'คนไข้รอได้นานขึ้น +15%' },
   { id: 'tips', icon: '💖', name: 'บริการประทับใจ', desc: 'ทิปจากคนไข้ +20% (จาก ×1.2 เป็น ×1.44)' },
-  { id: 'collector', icon: '💰', name: 'รถเข็นเงิน', desc: 'พนักงานเก็บเงินเดินเร็ว +30%' },
+  { id: 'collector', icon: '💰', name: 'รถเข็นเงิน', desc: 'พนักงานเก็บเงินเดินเร็ว +30%', hidden: true }, // retired with the money piles
   { id: 'rush', icon: '🚨', name: 'แผนรับมือเร่งด่วน', desc: 'ชั่วโมงเร่งด่วนนานขึ้น 30 วินาที' },
   { id: 'boss', icon: '🦠', name: 'วัคซีนสูตรใหม่', desc: 'เงินรางวัลจากบอส ×2' },
   { id: 'basket', icon: '🧺', name: 'รอกไฟฟ้า', desc: 'ตะกร้าเงินขึ้นลงเร็ว ×2' },
@@ -6632,6 +6641,7 @@ function renderResearch() {
     upList.append(emEl('p', 'emhint', 'เลือกวิจัยได้ทีละอย่าง งานวิจัยเดินต่อแม้ปิดเกม (เริ่มใหม่เมื่อเกิดใหม่)'));
   }
   for (const r of RESEARCH) {
+    if (r.hidden && R.cur?.id !== r.id) continue;
     const done = researched(r.id);
     const row = emEl('div', 'uprow', `<div class="upico">${r.icon}</div><div class="upinfo"><b>${r.name}</b><br><small>${r.desc} · ใช้เวลา ${formatDuration(r.time) || `${r.time} วินาที`}</small></div>`);
     row.append(emButton(done ? 'สำเร็จ ✓' : `💵${fmt(r.cost)}`, done || Boolean(R.cur) || state.money < r.cost, () => startResearch(r)));
@@ -7850,7 +7860,7 @@ function updateCampus(dt) {
       campus.owned.push(lot.id);
       buildCampusLot(lot, true);
       sfxUnlock();
-      toast(`${lot.icon} <b>เปิด ${lot.name}!</b><br>รายได้ +${fmt(Math.round(lot.rate * priceMult() * 60))}/นาที ไปเก็บที่กองเงินหน้าตึก`, 4000);
+      toast(`${lot.icon} <b>เปิด ${lot.name}!</b><br>รายได้ +${fmt(Math.round(lot.rate * priceMult() * 60))}/นาที เข้ากระเป๋าเองเลย`, 4000);
       save();
     }
   }
@@ -11973,7 +11983,7 @@ function updateGoal() {
     goalEl.classList.toggle('none', !a);
     const need = a ? a.price - AP().paid - state.money : 0;
     goalEl.textContent = a ? `${need > 0 ? '🎯' : '✅'} ${a.icon} ${tx(a.name, a.en)} · ${need > 0 ? `${tx('อีก', 'need')} 💵${fmt(need)}` : tx('พร้อมสร้างแล้ว! ไปที่ป้ายน้ำเงิน 👉', 'Ready! Stand on the blue tile 👉')}`
-      : tx('✈️ สนามบินครบทุกส่วนแล้ว! เก็บเงินจากกองได้เรื่อยๆ', '✈️ The airport is complete! Keep collecting the cash');
+      : tx('✈️ สนามบินครบทุกส่วนแล้ว! รายได้เข้ากระเป๋าเองตลอด', '✈️ The airport is complete! It keeps earning for you');
     return;
   }
   const u = UNLOCKS[state.step];
@@ -12279,7 +12289,6 @@ const TUTORIAL = [
   { text: '💊 เดินเข้า<b>วงสีขาว</b>หน้าเครื่อง เพื่อเก็บยาขึ้นหลัง', at: () => LINES.pill.pickup, done: () => player.stack.total >= 3 },
   { text: '📦 เอายาไปวางที่<b>วงสีเหลือง</b>หลังเคาน์เตอร์', at: () => LINES.pill.drop, done: () => tut.dropped },
   { text: '💚 ยืนใน<b>วงสีเขียว</b>เพื่อจ่ายยาให้คนไข้', at: () => LINES.pill.cashier, done: () => tut.served },
-  { text: '💵 เดินไปเก็บ<b>กองเงิน</b>ข้างเคาน์เตอร์', at: () => LINES.pill.money, done: () => state.earned > 0 },
   { text: '🎯 ยืนบน<b>ช่องราคา</b>เพื่อจ้างพยาบาลแคชเชียร์คนแรก (ทำต่อจนมีเงินพอ)', at: () => UNLOCKS[0].at, done: () => state.step >= 1 },
 ];
 const tutorialDone = () => state.tutorial >= TUTORIAL.length;
@@ -12588,7 +12597,7 @@ function load() {
   state.week = data.week || null;
   state.story = data.story ? { ...defaultStory(), ...data.story } : { ch: 0, catchup: true };
   state.conquests = data.conquests || 0;
-  Object.assign(state, { login: data.login || null, welcomed: data.welcomed ?? (data.tutorial >= 6), installAsked: data.installAsked || false, refUsed: data.refUsed || null, refClaimed: data.refClaimed || 0, seasonSeen: data.seasonSeen || '' });
+  Object.assign(state, { login: data.login || null, welcomed: data.welcomed ?? (data.tutorial >= TUTORIAL.length), installAsked: data.installAsked || false, refUsed: data.refUsed || null, refClaimed: data.refClaimed || 0, seasonSeen: data.seasonSeen || '' });
   state.city = { ...defaultCity(), ...(data.city || {}) };
   state.conquestRun = data.conquestRun ?? -1;
   state.base = { ...defaultBase(), ...(data.base || {}) };
