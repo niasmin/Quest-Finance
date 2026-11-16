@@ -259,6 +259,12 @@ const LOOKS = {
     diffuseColor.rgb *= 0.7 + 0.55 * lf;
     diffuseColor.rgb *= mix(0.66, 1.14, clamp(rqN.y * 0.5 + 0.5, 0.0, 1.0));
   }`,
+  wood: `
+  {
+    float wg = rq_n(vec2(rqW.x * 1.6 + rqW.y * 7.0, rqW.z * 15.0)) * 0.6 + rq_n(vec2(rqW.x * 13.0, rqW.z * 2.0 + rqW.y * 9.0)) * 0.4;
+    float k = clamp(1.0 - fwidth(rqW.z * 15.0) * 0.8, 0.0, 1.0);
+    diffuseColor.rgb *= mix(1.0, 0.82 + 0.34 * wg, k);
+  }`,
   tile: `
   {
     float cy = rqW.y / 0.15; float row = floor(cy);
@@ -283,6 +289,7 @@ const GLASS = new Set([0x9fd8ff, 0x64b5f6, 0x90caf9, 0x7fc8f8, 0xcfe8ff, 0xbfdbf
 const METAL = new Set([0x37474f, 0x444444, 0xb0bec5, 0x90a4ae, 0x78909c, 0x607d8b, 0x7b61ff, 0x5a43d6, 0x222222]);
 const GRASS = new Set([0x79c850, 0x9bd67a, 0x8fcf6c, 0x7ccf5a, 0x4caf50, 0x3c9a46, 0x2f8f4a, 0x6b8e23]);
 const ASPHALT = new Set([0x55606e, 0x2b2d42, 0x3a3f4b]);
+const WOOD = new Set([0x8a5a30, 0xb5651d, 0xa0703c, 0x8d6e63, 0x6d4c41, 0x7b4a2a, 0x8b5a2b, 0x7a5230, 0x6b4226, 0x8d5a2b, 0x6d4322, 0x5d4037, 0xa0703e, 0x7a5532, 0xbcaaa4]);
 function surface({ pattern = '', ...o } = {}) {
   if (!REAL) return new THREE.MeshLambertMaterial(o);
   const c = typeof o.color === 'number' ? o.color : null;
@@ -295,7 +302,7 @@ function surface({ pattern = '', ...o } = {}) {
     m.color.setHSL(hsl.h, Math.min(1, hsl.s * 1.18), hsl.l * (hsl.l > 0.8 ? 0.93 : 0.86));
   }
   m.envMapIntensity = 0.38;
-  if (!o.map && !o.transparent) addGrain(m, GRASS.has(c) ? 0.3 : ASPHALT.has(c) ? 0.34 : 0.07, pattern || (GRASS.has(c) ? 'grass' : ''));
+  if (!o.map && !o.transparent) addGrain(m, GRASS.has(c) ? 0.3 : ASPHALT.has(c) ? 0.34 : 0.07, pattern || (GRASS.has(c) ? 'grass' : WOOD.has(c) ? 'wood' : ''));
   realMats.push(m);
   return m;
 }
@@ -440,7 +447,7 @@ const LOOK = { built: false, sky: null, stars: null, sunDisc: null, clouds: [], 
 const CITY_GLOW = []; // facade and window materials with a glow map: they light up at night
 const NIGHT_FX = []; // materials whose opacity follows the night: lamp halos, light pools, headlight beams
 const RIVER = { z0: 33, z1: 41 };
-const LINK_Z = -23.2;
+const LINK_Z = -25.6; // north of the last row of city lots, south of the base fence
 const nightAmount = () => (themeOf(state.branch).night ? Math.max(0.75, 1 - daylight()) : 1 - daylight());
 const nightMat = (opts, max) => {
   const m = new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, depthWrite: false, opacity: 0, blending: THREE.AdditiveBlending, ...opts });
@@ -590,7 +597,13 @@ function buildWorld() {
         g.fillRect(x * 32, y * 32, 32, 32);
       }
     }
-    g.strokeStyle = 'rgba(160,110,60,.25)';
+    // Terrazzo speckle, then the grout lines
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = ['rgba(255,255,255,.35)', 'rgba(150,100,60,.22)', 'rgba(90,70,50,.14)'][i % 3];
+      g.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1 + Math.random() * 2);
+    }
+    g.strokeStyle = 'rgba(140,95,50,.38)';
+    g.lineWidth = 1.5;
     for (let i = 0; i <= 8; i++) {
       g.beginPath(); g.moveTo(i * 32, 0); g.lineTo(i * 32, 256); g.stroke();
       g.beginPath(); g.moveTo(0, i * 32); g.lineTo(256, i * 32); g.stroke();
@@ -600,7 +613,7 @@ function buildWorld() {
   const fd = FLOOR.z1 - FLOOR.z0;
   tiles.wrapS = tiles.wrapT = THREE.RepeatWrapping;
   tiles.repeat.set(fw / 8, fd / 8);
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(fw, 0.12, fd), surface({ map: tiles }));
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(fw, 0.12, fd), surface({ map: tiles, roughness: 0.42, metalness: 0.04 }));
   floor.position.set((FLOOR.x0 + FLOOR.x1) / 2, 0.06, (FLOOR.z0 + FLOOR.z1) / 2);
   floor.receiveShadow = true;
   scene.add(floor);
@@ -702,7 +715,7 @@ function sceneryBlocked(x, z) {
   return (x > -10.5 && x < 10.5 && z > -15.5 && z < 14.7) || (z > ROAD_Z - 2.4 && z < ROAD_Z + 2.4)
     || (x > 8.8 && x < 19.5 && z > -12.5 && z < 2.5) || (x > -12 && x < 20 && z > 18.5 && z < 28.5)
     || (x > -43.5 && x < -10.5 && z > -25 && z < 15.5) // the city district west of the hospital
-    || (z > -25.6 && z < -20.8 && x > -38 && x < 22) || (x > -22.5 && x < -16.5 && z > 15) || z > 31 // the link road, the south road and the river
+    || (z > -27.6 && z < -23.6 && x > -38 && x < 22) || (x > -22.5 && x < -16.5 && z > 15) || z > 31 // the link road, the south road and the river
     || (x > -16 && x < 52 && z > -68 && z < -26) // the military base
     || (x > 18.5 && x < 49 && z > -28 && z < 15.6) || (x > 20 && x < 49 && z > 18.5 && z < 29.5); // the campus and its town
 }
@@ -1317,6 +1330,48 @@ const part = (geo, color, x, y, z, shadow = true) => {
   m.position.set(x, y, z);
   return m;
 };
+// A face painted on the head: eyes with a highlight, brows, a small smile and a touch of blush.
+// One texture per skin tone, so it costs less than the two eye meshes it replaces.
+const faceCache = new Map();
+function faceMat(skin) {
+  if (faceCache.has(skin)) return faceCache.get(skin);
+  const base = new THREE.Color(skin);
+  if (REAL) {
+    const h = {};
+    base.getHSL(h);
+    base.setHSL(h.h, Math.min(1, h.s * 1.18), h.l * (h.l > 0.8 ? 0.93 : 0.86));
+  }
+  const tex = canvasTexture(256, 128, (g) => {
+    g.fillStyle = `#${base.getHexString()}`;
+    g.fillRect(0, 0, 256, 128);
+    const cx = 64; // u = 0.25 is the front of a three.js sphere
+    const cy = 60;
+    for (const sx of [-1, 1]) {
+      const ex = cx + sx * 14;
+      g.fillStyle = 'rgba(255,120,120,0.28)';
+      g.beginPath(); g.ellipse(cx + sx * 21, cy + 9, 7, 4.5, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#ffffff';
+      g.beginPath(); g.ellipse(ex, cy, 5.2, 5.6, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#2a1c14';
+      g.beginPath(); g.ellipse(ex + sx * 0.4, cy + 0.6, 3.4, 4.2, 0, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#ffffff';
+      g.beginPath(); g.arc(ex - 1.2, cy - 1.4, 1.2, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(50,30,20,0.85)';
+      g.lineWidth = 2;
+      g.lineCap = 'round';
+      g.beginPath(); g.moveTo(ex - 5, cy - 9); g.quadraticCurveTo(ex, cy - 11.5, ex + 5, cy - 9); g.stroke();
+    }
+    g.strokeStyle = 'rgba(120,40,40,0.9)';
+    g.lineWidth = 2.2;
+    g.beginPath(); g.moveTo(cx - 6, cy + 13); g.quadraticCurveTo(cx, cy + 18, cx + 6, cy + 13); g.stroke();
+    g.fillStyle = 'rgba(0,0,0,0.10)';
+    g.beginPath(); g.ellipse(cx, cy + 6, 2, 1.4, 0, 0, Math.PI * 2); g.fill(); // nose shadow
+  });
+  const m = REAL ? new THREE.MeshStandardMaterial({ map: tex, roughness: 0.86, metalness: 0.02, envMapIntensity: 0.38 }) : new THREE.MeshLambertMaterial({ map: tex });
+  if (REAL) realMats.push(m);
+  faceCache.set(skin, m);
+  return m;
+}
 function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HAIR), coat = null, cap = null, apron = null }) {
   const group = new THREE.Group();
   const body = new THREE.Group();
@@ -1363,15 +1418,13 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
   headG.add(hd);
   body.add(headG);
   const head = part(PG.head, skin, 0, 1.52, 0);
+  head.material = faceMat(skin);
   head.scale.set(0.96, 1.04, 0.98);
   hd.add(head, part(PG.hair, hair, 0, 1.545, -0.025, false));
   // A few hairstyles: short, a bob that covers the neck, or a bun
   const style = Math.random();
   if (style < 0.3) hd.add(part(PG.bob, hair, 0, 1.52, -0.04, false));
   else if (style < 0.45) hd.add(part(PG.bun, hair, 0, 1.76, -0.14, false));
-  for (const side of [-1, 1]) {
-    hd.add(part(PG.eye, 0x1a1a1a, side * 0.09, 1.54, 0.225, false));
-  }
   if (cap) {
     const c = box(0.34, 0.12, 0.2, 0xffffff);
     c.position.set(0, 1.8, 0.04);
@@ -1641,6 +1694,53 @@ function bigSyringe() {
   return g;
 }
 
+// --- small shared details for the wards and counters ---
+const litMat = (c) => new THREE.MeshBasicMaterial({ toneMapped: false, color: c });
+const LIT = { green: litMat(0x5dff9a), red: litMat(0xff5a5a), amber: litMat(0xffc94d), blue: litMat(0x7fd3ff) };
+let hazardTex = null;
+let ecgTex = null;
+function hazardStrip(w) {
+  hazardTex = hazardTex || canvasTexture(64, 16, (g) => {
+    g.fillStyle = '#f5c518';
+    g.fillRect(0, 0, 64, 16);
+    g.fillStyle = '#22252b';
+    for (let x = -16; x < 64; x += 16) {
+      g.beginPath(); g.moveTo(x, 16); g.lineTo(x + 8, 16); g.lineTo(x + 16, 0); g.lineTo(x + 8, 0); g.fill();
+    }
+  });
+  const t = hazardTex.clone();
+  t.wrapS = THREE.RepeatWrapping;
+  t.repeat.set(w / 0.5, 1);
+  t.needsUpdate = true;
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, 0.14), new THREE.MeshBasicMaterial({ map: t, toneMapped: false }));
+}
+// A vitals monitor on a trolley and an IV stand, to stand beside a bed
+function bedsideKit() {
+  ecgTex = ecgTex || canvasTexture(128, 96, (g) => {
+    g.fillStyle = '#0d1b1e';
+    g.fillRect(0, 0, 128, 96);
+    g.strokeStyle = '#5dff9a';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(4, 40);
+    for (const [x, y] of [[30, 40], [38, 30], [46, 40], [54, 40], [60, 12], [66, 62], [72, 40], [96, 40], [104, 32], [112, 40], [124, 40]]) g.lineTo(x, y);
+    g.stroke();
+    g.fillStyle = '#7fd3ff';
+    g.font = '700 22px sans-serif';
+    g.fillText('98', 8, 86);
+    g.fillStyle = '#ffc94d';
+    g.fillText('72', 84, 86);
+  });
+  const g = new THREE.Group();
+  g.add(at3(box(0.42, 0.62, 0.36, 0xf4f6f8), 0, 0.42, 0), at3(box(0.46, 0.04, 0.4, 0xb0bec5), 0, 0.75, 0), at3(box(0.44, 0.34, 0.06, 0x263238), 0, 0.98, 0));
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.38, 0.28), new THREE.MeshBasicMaterial({ map: ecgTex, toneMapped: false }));
+  g.add(at3(scr, 0, 0.98, 0.035));
+  for (const [x, z] of [[-0.16, -0.13], [0.16, -0.13], [-0.16, 0.13], [0.16, 0.13]]) g.add(at3(cylM(0.04, 0.04, 0.06, 0x37474f, 6), x, 0.06, z));
+  // IV stand
+  g.add(at3(cylM(0.02, 0.02, 1.7, 0xb0bec5, 6), 0.42, 0.85, -0.1), at3(cylM(0.16, 0.16, 0.03, 0x78909c, 8), 0.42, 0.02, -0.1), at3(box(0.3, 0.03, 0.03, 0xb0bec5, { shadow: false }), 0.42, 1.68, -0.1));
+  g.add(at3(box(0.16, 0.26, 0.05, 0xbfe9ff, { shadow: false }), 0.52, 1.5, -0.1));
+  return g;
+}
 function buildLine(line, animate) {
   const m = line.machine;
   const root = new THREE.Group();
@@ -1661,6 +1761,14 @@ function buildLine(line, animate) {
   const hopper = box(1, 1.4, 1.4, 0x98c1d9);
   hopper.position.set(-1.7, 0.7, 0);
   root.add(base, ...rails, belt, hopper);
+  // Plinth, a hazard stripe, a control panel with lit buttons, a funnel on the hopper and a status beacon
+  root.add(at3(box(3.4, 0.1, 1.5, 0x2b2d42), 0, 0.05, 0), at3(hazardStrip(3.2), 0, 0.2, 0.656));
+  root.add(at3(box(0.9, 0.42, 0.06, 0x263238), 0.7, 0.52, 0.66), at3(new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.24), LIT.green), 0.5, 0.54, 0.695));
+  [LIT.red, LIT.amber, LIT.blue].forEach((m, k) => root.add(at3(new THREE.Mesh(new THREE.CircleGeometry(0.05, 10), m), 0.82 + k * 0.13, 0.58, 0.695)));
+  root.add(at3(box(0.34, 0.05, 0.02, 0x90a4ae, { shadow: false }), 0.95, 0.42, 0.695));
+  root.add(at3(cylM(0.62, 0.38, 0.4, 0xb8d4e3, 14), -1.7, 1.6, 0), at3(cylM(0.64, 0.64, 0.05, 0x78909c, 14), -1.7, 1.82, 0));
+  root.add(at3(cylM(0.05, 0.05, 0.5, 0x78909c, 6), -1.3, 1.65, -0.55), at3(new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6), LIT.green), -1.3, 1.95, -0.55));
+  for (const x of [-1.2, 0, 1.2]) root.add(at3(box(0.08, 0.3, 1.34, 0xf5a623), x, 0.93, 0).rotateZ(0), at3(box(0.5, 0.03, 1.34, 0x9fd8ff, { shadow: false }), x, 1.09, 0));
   belts.push(belt);
   const icon = line.product === 'pill' ? bigCapsule() : bigSyringe();
   icon.position.set(0, 3.1, 0);
@@ -1679,6 +1787,11 @@ function buildLine(line, animate) {
   const register = box(0.5, 0.35, 0.45, 0x2b2d42);
   register.position.set(0, 1.25, 0.85);
   counter.add(desk, top, register);
+  // A colour band with a cross, a screen and keyboard for the cashier, a card reader and a small plant
+  counter.add(at3(box(1.03, 0.16, 2.43, 0x3d8bfd), 0, 0.72, 0), at3(box(0.04, 0.3, 0.1, 0xffffff, { shadow: false }), 0.52, 0.72, 0), at3(box(0.04, 0.1, 0.3, 0xffffff, { shadow: false }), 0.52, 0.72, 0));
+  counter.add(at3(box(0.06, 0.34, 0.5, 0x263238), -0.2, 1.32, -0.2), at3(new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.28), LIT.blue).rotateY(-Math.PI / 2), -0.235, 1.32, -0.2), at3(box(0.08, 0.14, 0.08, 0x263238), -0.2, 1.12, -0.2));
+  counter.add(at3(box(0.18, 0.03, 0.42, 0x37474f, { shadow: false }), -0.38, 1.1, -0.2), at3(box(0.14, 0.08, 0.2, 0x37474f), 0.3, 1.12, 0.3));
+  counter.add(at3(cylM(0.09, 0.07, 0.14, 0xd9a066, 8), 0.32, 1.15, -1.0), at3(new THREE.Mesh(new THREE.IcosahedronGeometry(0.15, 0), mat(0x43a047)), 0.32, 1.33, -1.0));
   scene.add(counter);
   addCollider(line.counter.x, line.counter.z, 1.1, 2.5);
 
@@ -1985,6 +2098,12 @@ function buildRoom(room, animate) {
   }
   room.bigIcon.position.y = 3.0;
   root.add(room.bigIcon);
+  // Bedside monitor and IV stand on the far side from where the operator stands
+  const kit = bedsideKit();
+  const far = room.operator.x <= room.bed.x ? 1 : -1;
+  kit.position.set(far * 0.95, 0, -0.75);
+  if (far < 0) kit.scale.x = -1;
+  root.add(kit);
   scene.add(root);
   addCollider(room.bed.x, room.bed.z, 1.1, 2.3);
   room.cash = new MoneyPile(room.money);
@@ -3188,6 +3307,7 @@ function addBeds(n, animate) {
     const bag = box(0.24, 0.4, 0.06, 0x9fd8ff);
     bag.position.set(0.62, 1.55, -0.8);
     root.add(frame, mattress, pillow, pole, bag);
+    root.add(at3(box(0.97, 0.06, 1.1, 0x9ad0c2), 0, 0.64, 0.38), at3(box(0.97, 0.05, 0.14, 0xffffff, { shadow: false }), 0, 0.665, -0.2), at3(box(1.04, 0.5, 0.06, 0xb0bec5), 0, 0.7, -1.0), at3(box(1.04, 0.3, 0.06, 0xb0bec5), 0, 0.5, 1.0));
     root.position.set(at.x, 0, at.z);
     F2.group.add(root); // no collider: beds are low, and rows of them shouldn't wall off the ward
     const bed = { at, root, bag, iv: 0.6, patient: null, stay: 0, empty: 1 + i * 2, earn: 0, drawn: '' };
@@ -8730,7 +8850,19 @@ function tankModel() {
   barrel.rotation.x = Math.PI / 2;
   barrel.position.set(0, 1.1, 1.3);
   turret.add(top, barrel);
+  // Muzzle brake, commander's hatch, aerial and a stowage box on the turret
+  turret.add(at3(cylM(0.13, 0.13, 0.22, 0x2b3318, 8).rotateX(Math.PI / 2), 0, 1.1, 2.15), at3(cylM(0.2, 0.2, 0.08, 0x3a4520, 10), -0.2, 1.31, -0.1));
+  turret.add(at3(cylM(0.012, 0.012, 1.1, 0x1d2433, 4), 0.38, 1.8, -0.45), at3(box(0.7, 0.22, 0.3, 0x556b2f), 0, 1.0, -0.75));
   g.add(turret);
+  // Road wheels along both tracks, mudguards, headlights and a sloped front plate
+  for (const sx of [-0.85, 0.85]) {
+    for (let k = 0; k < 5; k++) g.add(at3(cylM(0.2, 0.2, 0.37, 0x16181d, 10).rotateZ(Math.PI / 2), sx, 0.24, -1.05 + k * 0.52));
+    g.add(at3(box(0.42, 0.05, 2.8, 0x4b5320), sx, 0.58, 0));
+    g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), headMat), sx * 0.75, 0.75, 1.27));
+  }
+  const glacis = box(1.6, 0.06, 0.6, 0x5a6b2c);
+  glacis.rotation.x = 0.6;
+  g.add(at3(glacis, 0, 0.72, 1.3));
   g.userData.turret = turret;
   return g;
 }
@@ -8744,6 +8876,12 @@ function armoredModel() {
   const gun = box(0.4, 0.3, 0.5, 0x3a4520);
   gun.position.set(0, 1.45, 0.2);
   g.add(body, nose, gun);
+  // Windscreen, side windows, a gun barrel, roof hatch, headlights and a spare wheel on the back
+  g.add(at3(box(1.2, 0.3, 0.04, 0x22303f, { shadow: false }), 0, 1.05, 1.27), at3(cylM(0.04, 0.04, 0.7, 0x2b3318, 6).rotateX(Math.PI / 2), 0, 1.47, 0.75), at3(cylM(0.22, 0.22, 0.06, 0x556b2f, 10), 0, 1.33, -0.6));
+  for (const sx of [-1, 1]) {
+    g.add(at3(box(0.04, 0.26, 0.5, 0x22303f, { shadow: false }), sx * 0.71, 1.05, 0.6), at3(new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), headMat), sx * 0.5, 0.62, 1.7));
+  }
+  g.add(at3(cylM(0.3, 0.3, 0.2, 0x16181d, 12).rotateX(Math.PI / 2), 0, 0.95, -1.36));
   for (const z of [-0.85, 0, 0.85]) {
     for (const s of [-0.75, 0.75]) {
       const w = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.25, 12), mat(0x1d2433));
@@ -8772,6 +8910,13 @@ function jetModel(color = 0x8d99ae) {
   const fin = box(0.06, 0.8, 0.7, color);
   fin.position.set(0, 1.1, -1.4);
   g.add(body, nose, canopy, wing, tailW, fin);
+  // Air intakes, an exhaust nozzle, missiles under the wings and wing-tip lights
+  g.add(at3(cylM(0.2, 0.26, 0.3, 0x263238, 10).rotateX(Math.PI / 2), 0, 0.7, -1.82));
+  for (const sx of [-1, 1]) {
+    g.add(at3(box(0.2, 0.26, 0.9, color), sx * 0.36, 0.62, 0.5), at3(box(0.16, 0.2, 0.04, 0x16181d, { shadow: false }), sx * 0.36, 0.62, 0.96));
+    g.add(at3(cylM(0.045, 0.045, 0.9, 0xeceff1, 6).rotateX(Math.PI / 2), sx * 1.15, 0.55, 0), at3(cylM(0.0, 0.045, 0.16, 0xe5484d, 6).rotateX(Math.PI / 2), sx * 1.15, 0.55, 0.53));
+    g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 5), sx < 0 ? LIT.red : LIT.green), sx * 1.7, 0.68, -0.1));
+  }
   for (const s of [-1.2, 1.2]) {
     const gear = box(0.06, 0.4, 0.06, 0x1d2433);
     gear.position.set(s * 0.3, 0.25, 0);
@@ -8797,6 +8942,14 @@ function shipModel() {
   gun.rotation.x = Math.PI / 2;
   gun.position.set(0, 0.8, 1.5);
   g.add(hull, bow, deck, bridge, mast, gun);
+  // Bridge windows, a turning radar, a gun turret, deck rails, a funnel and a red waterline
+  g.add(at3(box(0.82, 0.16, 0.82, 0x22303f, { shadow: false }), 0, 1.58, -0.6), at3(box(0.9, 0.06, 0.2, 0x90a4ae), 0, 2.5, -0.7), at3(cylM(0.28, 0.32, 0.26, 0x78909c, 10), 0, 0.68, 1.3));
+  g.add(at3(cylM(0.16, 0.2, 0.6, 0x546e7a, 10), 0, 1.5, -1.3), at3(box(1.52, 0.12, 4.62, 0xb71c1c, { shadow: false }), 0, -0.1, 0));
+  for (const sx of [-0.72, 0.72]) {
+    g.add(at3(box(0.03, 0.03, 4.2, 0xeceff1, { shadow: false }), sx, 0.85, 0.1));
+    for (let z = -1.9; z <= 2.2; z += 0.82) g.add(at3(box(0.03, 0.3, 0.03, 0xeceff1, { shadow: false }), sx, 0.7, z));
+  }
+  g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), LIT.red), 0, 2.85, -0.7));
   return g;
 }
 function droneModel() {
@@ -10770,6 +10923,16 @@ function airlinerModel(color) {
   }
   g.add(at3(box(1.1, 0.25, 0.4, 0x263238, { shadow: false }), 0, 2.15, 5.3));
   for (const z of [-1.6, 2.2]) g.add(at3(cylM(0.1, 0.1, 0.9, 0x37474f, 6), 0, 0.45, z));
+  // Wheels, engine intakes and pylons, winglets, doors, a tail emblem and navigation lights
+  for (const [x, z] of [[-0.28, -1.6], [0.28, -1.6], [0, 2.2]]) g.add(at3(cylM(0.2, 0.2, 0.16, 0x16181d, 10).rotateZ(Math.PI / 2), x, 0.2, z));
+  for (const sx of [-1, 1]) {
+    g.add(at3(cylM(0.34, 0.34, 0.08, 0x263238, 12).rotateX(Math.PI / 2), sx * 2.6, 0.75, 1.82), at3(box(0.12, 0.4, 0.8, 0xe0e0e0), sx * 2.6, 1.0, 0.8));
+    g.add(at3(box(0.1, 0.7, 0.7, color), sx * 5.45, 1.5, 0.1));
+    for (const z of [3.4, -3.2]) g.add(at3(box(0.03, 0.9, 0.5, 0xcfd8dc, { shadow: false }), sx * 1.0, 1.55, z));
+    g.add(at3(new THREE.Mesh(new THREE.CircleGeometry(0.32, 14).rotateY(sx * Math.PI / 2), new THREE.MeshBasicMaterial({ toneMapped: false, color: 0xffffff })), sx * 0.09, 3.3, -6.2));
+    g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), sx < 0 ? LIT.red : LIT.green), sx * 5.5, 1.3, 0.3));
+  }
+  g.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), LIT.red), 0, 2.65, 0));
   return g;
 }
 function stairsModel() {
@@ -10926,6 +11089,27 @@ function buildTerminal() {
     c.fillText('DQ208  Singapore  ประตู 2  BOARDING', 16, 112);
   }) }));
   g.add(at3(board, 460, 2.6, -19.7));
+  // Shops in the two front corners, planters, floor signs pointing the way, and a baggage trolley bay
+  for (const [x, label, col, bg] of [[439.5, '☕ Coffee · กาแฟ', 0x6d4c41, '#4e342e'], [480.5, '🛍️ Duty Free', 0x1565c0, '#0d47a1']]) {
+    g.add(at3(box(6, 1.5, 1.4, 0xf4f6f8), x, 0.79, -1.2), at3(box(6.2, 0.14, 1.7, col), x, 1.6, -1.2), at3(box(5.6, 0.7, 0.06, 0x22303f, { shadow: false }), x, 1.0, -1.92));
+    g.add(at3(signBoard(label, bg, 3.4, 0.5).rotateY(Math.PI), x, 2.1, -1.95));
+    for (let k = 0; k < 4; k++) g.add(at3(box(0.5, 0.3, 0.3, pick([0xffd166, 0xe5484d, 0x2ec4b6, 0xff8fab]), { shadow: false }), x - 1.8 + k * 1.2, 0.72, -2.05));
+    addCollider(x, -1.2, 6, 1.6);
+  }
+  for (const [x, z] of [[436.3, -6], [436.3, -14], [483.7, -6], [483.7, -18.6], [452, -18.9], [468, -18.9]]) {
+    g.add(at3(cylM(0.34, 0.26, 0.5, 0xd9d4c7, 10), x, 0.29, z), at3(foliage([[0, 0.55, 0, 0.42], [0.18, 0.85, 0.05, 0.3], [-0.15, 0.8, -0.1, 0.28]], 0x3f8f3a), x, 0.3, z));
+  }
+  const floorSign = (text, x, z, w = 3.4) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.7), new THREE.MeshBasicMaterial({ map: signTex(text, '#f5c518'), transparent: true, opacity: 0.9, toneMapped: false }));
+    m.rotation.x = -Math.PI / 2;
+    g.add(at3(m, x, 0.05, z));
+  };
+  floorSign('⬆ เช็คอิน Check-in', 450, -2.2);
+  floorSign('⬆ ตรวจความปลอดภัย Security', 470, -2.2, 4.4);
+  floorSign('⬆ ประตู Gates', 460, -11.5);
+  for (let k = 0; k < 4; k++) {
+    g.add(at3(box(0.5, 0.06, 0.8, 0xb0bec5), 465.2 + k * 0.62, 0.3, -1.0), at3(box(0.5, 0.5, 0.04, 0xb0bec5), 465.2 + k * 0.62, 0.55, -0.62), at3(box(0.5, 0.04, 0.04, 0x1e88e5, { shadow: false }), 465.2 + k * 0.62, 0.82, -0.62));
+  }
   scene.add(g);
   // Clear the starting money piles' spots, and gate areas with seats
 }
