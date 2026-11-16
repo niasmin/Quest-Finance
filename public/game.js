@@ -178,6 +178,7 @@ const view = document.getElementById('view');
 let LITE = false;
 try {
   LITE = localStorage.getItem('drquest-lite') === 'on';
+  if (LITE) document.body.classList.add('lite');
 } catch {
   // Storage blocked: full quality
 }
@@ -194,7 +195,7 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x5a9e4a, 1.4));
 const sun = new THREE.DirectionalLight(0xffffff, 1.9);
-sun.position.set(9, 18, 8);
+sun.position.set(12, 15, 6);
 sun.castShadow = !LITE;
 // Smaller shadow map on phones keeps the frame rate up
 const shadowSize = matchMedia('(pointer: coarse)').matches ? 1024 : 2048;
@@ -251,6 +252,12 @@ const LOOKS = {
     float cy = rqW.y / 0.24;
     float k = clamp(1.0 - fwidth(cy) * 2.0, 0.0, 1.0);
     diffuseColor.rgb *= mix(1.0, 0.86 + 0.16 * fract(cy), k);
+  }`,
+  leaf: `
+  {
+    float lf = rq_n(rqW.xz * 6.0 + rqW.y * 4.0) * 0.6 + rq_n(rqW.xy * 13.0 + rqW.z * 5.0) * 0.4;
+    diffuseColor.rgb *= 0.7 + 0.55 * lf;
+    diffuseColor.rgb *= mix(0.66, 1.14, clamp(rqN.y * 0.5 + 0.5, 0.0, 1.0));
   }`,
   tile: `
   {
@@ -455,6 +462,23 @@ NIGHT_FX.push(lampHalo);
 const lampPool = nightMat({ map: glowTex, color: 0xffe2a0 }, 0.5);
 const beamMat = nightMat({ map: glowTex, color: 0xfff1c9 }, 0.55);
 const poolGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+// A soft dark edge on the ground round a building's footprint: cheap stand-in for ambient occlusion
+const aoTex = canvasTexture(128, 128, (g) => {
+  g.clearRect(0, 0, 128, 128);
+  g.filter = 'blur(9px)';
+  g.fillStyle = 'rgba(0,0,0,1)';
+  g.fillRect(22, 22, 84, 84);
+});
+const aoMat = new THREE.MeshBasicMaterial({ map: aoTex, transparent: true, opacity: 0.42, depthWrite: false, toneMapped: false });
+function aoDecal(w, d, x = 0, z = 0) {
+  // The opaque core of the texture is 84/128 of its width, so the plane is scaled to put that core on the footprint
+  const m = new THREE.Mesh(poolGeo, aoMat);
+  m.scale.set(w * 1.5, 1, d * 1.5);
+  m.position.set(x, 0.028, z);
+  m.renderOrder = 1;
+  m.visible = !LITE;
+  return m;
+}
 // A pool of light on the ground and a halo round the bulb, both invisible by day
 function lampGlow(g, x, y, z, size = 5) {
   if (LITE) return;
@@ -684,19 +708,45 @@ function sceneryBlocked(x, z) {
 }
 const leafGeo = new THREE.IcosahedronGeometry(1, 0);
 const flatMat = (color) => surface({ color, flatShading: true });
+// Foliage: lumpy rounded clumps joined into one mesh per tree, shaded darker underneath and dappled
+// by the 'leaf' pattern. The trunk tapers and flares at the roots.
+const clumpGeo = (() => {
+  const g = new THREE.IcosahedronGeometry(1, 1);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const k = 0.86 + 0.28 * Math.abs(Math.sin(p.getX(i) * 12.9 + p.getY(i) * 78.2 + p.getZ(i) * 37.7) * 43758.5 % 1);
+    p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.9, p.getZ(i) * k);
+  }
+  g.computeVertexNormals();
+  return g;
+})();
+function foliage(clumps, color) {
+  const m = new THREE.Mesh(mergeGeos(clumps.map(([x, y, z, r]) => clumpGeo.clone().scale(r, r, r).rotateY(x * 7 + z * 3).translate(x, y, z))), lookMat(color, 'leaf'));
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+function trunkMesh(h, r = 0.14, color = 0x7a5230) {
+  const g = new THREE.Group();
+  const t = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, h, 7), mat(color));
+  t.position.y = h / 2;
+  t.castShadow = true;
+  const root = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.7, 0.18, 7), mat(color));
+  root.position.y = 0.09;
+  g.add(t, root);
+  return g;
+}
 const TREES = {
   round() {
     const t = new THREE.Group();
-    const trunk = box(0.35, 1.2, 0.35, 0x8a5a30);
-    trunk.position.y = 0.6;
-    t.add(trunk);
-    for (let k = 0; k < 3; k++) {
-      const leaf = new THREE.Mesh(leafGeo, flatMat(pick([0x5bbd3a, 0x4caf50, 0x7ad04e])));
-      leaf.position.set(rand(-0.4, 0.4), 1.6 + k * 0.45, rand(-0.4, 0.4));
-      leaf.scale.setScalar(rand(0.7, 1.05) - k * 0.15);
-      leaf.castShadow = true;
-      t.add(leaf);
+    t.add(trunkMesh(1.5, 0.17));
+    const clumps = [[0, 2.0, 0, rand(0.85, 1.0)]];
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2 + rand(0, 0.8);
+      clumps.push([Math.cos(a) * 0.6, 1.65 + rand(0, 0.5), Math.sin(a) * 0.6, rand(0.5, 0.72)]);
     }
+    clumps.push([rand(-0.2, 0.2), 2.65, rand(-0.2, 0.2), 0.55]);
+    t.add(foliage(clumps, pick([0x4f9e3a, 0x3f8f3a, 0x5fae45])));
     return t;
   },
   palm() {
@@ -727,7 +777,7 @@ const TREES = {
     trunk.position.y = 0.4;
     t.add(trunk);
     for (let k = 0; k < 3; k++) {
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(1.1 - k * 0.28, 1.3, 7), flatMat(0x2d6a4f));
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(1.1 - k * 0.28, 1.3, 10), lookMat(0x2d6a4f, 'leaf'));
       cone.position.y = 1.3 + k * 0.75;
       cone.castShadow = true;
       const snow = new THREE.Mesh(new THREE.ConeGeometry(0.55 - k * 0.12, 0.5, 7), flatMat(0xffffff));
@@ -804,7 +854,7 @@ function applyBranchTheme() {
   hemiLight.intensity = (th.night ? 0.75 : 1.4) * LIGHT.hemi;
   hemiLight.groundColor.set(th.night ? 0x2a3550 : 0x5a9e4a);
   sun.intensity = (th.night ? 0.9 : 1.9) * LIGHT.sun;
-  sun.color.set(th.night ? 0xb8c6ff : 0xffffff);
+  sun.color.set(th.night ? 0xb8c6ff : 0xfff1dc);
   sceneryGroup.clear();
   // Same layout every visit: trees come from a seeded random per branch
   let seed = 1234 + (state.branch || 0) * 977;
@@ -1303,24 +1353,33 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
     a.position.set(0, 0.92, 0.215);
     body.add(a);
   }
+  // The head and everything on it sits in its own group, scaled down a little about the neck:
+  // a smaller head on the same body reads less like a toy
+  const headG = new THREE.Group();
+  headG.position.y = 1.3;
+  headG.scale.setScalar(0.85);
+  const hd = new THREE.Group();
+  hd.position.y = -1.3;
+  headG.add(hd);
+  body.add(headG);
   const head = part(PG.head, skin, 0, 1.52, 0);
   head.scale.set(0.96, 1.04, 0.98);
-  body.add(head, part(PG.hair, hair, 0, 1.545, -0.025, false));
+  hd.add(head, part(PG.hair, hair, 0, 1.545, -0.025, false));
   // A few hairstyles: short, a bob that covers the neck, or a bun
   const style = Math.random();
-  if (style < 0.3) body.add(part(PG.bob, hair, 0, 1.52, -0.04, false));
-  else if (style < 0.45) body.add(part(PG.bun, hair, 0, 1.76, -0.14, false));
+  if (style < 0.3) hd.add(part(PG.bob, hair, 0, 1.52, -0.04, false));
+  else if (style < 0.45) hd.add(part(PG.bun, hair, 0, 1.76, -0.14, false));
   for (const side of [-1, 1]) {
-    body.add(part(PG.eye, 0x1a1a1a, side * 0.09, 1.54, 0.225, false));
+    hd.add(part(PG.eye, 0x1a1a1a, side * 0.09, 1.54, 0.225, false));
   }
   if (cap) {
     const c = box(0.34, 0.12, 0.2, 0xffffff);
     c.position.set(0, 1.8, 0.04);
     const cross = box(0.08, 0.08, 0.02, 0xe5484d, { shadow: false });
     cross.position.set(0, 1.8, 0.15);
-    body.add(c, cross);
+    hd.add(c, cross);
   }
-  return { group, body, legs, arms, phase: Math.random() * 6, parts: { torso, front } };
+  return { group, body, legs, arms, head: hd, phase: Math.random() * 6, parts: { torso, front } };
 }
 
 function animatePerson(p, moving, dt, carrying = false) {
@@ -4103,9 +4162,9 @@ function applyOutfit() {
   if (front) front.material = mat(o.shirt);
   for (const s of player.arms) s.children[0].material = mat(o.coat);
   for (const h of player.legs) h.children[0].material = mat(o.pants);
-  if (player.hat) player.body.remove(player.hat);
+  if (player.hat) player.hat.parent?.remove(player.hat);
   player.hat = makeHat(o);
-  player.body.add(player.hat);
+  (player.head || player.body).add(player.hat);
 }
 
 // --- the 🎨 panel ---
@@ -5795,6 +5854,7 @@ function syncDistrict(animate = false) {
       // Face the road
       slot.group.rotation.y = slot.at.x > roadOf(slot.at.x) ? -Math.PI / 2 : Math.PI / 2;
       if (p.type !== 'garden') {
+        if (p.type !== 'homes') slot.group.add(aoDecal(3.0, 2.4));
         addCollider(slot.at.x, slot.at.z, 3.2, 3.2);
         slot.collider = colliders[colliders.length - 1];
       }
@@ -6731,6 +6791,7 @@ try {
   // Storage blocked: on
 }
 const NIGHT_SKY = new THREE.Color(0x0f1a3a);
+const SUN_DAY = new THREE.Color(0xfff1dc);
 const dayBase = { sky: new THREE.Color(), hemi: 1.4, sun: 1.9, f: -1 };
 // 1 = full day, 0 = night; dawn 5-7, dusk 17:30-19:30
 function daylight() {
@@ -6754,6 +6815,8 @@ function updateDayNight() {
   hemiLight.intensity = base * (0.5 + 0.5 * f) * LIGHT.hemi;
   sun.intensity = (th.night ? 0.9 : 1.9) * (0.35 + 0.65 * f) * LIGHT.sun;
   setEnvLevel(th.night ? 0.5 * f : f);
+  // Warm white at noon, gold near sunrise and sunset, cool moonlight at night
+  if (!th.night) sun.color.set(f <= 0.02 ? 0xb8c6ff : 0xffb070).lerp(SUN_DAY, Math.max(0, f * 2 - 1));
   // Lit windows after dark, and more emergencies at night
   mat(0x7fc8f8).color.set(f < 0.5 ? 0xffe08a : 0x7fc8f8);
   PATIENT_TYPES.emergency.weight = f < 0.5 ? 24 : 12;
@@ -7293,21 +7356,17 @@ function signBoard(text, bg, w = 3.2, h = 0.6) {
 }
 function treeModel(kind = 'round') {
   const g = new THREE.Group();
-  g.add(at3(cylM(0.12, 0.16, 1.1, 0x8b5a2b, 8), 0, 0.55, 0));
+  g.add(trunkMesh(1.15, 0.13, 0x8b5a2b));
   if (kind === 'sakura') {
-    for (const [x, y, z, r] of [[0, 1.6, 0, 0.75], [0.45, 1.4, 0.2, 0.5], [-0.4, 1.45, -0.15, 0.5]]) {
-      const b = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), mat(0xffb3d1));
-      b.castShadow = true;
-      g.add(at3(b, x, y, z));
-    }
+    g.add(foliage([[0, 1.65, 0, 0.72], [0.45, 1.45, 0.2, 0.5], [-0.4, 1.5, -0.15, 0.5], [0.05, 2.05, -0.1, 0.42]], 0xffa9cc));
   } else if (kind === 'cone') {
-    const c = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.8, 7), mat(0x2f8f4a));
-    c.castShadow = true;
-    g.add(at3(c, 0, 1.8, 0));
+    for (let k = 0; k < 3; k++) {
+      const c = new THREE.Mesh(new THREE.ConeGeometry(0.72 - k * 0.2, 0.95, 10), lookMat(0x2f8f4a, 'leaf'));
+      c.castShadow = true;
+      g.add(at3(c, 0, 1.35 + k * 0.55, 0));
+    }
   } else {
-    const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85, 0), mat(0x4caf50));
-    b.castShadow = true;
-    g.add(at3(b, 0, 1.65, 0));
+    g.add(foliage([[0, 1.7, 0, 0.78], [0.42, 1.5, 0.25, 0.5], [-0.4, 1.55, -0.2, 0.52], [0.1, 1.5, -0.45, 0.45], [0, 2.2, 0.05, 0.45]], 0x449c3f));
   }
   return g;
 }
@@ -7403,12 +7462,14 @@ function campusProp(name, w = 2) {
       awning.rotation.x = 0.35;
       g.add(at3(awning, 0, 1.75, 1.5), at3(box(1.6, 0.9, 0.05, 0x9fd8ff, { shadow: false }), -0.6, 1.0, 1.22), at3(box(0.7, 1.4, 0.05, 0x6d4c41, { shadow: false }), 1.1, 0.7, 1.22));
       g.add(at3(signBoard(label, '#5d4037', 2.2, 0.45), 0, 2.15, 1.23));
+      g.add(aoDecal(3.4, 2.4));
       return detailWalls(g, name === 'cafe' ? 'brick' : 'siding');
     }
     default: { // houses
       const col = pick([0xfad7a0, 0xd6eaf8, 0xfadbd8, 0xd5f5e3]);
       g.add(at3(box(3, 2, 2.4, col), 0, 1, 0), at3(hipRoof(3, 2.4, 1.2, pick([0xc0392b, 0x7d3c98, 0x2874a6])), 0, 2.6, 0));
       g.add(at3(box(0.7, 1.3, 0.05, 0x6d4c41, { shadow: false }), 0.7, 0.65, 1.22), at3(box(0.8, 0.6, 0.05, 0x9fd8ff, { shadow: false }), -0.7, 1.2, 1.22));
+      g.add(aoDecal(3, 2.4));
       return detailWalls(g, 'siding');
     }
   }
@@ -7553,6 +7614,7 @@ function campusBuilding(lot) {
   }
   // Turn the front toward the lot's street
   if (lot.front.z < lot.at.z) g.rotation.y = Math.PI;
+  g.add(aoDecal(fw, fd));
   // Plaster blocks on the big walls; the spa and the villa-style centres get planks
   return detailWalls(g, lot.id === 'tranquila' || lot.id === 'park' ? 'siding' : 'block');
 }
@@ -8633,6 +8695,7 @@ function buildingBox(x, z, w, h, d, wall, roof) {
   g.add(at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, d / 2 + 0.2), at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, -d / 2 - 0.2));
   roofDetails(g, 0, w, d, h + 0.25, 0);
   detailWalls(g, 'block');
+  g.add(aoDecal(w, d));
   g.position.set(x, 0, z);
   scene.add(g);
   addCollider(x, z, w, d);
@@ -10113,6 +10176,7 @@ function parkingDetails(g) {
 // --- the hospital front: entrance canopy, big name sign, planters, flags and street furniture ---
 function hospitalFacade() {
   const g = new THREE.Group();
+  g.add(aoDecal(22, 3, 0, -13.4), aoDecal(FLOOR.x1 - FLOOR.x0 + 0.6, FLOOR.z1 - FLOOR.z0 + 0.6, 0, (FLOOR.z0 + FLOOR.z1) / 2));
   // Canopy over the entrance and its two posts
   g.add(at3(box(4.6, 0.22, 2.4, 0xffffff), 7.0, 2.9, 14.6), at3(box(4.7, 0.12, 2.5, 0xe5484d), 7.0, 3.06, 14.6));
   for (const x of [5.0, 9.0]) g.add(at3(cylM(0.12, 0.12, 2.9, 0xdfe6ee, 10), x, 1.45, 15.6));
@@ -12671,7 +12735,7 @@ function updateCamera(dt, snap = false) {
   else camera.position.lerp(camPos, Math.min(1, dt * 6));
   camera.lookAt(player.group.position.x, player.group.position.y + 0.5, player.group.position.z - 0.5);
   // Keep the sun's shadow box centred on the action
-  sun.position.set(player.group.position.x + 9, 18, player.group.position.z + 8);
+  sun.position.set(player.group.position.x + 12, 15, player.group.position.z + 6);
   sun.target.position.set(player.group.position.x, 0, player.group.position.z);
   sun.target.updateMatrixWorld();
 }
@@ -12706,7 +12770,7 @@ function titleCamera(now) {
   scene.fog.near = 80 * k;
   scene.fog.far = 170 * k;
   fogZoom = -1; // recompute the normal fog when play starts
-  sun.position.set(cx + 9, 18, cz + 8);
+  sun.position.set(cx + 12, 15, cz + 6);
   sun.target.position.set(cx, 0, cz);
   sun.target.updateMatrixWorld();
 }
