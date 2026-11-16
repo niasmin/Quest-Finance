@@ -1,6 +1,6 @@
 # Builds the game's car and tree models in Blender and writes them as compact JSON:
-# Usage: pip install bpy, then  python3 tools/blender/models.py -- public/models
 # one entry per material, with positions/normals as integers (×1000) and triangle indices.
+# Usage: pip install bpy, then  python3 tools/blender/models.py -- public/models
 import bpy, bmesh, math, random, json, os, sys
 from mathutils import Vector
 OUT = sys.argv[sys.argv.index('--') + 1]
