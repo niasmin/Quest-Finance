@@ -533,6 +533,16 @@ function mergeGeos(list) {
   return out;
 }
 function autoModel(color, kind = pick(['sedan', 'sedan', 'hatch', 'suv', 'pickup'])) {
+  const made = modelGroup(`car_${kind === 'hatch' ? 'sedan' : kind}`, color);
+  if (made) {
+    if (!LITE) {
+      const beam = new THREE.Mesh(poolGeo, beamMat);
+      beam.scale.set(1.6, 1, 2.6);
+      beam.renderOrder = 2;
+      made.add(at3(beam, 0, 0.07, 2.3));
+    }
+    return made;
+  }
   const g = new THREE.Group();
   const groups = { paint: [], dark: [], glass: [], head: [], tail: [], light: [] };
   const part = (w, h, d, key, x, y, z) => groups[key].push(new THREE.BoxGeometry(w, h, d).translate(x, y, z));
@@ -757,8 +767,61 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
   g.add(t, root);
   return g;
 }
+// ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
+// Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
+// indices. Geometry is shared by every copy; materials are mapped onto the game's own.
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide'];
+const MODELS = {};
+async function loadModels() {
+  const one = async (n) => {
+    try {
+      const r = await fetch(`models/${n}.json`);
+      if (!r.ok) return;
+      const data = await r.json();
+      MODELS[n] = data.parts.map((p) => {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(p.pos, (x) => x / 1000), 3));
+        geo.setAttribute('normal', new THREE.BufferAttribute(Float32Array.from(p.nor, (x) => x / 100), 3));
+        geo.setIndex(p.idx);
+        geo.computeBoundingSphere();
+        return { key: p.key, hex: new THREE.Color().setRGB(...p.color).getHex(), rough: p.rough, metal: p.metal, geo };
+      });
+    } catch {
+      // missing or broken: the code-built model is used instead
+    }
+  };
+  // Never hold the game up for long: start with whatever has arrived after 4 s
+  await Promise.race([Promise.all(MODEL_NAMES.map(one)), new Promise((r) => setTimeout(r, 4000))]);
+}
+const modelMats = new Map();
+function modelMesh(part, paint) {
+  let m;
+  if (part.key === 'paint') m = carPaint(paint);
+  else if (part.key === 'glass') m = glassMat();
+  else if (part.key === 'head') m = headMat;
+  else if (part.key === 'tail') m = tailMat;
+  else if (part.key.startsWith('leaf')) m = lookMat(part.hex, 'leaf');
+  else if (part.key === 'bark') m = lookMat(part.hex, 'wood');
+  else {
+    if (!modelMats.has(part.key)) modelMats.set(part.key, surface({ color: part.hex, roughness: part.rough, metalness: part.metal }));
+    m = modelMats.get(part.key);
+  }
+  const mesh = new THREE.Mesh(part.geo, m);
+  mesh.castShadow = part.key !== 'head' && part.key !== 'tail';
+  mesh.receiveShadow = true;
+  return mesh;
+}
+function modelGroup(name, paint) {
+  const parts = MODELS[name];
+  if (!parts) return null;
+  const g = new THREE.Group();
+  for (const p of parts) g.add(modelMesh(p, paint));
+  return g;
+}
 const TREES = {
   round() {
+    const made = modelGroup(pick(['tree_round', 'tree_round', 'tree_tall', 'tree_wide']));
+    if (made) return made;
     const t = new THREE.Group();
     t.add(trunkMesh(1.5, 0.17));
     const clumps = [[0, 2.0, 0, rand(0.85, 1.0)]];
@@ -7694,6 +7757,11 @@ function signBoard(text, bg, w = 3.2, h = 0.6) {
   return m;
 }
 function treeModel(kind = 'round') {
+  if (kind === 'round' && MODELS.tree_round) {
+    const t = modelGroup(pick(['tree_round', 'tree_wide']));
+    t.scale.setScalar(0.78);
+    return t;
+  }
   const g = new THREE.Group();
   g.add(trunkMesh(1.15, 0.13, 0x8b5a2b));
   if (kind === 'sakura') {
@@ -13298,6 +13366,7 @@ function frameRest(dt, now) {
 }
 
 // ---------- start ----------
+await loadModels();
 buildWorld();
 buildPartitions();
 buildTrash();
@@ -13812,4 +13881,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { MODELS, startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
