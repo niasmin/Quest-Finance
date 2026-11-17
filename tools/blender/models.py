@@ -621,6 +621,57 @@ def trim_kit():
 
 trim_kit()
 
+# ---------------- bus shelter (front at -Y; the bench and sign are added by the game) ----------------
+def bus_shelter():
+    begin()
+    frame = mat('frame', [0.04, 0.06, 0.09], rough=0.45, metal=0.6)
+    roof = mat('roof', [0.05, 0.16, 0.55], rough=0.4, metal=0.2)
+    pane = mat('pane', [0.55, 0.72, 0.85], rough=0.1, metal=0.3)
+    ad = mat('ad', [1.0, 0.85, 0.45], emit=True)
+    r = cube((2.3, 1.15, 0.08), (0, 0.05, 2.18), roof, bevel=0.03, seg=1)
+    for v in r.data.vertices:  # roof slopes down toward the back
+        v.co.z -= v.co.y * 0.12
+    cube((2.32, 0.06, 0.12), (0, -0.53, 2.2), roof, bevel=0.02, seg=1)
+    for x in (-1.05, 1.05):
+        for y in (0.42, -0.3):
+            cyl(0.04, 2.15, (x, y, 1.07), frame, verts=8)
+    cube((2.06, 0.03, 1.55), (0, 0.42, 1.2), pane)  # back glass
+    cube((2.1, 0.06, 0.06), (0, 0.42, 1.98), frame)
+    cube((2.1, 0.06, 0.06), (0, 0.42, 0.42), frame)
+    for x in (-1.05, 1.05):
+        cube((0.03, 0.66, 1.4), (x, 0.06, 1.25), pane)  # side glass
+    cube((0.06, 0.62, 1.2), (1.05, 0.06, 1.2), ad)  # lit advert panel on one end
+    write('bus_shelter')
+
+# ---------------- airport control tower (origin at the foot) ----------------
+def control_tower():
+    begin()
+    concrete = mat('concrete', [0.72, 0.72, 0.7], rough=0.8)
+    band = mat('band', [0.45, 0.46, 0.48], rough=0.7)
+    glass = mat('glass', [0.05, 0.12, 0.18], rough=0.05, metal=0.7)
+    dark = mat('trim', [0.05, 0.06, 0.07], rough=0.5, metal=0.4)
+    cube((4.0, 3.0, 2.6), (0, 0, 1.3), concrete, bevel=0.06, seg=1)  # base building
+    cube((4.1, 3.1, 0.2), (0, 0, 2.65), band, bevel=0.03, seg=1)
+    cube((3.6, 0.04, 0.8), (0, -1.52, 1.4), glass)
+    cyl(1.15, 7.0, (0, 0, 6.0), concrete, verts=20, r2=0.85)  # tapering shaft
+    for z in (4.0, 6.0, 8.0):
+        cyl(1.12 - (z - 2.5) * 0.043, 0.18, (0, 0, z), band, verts=20)
+    cyl(1.25, 0.35, (0, 0, 9.6), band, verts=20)  # gallery floor
+    cyl(1.55, 0.1, (0, 0, 9.82), dark, verts=24)
+    cyl(1.45, 1.4, (0, 0, 10.55), glass, verts=12, r2=1.85)  # cab, windows leaning out
+    cyl(1.95, 0.2, (0, 0, 11.35), concrete, verts=12)
+    cyl(1.2, 0.3, (0, 0, 11.6), band, verts=12)
+    cyl(1.62, 0.06, (0, 0, 10.1), dark, verts=12)  # frame rings round the cab glass
+    cyl(1.78, 0.06, (0, 0, 10.9), dark, verts=12)
+    cyl(0.04, 1.6, (0.6, 0.3, 12.5), dark, verts=6)  # antennas
+    cyl(0.03, 1.1, (-0.5, -0.4, 12.2), dark, verts=6)
+    dish = cyl(0.45, 0.2, (-0.8, 0.5, 12.0), concrete, verts=14, r2=0.1)
+    dish.rotation_euler.x = 0.6
+    write('control_tower')
+
+bus_shelter()
+control_tower()
+
 helicopter()
 armored()
 person_parts()
