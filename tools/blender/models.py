@@ -599,6 +599,28 @@ def entrance_canopy():
 
 hospital_front()
 entrance_canopy()
+# ---------------- trim kit: unit pieces the game stretches to fit any building ----------------
+# Each piece's back sits on y = 0 and it projects toward -Y (the wall's outward face in the game).
+# Cornice and plinth are 1 long (x from -0.5 to 0.5); the corner pilaster is 1 tall.
+def trim_kit():
+    begin()
+    trim = mat('trim', [0.86, 0.85, 0.81], rough=0.6)
+    cube((1, 0.1, 0.12), (0, -0.05, -0.12), trim, bevel=0.015, seg=1)
+    cube((1, 0.17, 0.1), (0, -0.085, -0.01), trim, bevel=0.015, seg=1)
+    cube((1, 0.22, 0.05), (0, -0.11, 0.065), trim, bevel=0.015, seg=1)
+    write('kit_cornice')
+    begin()
+    stone = mat('stone', [0.5, 0.48, 0.45], rough=0.75)
+    cube((1, 0.08, 0.3), (0, -0.04, 0.15), stone, bevel=0.015, seg=1)
+    cube((1, 0.11, 0.07), (0, -0.055, 0.33), stone, bevel=0.015, seg=1)
+    write('kit_plinth')
+    begin()
+    trim = mat('trim', [0.86, 0.85, 0.81], rough=0.6)
+    cube((0.26, 0.26, 1), (0, 0, 0.5), trim, bevel=0.02, seg=1)
+    write('kit_corner')
+
+trim_kit()
+
 helicopter()
 armored()
 person_parts()
