@@ -770,7 +770,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -4820,6 +4820,14 @@ function showFloor(f) {
 }
 
 function helicopterModel() {
+  if (MODELS.heli_body && MODELS.heli_rotor) {
+    const g = modelGroup('heli_body');
+    const rotor = modelGroup('heli_rotor');
+    rotor.position.y = 2.05;
+    g.add(rotor);
+    g.userData.rotor = rotor;
+    return g;
+  }
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.75, 1.6, 6, 12), mat(0xffffff));
   body.rotation.x = Math.PI / 2;
@@ -9040,6 +9048,8 @@ function tankModel() {
   return g;
 }
 function armoredModel() {
+  const made = modelGroup('armored');
+  if (made) return made;
   const g = new THREE.Group();
   const body = box(1.4, 0.9, 2.5, 0x6b7a3a);
   body.position.y = 0.85;
@@ -11389,12 +11399,14 @@ function buildMedevac() {
   H.rotation.x = -Math.PI / 2;
   scene.add(at3(H, 425, 0.08, -8));
   // Reuse the rooftop helicopter's look: a white body with a red cross
-  const heli = new THREE.Group();
+  const heli = MODELS.heli_body ? helicopterModel() : new THREE.Group();
+  if (!MODELS.heli_body) {
   heli.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.9, 14, 10), mat(0xffffff)), 0, 1.0, 0), at3(box(0.3, 0.3, 2.4, 0xffffff), 0, 1.1, -1.6));
   heli.add(at3(box(0.5, 0.12, 0.14, 0xe5484d, { shadow: false }), 0, 1.3, 0.85), at3(box(0.14, 0.5, 0.14, 0xe5484d, { shadow: false }), 0, 1.3, 0.86));
   const rotor = box(4, 0.04, 0.2, 0x263238, { shadow: false });
   heli.add(at3(rotor, 0, 2.0, 0));
   heli.userData.rotor = rotor;
+  }
   heli.position.set(425, 0, -8);
   scene.add(heli);
   AIR.heli = { g: heli, t: 0, flying: false };
@@ -13402,6 +13414,18 @@ function frameRest(dt, now) {
 
 // ---------- start ----------
 await loadModels();
+// People keep their own rig and colours; the Blender parts only replace the shapes of the pieces
+{
+  const before = { ...PG };
+  for (const k of ['torso', 'leg', 'arm', 'shoe', 'hand']) {
+    const part = MODELS[`pp_${k}`]?.find((p) => p.key === k);
+    if (part) PG[k] = part.geo;
+  }
+  // The player was made before the models arrived: swap its pieces too
+  player.group.traverse((o) => {
+    for (const k of Object.keys(before)) if (o.geometry && o.geometry === before[k]) o.geometry = PG[k];
+  });
+}
 buildWorld();
 buildPartitions();
 buildTrash();
@@ -13916,4 +13940,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { MODELS, modelGroup, tankModelX: () => tankModel(), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
