@@ -770,7 +770,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -812,6 +812,62 @@ function modelMesh(part, paint) {
   mesh.userData.key = part.key;
   mesh.receiveShadow = true;
   return mesh;
+}
+// Fit the trim kit (cornice, plinth, corner pilasters) to every big upright block in a building and
+// bake it into one mesh per material, so a whole building's trim costs two draw calls
+const kitTmp = { m: new THREE.Matrix4(), a: new THREE.Matrix4(), p: new THREE.Vector3(), q: new THREE.Quaternion(), s: new THREE.Vector3(), e: new THREE.Euler() };
+function trimWalls(g) {
+  if (LITE || !MODELS.kit_cornice || !MODELS.kit_plinth || !MODELS.kit_corner) return g;
+  g.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+  const out = {}; // material key → { hex, rough, metal, pos: [], nor: [], idx: [] }
+  const put = (name, mtx) => {
+    for (const part of MODELS[name]) {
+      const geo = part.geo.clone().applyMatrix4(mtx);
+      const o = out[part.key] || (out[part.key] = { part, pos: [], nor: [], idx: [] });
+      const base = o.pos.length / 3;
+      o.pos.push(...geo.attributes.position.array);
+      o.nor.push(...geo.attributes.normal.array);
+      for (const i of geo.index.array) o.idx.push(base + i);
+    }
+  };
+  const blocks = [];
+  g.traverse((o) => {
+    const p = o.geometry?.parameters;
+    const c = o.material?.userData?.c;
+    if (!o.isMesh || o.geometry.type !== 'BoxGeometry' || !p || GLASS.has(c)) return;
+    kitTmp.m.multiplyMatrices(inv, o.matrixWorld).decompose(kitTmp.p, kitTmp.q, kitTmp.s);
+    kitTmp.e.setFromQuaternion(kitTmp.q);
+    if (Math.abs(kitTmp.e.x) > 0.01 || Math.abs(kitTmp.e.z) > 0.01) return;
+    const w = p.width * kitTmp.s.x;
+    const h = p.height * kitTmp.s.y;
+    const d = p.depth * kitTmp.s.z;
+    if (h < 1.2 || Math.max(w, d) < 1.4 || Math.min(w, d) < 0.8) return;
+    blocks.push({ x: kitTmp.p.x, y: kitTmp.p.y, z: kitTmp.p.z, yaw: kitTmp.e.y, w, h, d });
+  });
+  for (const b of blocks) {
+    const top = b.y + b.h / 2;
+    const bottom = b.y - b.h / 2;
+    const frame = new THREE.Matrix4().makeRotationY(b.yaw).setPosition(b.x, 0, b.z);
+    for (const [len, ox, oz, ry] of [[b.w, 0, b.d / 2, 0], [b.w, 0, -b.d / 2, Math.PI], [b.d, b.w / 2, 0, Math.PI / 2], [b.d, -b.w / 2, 0, -Math.PI / 2]]) {
+      const side = (y, sy = 1) => kitTmp.a.copy(frame).multiply(new THREE.Matrix4().makeTranslation(ox, y, oz)).multiply(new THREE.Matrix4().makeRotationY(ry)).multiply(new THREE.Matrix4().makeScale(len + 0.3, sy, 1));
+      put('kit_cornice', side(top));
+      if (bottom < 0.25) put('kit_plinth', side(Math.max(0, bottom)));
+    }
+    for (const [cx, cz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      put('kit_corner', kitTmp.a.copy(frame).multiply(new THREE.Matrix4().makeTranslation(cx * b.w / 2, bottom, cz * b.d / 2)).multiply(new THREE.Matrix4().makeScale(1, b.h - 0.18, 1)));
+    }
+  }
+  for (const o of Object.values(out)) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(o.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(o.nor, 3));
+    geo.setIndex(o.idx);
+    geo.computeBoundingSphere();
+    const mesh = modelMesh({ ...o.part, geo });
+    g.add(mesh);
+  }
+  return g;
 }
 function modelGroup(name, paint) {
   const parts = MODELS[name];
@@ -8050,7 +8106,7 @@ function campusBuilding(lot) {
   if (lot.front.z < lot.at.z) g.rotation.y = Math.PI;
   g.add(aoDecal(fw, fd));
   // Plaster blocks on the big walls; the spa and the villa-style centres get planks
-  return detailWalls(g, lot.id === 'tranquila' || lot.id === 'park' ? 'siding' : 'block');
+  return trimWalls(detailWalls(g, lot.id === 'tranquila' || lot.id === 'park' ? 'siding' : 'block'));
 }
 
 // People on the campus and inside the centres
@@ -9204,7 +9260,7 @@ function buildingBox(x, z, w, h, d, wall, roof) {
   g.add(at3(box(1.2, 1.6, 0.06, 0x5d4037, { shadow: false }), 0, 0.8, d / 2 + 0.04), at3(box(1.6, 0.12, 0.8, roof), 0, 1.8, d / 2 + 0.4));
   g.add(at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, d / 2 + 0.2), at3(box(w + 0.4, 0.3, 0.12, roof), 0, h + 0.3, -d / 2 - 0.2));
   roofDetails(g, 0, w, d, h + 0.25, 0);
-  detailWalls(g, 'block');
+  trimWalls(detailWalls(g, 'block'));
   g.add(aoDecal(w, d));
   g.position.set(x, 0, z);
   scene.add(g);
