@@ -5312,7 +5312,43 @@ const CITY_BUILDINGS = [
   { id: 'bank', icon: '🏦', name: 'ธนาคาร', desc: (l) => `รายได้ +${4 * l}% ทุกสาขา` },
   { id: 'market', icon: '🏪', name: 'ตลาด', desc: (l) => `ภาษี +${marketRate(l)}/วินาที` },
   { id: 'garden', icon: '🌳', name: 'สวนสาธารณะ', desc: (l) => `ความสบาย +${2 * l}` },
+  { id: 'power', icon: '⚡', name: 'โรงไฟฟ้า', desc: (l) => `ไฟฟ้า +${UTIL_PER.power * l} หน่วย` },
+  { id: 'water', icon: '💧', name: 'ประปา', desc: (l) => `น้ำประปา +${UTIL_PER.water * l} หน่วย` },
+  { id: 'waste', icon: '♻️', name: 'จัดการขยะ', desc: (l) => `เก็บขยะ +${UTIL_PER.waste * l} หน่วย` },
 ];
+// --- utilities: power, water and waste must keep up with the city to earn its full bonus ---
+const UTIL_PER = { power: 10, water: 10, waste: 12 };
+const UTILS = [
+  { id: 'power', icon: '⚡', name: 'ไฟฟ้า' },
+  { id: 'water', icon: '💧', name: 'น้ำประปา' },
+  { id: 'waste', icon: '♻️', name: 'ขยะ' },
+];
+// People: 40 per star of homes, more where the neighbourhood is good
+const cityPopulation = () => Math.round((emp()?.plots || []).reduce((a, p, i) => a + (p?.type === 'homes' ? p.lvl * 40 * plotMult(i) : 0), 0));
+function utilDemand(id) {
+  const pop = cityPopulation();
+  const L = (t) => cityLevel(t);
+  if (id === 'power') return Math.ceil(pop / 40 + L('factory') * 2 + L('bank') + L('school') + L('market'));
+  if (id === 'water') return Math.ceil(pop / 40 + L('factory') + L('garden') + L('school'));
+  return Math.ceil(pop / 50 + L('market') * 2 + L('factory'));
+}
+const utilSupply = (id) => cityLevel(id) * UTIL_PER[id];
+const utilCover = (id) => {
+  const d = utilDemand(id);
+  return d ? Math.min(1, utilSupply(id) / d) : 1;
+};
+// A fully served city works 25% better; a city without utilities loses nothing it had before
+const utilCache = { t: -1e9, v: 1 };
+const utilMult = () => {
+  const now = performance.now();
+  if (now - utilCache.t < 500) return utilCache.v;
+  utilCache.t = now;
+  utilCache.v = cityPopulation() ? 1 + 0.25 * Math.min(...UTILS.map((u) => utilCover(u.id))) : 1;
+  return utilCache.v;
+};
+// Population goals: each one pays a reward once
+const POP_GOALS = [100, 300, 600, 1000, 1600, 2500, 4000];
+const popReward = (i) => 30000 * 2 ** i;
 const CITY_PLOTS = 8;
 const PLACE_MAX = 3;
 const defaultEmpire = () => ({ tier: 0, plots: Array(CITY_PLOTS).fill(null), nodes: {}, buys: 0, land: 0, spots: {} });
@@ -5322,7 +5358,7 @@ const cityLevel = (type) => (emp()?.plots || []).reduce((a, p) => a + (p?.type =
 // Neighbours are the buildings beside it on the same street side and the one straight across the road.
 const NEAR = 8.6;
 const SYNERGY = {
-  homes: { garden: 0.5, market: 0.25, school: 0.25, factory: -0.5 },
+  homes: { garden: 0.5, market: 0.25, school: 0.25, factory: -0.5, waste: -0.25, power: -0.1 },
   market: { homes: 0.25, bank: 0.25 },
   school: { garden: 0.25, homes: 0.1 },
   factory: { factory: 0.25 },
@@ -5354,7 +5390,7 @@ function plotMult(i) {
   }
   return multCache.m[i] ?? 1;
 }
-const cityPower = (type) => (emp()?.plots || []).reduce((a, p, i) => a + (p?.type === type ? p.lvl * plotMult(i) : 0), 0);
+const cityPower = (type) => (emp()?.plots || []).reduce((a, p, i) => a + (p?.type === type ? p.lvl * plotMult(i) : 0), 0) * utilMult();
 const synergyText = (why) => Object.entries(why).map(([t, k]) => `${CITY_BUILDINGS.find((b) => b.id === t).icon}${k > 0 ? '+' : ''}${Math.round(k * 100)}%`).join(' ');
 const marketRate = (l) => Math.round([0, 3, 9, 20][l] * (1 + 0.5 * (emp()?.tier || 0)));
 // Steep for the first 24 builds, gentler after so a big city stays affordable
@@ -5377,7 +5413,7 @@ const empireComfort = () => Math.round(2 * cityPower('garden'));
 function empireRate() {
   const e = emp();
   if (!e) return 0;
-  let rate = e.plots.reduce((a, p, i) => a + (p?.type === 'market' ? marketRate(p.lvl) * plotMult(i) : 0), 0);
+  let rate = e.plots.reduce((a, p, i) => a + (p?.type === 'market' ? marketRate(p.lvl) * plotMult(i) : 0), 0) * utilMult();
   for (let t = 1; t <= e.tier; t++) nodeLevels(t).forEach((l, i) => { rate += nodeRate(t, i + 1, l); });
   return rate * prestigeTax() * (researched('tax') ? 1.2 : 1);
 }
@@ -5410,7 +5446,24 @@ function cheapestEmpireCost() {
 
 let empireBuffer = 0;
 let empireShown = 0;
+function checkPopGoals() {
+  const e = emp();
+  if (!e) return;
+  const i = e.popGoal || 0;
+  if (i >= POP_GOALS.length || cityPopulation() < POP_GOALS[i]) return;
+  e.popGoal = i + 1;
+  const r = popReward(i);
+  addMoney(r);
+  sfxUnlock();
+  toast(`👥 <b>เมืองมีประชากร ${fmt(POP_GOALS[i])} คนแล้ว!</b><br>รางวัล 💵${fmt(r)}${POP_GOALS[i + 1] ? ` · เป้าหมายถัดไป ${fmt(POP_GOALS[i + 1])} คน` : ''}`, 4500);
+  save();
+}
 function tickEmpire(dt) {
+  tickEmpire.pop = (tickEmpire.pop || 0) + dt;
+  if (tickEmpire.pop > 1) {
+    tickEmpire.pop = 0;
+    checkPopGoals();
+  }
   const rate = empireRate();
   if (!rate) return;
   empireBuffer += rate * dt;
@@ -5442,7 +5495,9 @@ function buildPlot(i, type) {
   e.buys++;
   e.plots[i] = p ? { ...p, lvl: p.lvl + 1 } : { type, lvl: 1 };
   multCache.t = -1e9;
+  utilCache.t = -1e9;
   syncDistrict(true);
+  if (overlay.on) paintOverlay();
   save();
   renderEmpire();
 }
@@ -5545,6 +5600,9 @@ function renderCity() {
     const go = emButton('🚶 ไปดูเมืองจริง', false, visitDistrict);
     go.classList.add('emgo');
     emPage.append(go);
+    const ov = emButton('🗺️ ดูภาพรวมทำเล (สีบอกทำเลดี/แย่)', !district.built, () => setOverlay(true));
+    ov.classList.add('emgo');
+    emPage.append(ov);
     const landCost = LAND_COSTS[e.land || 0];
     if (landCost !== undefined) {
       const land = emButton(`🗺️ ซื้อที่ดินเพิ่ม +4 แปลง · 💵${fmt(landCost)}`, state.money < landCost, buyLand);
@@ -6186,6 +6244,59 @@ const CITY_MODELS = {
     }
     return g;
   },
+  power(l) {
+    // A switch house, transformers behind a fence, and one cooling tower per level with a plume of steam
+    const g = new THREE.Group();
+    g.add(at3(box(1.8, 1.4, 1.3, 0xb8c2cc), -0.6, 0.7, 0.6), at3(box(1.9, 0.12, 1.4, 0x546e7a), -0.6, 1.46, 0.6));
+    g.add(at3(signBoard('⚡ โรงไฟฟ้า', '#f9a825', 1.5, 0.34), -0.6, 1.05, 1.27));
+    for (let k = 0; k < l; k++) {
+      const x = 1.1 - k * 1.05;
+      const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.62, 1.3, 16, 1, true), mat(0xdfe6ee));
+      const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.45, 0.9, 16, 1, true), mat(0xdfe6ee));
+      lower.castShadow = upper.castShadow = true;
+      g.add(at3(lower, x, 0.65, -1.0), at3(upper, x, 1.75, -1.0), at3(cylM(0.53, 0.53, 0.08, 0xe5484d, 16), x, 2.2, -1.0));
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), surface({ color: 0xffffff, transparent: true, opacity: 0.7 }));
+      puff.position.set(x, 2.6, -1.0);
+      decorAnims.push((t) => {
+        const f = (t * 0.35 + k * 0.33) % 1;
+        puff.position.y = 2.5 + f * 1.4;
+        puff.scale.setScalar(0.8 + f * 0.9);
+        puff.material.opacity = 0.7 * (1 - f);
+      });
+      g.add(puff);
+    }
+    for (const x of [-1.4, -0.6, 0.2]) g.add(at3(box(0.5, 0.6, 0.4, 0x607d8b), x, 0.3, -0.35), at3(cylM(0.05, 0.05, 0.3, 0xeceff1, 6), x - 0.12, 0.75, -0.35), at3(cylM(0.05, 0.05, 0.3, 0xeceff1, 6), x + 0.12, 0.75, -0.35));
+    g.add(at3(fence(3.6), 0, 0, 0.05));
+    return g;
+  },
+  water(l) {
+    // A water tower on legs, settling tanks (one more per level) and a pump house
+    const g = new THREE.Group();
+    for (const [x, z] of [[-0.45, -0.45], [0.45, -0.45], [-0.45, 0.45], [0.45, 0.45]]) g.add(at3(cylM(0.06, 0.08, 2.2, 0x78909c, 6), x + 0.9, 1.1, z - 0.6));
+    g.add(at3(cylM(0.85, 0.85, 1.0, 0x42a5f5, 18), 0.9, 2.6, -0.6), at3(new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.5, 18), mat(0x1e88e5)), 0.9, 3.35, -0.6));
+    g.add(at3(cylM(0.87, 0.87, 0.08, 0xffffff, 18), 0.9, 2.35, -0.6), at3(signBoard('💧 ประปา', '#1565c0', 1.2, 0.3), 0.9, 2.65, 0.27));
+    for (let k = 0; k < l; k++) {
+      const x = -1.2 + (k % 2) * 1.1;
+      const z = 0.6 - Math.floor(k / 2) * 1.3;
+      g.add(at3(cylM(0.5, 0.5, 0.3, 0xb0bec5, 18), x, 0.15, z), at3(cylM(0.44, 0.44, 0.04, 0x4fc3f7, 18), x, 0.29, z));
+    }
+    g.add(at3(box(0.9, 0.9, 0.8, 0xeceff1), 1.1, 0.45, 1.0), at3(box(1.0, 0.1, 0.9, 0x1e88e5), 1.1, 0.95, 1.0), at3(cylM(0.08, 0.08, 1.6, 0x90a4ae, 8).rotateZ(Math.PI / 2), 0.0, 0.25, 1.0));
+    return g;
+  },
+  waste(l) {
+    // A sorting shed, colour-coded bins (more per level), a compactor and a recycling sign
+    const g = new THREE.Group();
+    g.add(at3(box(2.2, 1.3, 1.4, 0x7cb342), 0, 0.65, -0.7), at3(box(2.3, 0.1, 1.5, 0x33691e), 0, 1.35, -0.7));
+    g.add(at3(box(1.0, 0.9, 0.05, 0x455a64), 0, 0.45, 0.02), at3(signBoard('♻️ คัดแยกขยะ', '#2e7d32', 1.6, 0.34), 0, 1.05, 0.03));
+    const cols = [0x1e88e5, 0xfdd835, 0x43a047, 0xe53935];
+    for (let k = 0; k < 2 + l * 2; k++) {
+      const x = -1.5 + (k % 4) * 0.5;
+      const z = 0.75 + Math.floor(k / 4) * 0.55;
+      g.add(at3(box(0.38, 0.5, 0.38, cols[k % 4]), x, 0.25, z), at3(box(0.4, 0.05, 0.4, 0x263238), x, 0.52, z));
+    }
+    g.add(at3(box(0.8, 0.8, 1.1, 0x546e7a), 1.3, 0.4, 0.9), at3(hazardStrip(0.8).rotateY(0), 1.3, 0.15, 1.46));
+    return g;
+  },
 };
 
 // Rebuild any plot whose building or level changed
@@ -6238,6 +6349,55 @@ function syncDistrict(animate = false) {
       burst(slot.group.position);
     }
   });
+}
+
+// --- the overview: lots tinted by how good their spot is, seen from high above ---
+const overlay = { on: false, bar: null };
+const OV = { bad: new THREE.Color(0xe5484d), mid: new THREE.Color(0xffd166), good: new THREE.Color(0x3fbf5f), empty: new THREE.Color(0xb0b6bd), base: 0x8fcf6c };
+function paintOverlay() {
+  district.plots.forEach((slot, i) => {
+    if (!overlay.on) {
+      if (slot.baseMat) slot.lot.material = slot.baseMat;
+      return;
+    }
+    if (!slot.ovMat) {
+      slot.baseMat = slot.lot.material;
+      slot.ovMat = new THREE.MeshBasicMaterial({ toneMapped: false, color: 0xffffff });
+    }
+    slot.lot.material = slot.ovMat;
+    const p = emp().plots[i];
+    if (!p) {
+      slot.ovMat.color.copy(OV.empty);
+      return;
+    }
+    const k = synergyAt(i, p.type, slot.at).sum;
+    slot.ovMat.color.copy(k < 0 ? OV.bad.clone().lerp(OV.mid, 1 + k * 2) : OV.mid.clone().lerp(OV.good, Math.min(1, k * 2)));
+  });
+  if (overlay.bar) {
+    overlay.bar.querySelector('.mvnote').innerHTML = `🟩 ทำเลดี · 🟨 กลาง ๆ · 🟥 ทำเลแย่ · ⬜ ที่ว่าง<br>👥 ${fmt(cityPopulation())} คน · ${UTILS.map((u) => `${u.icon} ${Math.round(utilCover(u.id) * 100)}%`).join(' · ')}`;
+  }
+}
+function setOverlay(on) {
+  overlay.on = on;
+  if (on) {
+    branchPanel.style.display = 'none';
+    running = true;
+    if (!inDistrict(player.group.position)) visitDistrict();
+    setZoom(2.6);
+    if (!overlay.bar) {
+      const bar = emEl('div', 'movebar', '<div class="mvnote"></div>');
+      const close = emEl('button', 'btn ghost', tx('ปิดภาพรวม', 'Close overview'));
+      close.addEventListener('click', () => setOverlay(false));
+      bar.append(close);
+      document.body.append(bar);
+      overlay.bar = bar;
+    }
+    overlay.bar.style.display = 'flex';
+  } else {
+    if (overlay.bar) overlay.bar.style.display = 'none';
+    setZoom(1);
+  }
+  paintOverlay();
 }
 
 // --- moving a building: walk along a street, the outline follows you, then confirm ---
@@ -6327,8 +6487,10 @@ function confirmMove() {
   put(i, mover.at);
   const zone = plotZone(slot.at);
   multCache.t = -1e9;
+  utilCache.t = -1e9;
   endMove();
   syncDistrict(true);
+  if (overlay.on) paintOverlay();
   // Never leave the player standing inside the building that just landed
   const pp = player.group.position;
   if (Math.abs(pp.x - slot.at.x) < 2.2 && Math.abs(pp.z - slot.at.z) < 2.2) pp.copy(zone);
@@ -10388,6 +10550,7 @@ function demandRows() {
     { icon: '🌳', name: 'สวน/พักผ่อน', have: parks, use: Math.ceil(n * 0.4) },
     { icon: '🛏️', name: 'เตียงผู้ป่วย', have: beds, use: sick },
     { icon: '🚗', name: 'ถนน', have: roadCapacity(), use: Math.round(carDemand()) },
+    ...UTILS.map((u) => ({ icon: u.icon, name: u.name, have: utilSupply(u.id), use: utilDemand(u.id), util: u.id })),
   ];
 }
 function advise() {
@@ -10414,7 +10577,12 @@ function advise() {
     if (r.name === 'ร้านค้า') todo.push('สร้างหรืออัปเลเวลตลาด 🏪');
     if (r.name === 'สวน/พักผ่อน') todo.push('สร้างสวนสาธารณะ 🌳 ช่วยให้คนป่วยน้อยลงและดึงนักท่องเที่ยว');
     if (r.name === 'เตียงผู้ป่วย') todo.push('เพิ่มเตียงในหอผู้ป่วยชั้น 2');
+    if (r.util) {
+      const b = CITY_BUILDINGS.find((x) => x.id === r.util);
+      todo.push(`สร้างหรืออัปเลเวล${b.icon} ${b.name} ให้พอ เมืองที่มีไฟ น้ำ ขยะครบได้โบนัส +25%`);
+    }
   }
+  if (cityPopulation() && utilMult() >= 1.249) good.push('ไฟ น้ำ ขยะ ครบทั้งเมือง โบนัสเมือง +25%');
   if (cityState().tourists > 0) good.push(`นักท่องเที่ยวมารักษาแล้ว ${cityState().tourists} คน ✈️`);
   if (tourismScore() < 4 && state.step >= 8) todo.push('อยากได้นักท่องเที่ยวมากขึ้น: สวน ตลาด ของตกแต่ง และคะแนนดาวช่วยได้');
   const g = !storyDone() && curGoal();
@@ -10440,6 +10608,13 @@ function renderCityHub() {
   const box = hubEl.querySelector('.box');
   const c = cityState();
   box.innerHTML = `<h3>🏙️ เมืองของคุณ</h3><p class="sub">วัน${DAY_NAMES[c.day % 7]}ที่ ${c.day} · ${clockText()} · ชาวเมือง ${citizenCount()} คน · ${jamText(jam())}</p>`;
+  const pop = cityPopulation();
+  const gi = emp()?.popGoal || 0;
+  const goal = POP_GOALS[gi];
+  const prev = gi ? POP_GOALS[gi - 1] : 0;
+  box.append(emEl('div', 'popgoal', goal
+    ? `<b>👥 ประชากร ${fmt(pop)} คน</b> · เป้าหมาย ${fmt(goal)} คน (รางวัล 💵${fmt(popReward(gi))})<div class="hpbar"><i style="width:${Math.max(2, Math.min(100, ((pop - prev) / (goal - prev)) * 100))}%;background:#3d8bfd"></i></div><small>${UTILS.map((u) => `${u.icon} ${Math.round(utilCover(u.id) * 100)}%`).join(' · ')} · โบนัสเมือง +${Math.round((utilMult() - 1) * 100)}%</small>`
+    : `<b>👥 ประชากร ${fmt(pop)} คน</b> · ครบทุกเป้าหมายแล้ว 🎉`));
   const tabs = emEl('div', 'hubtabs');
   for (const [id, label] of [['advisor', '👩‍💼 ที่ปรึกษา'], ['people', '👥 ชาวเมือง'], ['traffic', '🚦 จราจร'], ['tourism', '✈️ ท่องเที่ยว']]) {
     const b = emEl('button', hubTab === id ? 'on' : '', label);
@@ -14016,4 +14191,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
