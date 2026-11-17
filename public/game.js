@@ -8679,7 +8679,23 @@ function campusSnapshot() {
 function campusTask() {
   if (!campusOpen()) return null;
   const lot = CAMPUS_LOTS.find((l) => !campus.owned.includes(l.id) && state.money >= l.price - (campus.paid[l.id] || 0));
-  return lot ? { at: lot.front, keep: () => !campus.owned.includes(lot.id) && state.money > 0 } : null;
+  if (lot) return { at: lot.front, keep: () => !campus.owned.includes(lot.id) && state.money > 0 };
+  return interiorHireTask();
+}
+// AUTO also hires the staff inside the centres: the cheapest station it can afford, through the door
+function interiorHireTask() {
+  let best = null;
+  for (const it of Object.values(INT)) {
+    for (const S of it.stations) {
+      const t = S.tile;
+      if (S.staffed || !t) continue;
+      const left = S.hire - t.paid;
+      if (state.money >= left && (!best || left < best.left)) best = { S, t, left };
+    }
+  }
+  if (!best) return null;
+  const { S, t } = best;
+  return { at: t.at, keep: () => !S.staffed && S.tile === t && state.money > 0 };
 }
 
 // ---------- inside the campus centres: walk in through the door and run them like the hospital ----------
@@ -10028,9 +10044,12 @@ function recruitGeneral() {
 // --- AUTO and routing ---
 function baseRoute(from, to) {
   if (flatDist(from, to) < 1.5) return to;
+  // Already level with the target and on its side of the avenue (or on the avenue): walk straight there.
+  // Without this, a target further than 1.2 from the avenue pulled AUTO back to it every few steps.
+  const sameSide = Math.abs(from.x - 20) <= 1.2 || Math.sign(from.x - 20) === Math.sign(to.x - 20);
+  if (Math.abs(from.z - to.z) <= 0.5 && sameSide) return to;
   if (Math.abs(from.x - 20) > 1.2) return v(20, from.z);
-  if (Math.abs(from.z - to.z) > 0.5) return v(20, to.z);
-  return to;
+  return v(20, to.z);
 }
 function baseTask() {
   if (!baseOpen()) return null;
@@ -10040,6 +10059,18 @@ function baseTask() {
   }
   const u = BASE_UNLOCKS[B().step];
   if (u && BASE.tile && state.money >= u.price - B().paid) return { at: u.at, keep: () => BASE_UNLOCKS[B().step] === u && state.money > 0 };
+  // Then hire the cheapest unit commander it can afford, so training runs on its own
+  let best = null;
+  for (const S of Object.values(BASE.stations || {})) {
+    if (!S || S.staffed || !S.hire || !S.hireAt) continue;
+    const left = commanderCost(S.k) - (S.hire.paid || 0);
+    if (state.money >= left && (!best || left < best.left)) best = { S, left };
+  }
+  if (best) {
+    const { S } = best;
+    const tileRef = S.hire;
+    return { at: S.hireAt, keep: () => !S.staffed && S.hire === tileRef && state.money > 0 };
+  }
   return null;
 }
 function basePerSecond() {
