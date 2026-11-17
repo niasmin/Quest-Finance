@@ -204,6 +204,237 @@ def tree(name, seed, shape):
         add(o, leaf2 if (z > h + 1.1 and i % 2 == 0) else leaf, smooth=False)
     write('tree_' + shape)
 
+
+# ---------------- shared helpers for the vehicles and street furniture ----------------
+def slab(points, thick, z, m, smooth=False):
+    """A flat shape from (x, y) points, given thickness upward from height z."""
+    me = bpy.data.meshes.new('slab')
+    n = len(points)
+    verts = [(x, y, z) for x, y in points] + [(x, y, z + thick) for x, y in points]
+    faces = [list(range(n))[::-1], list(range(n, 2 * n))] + [[i, (i + 1) % n, n + (i + 1) % n, n + i] for i in range(n)]
+    me.from_pydata(verts, [], faces)
+    me.update()
+    o = bpy.data.objects.new('slab', me)
+    bpy.context.scene.collection.objects.link(o)
+    return add(o, m, smooth)
+
+def wheels(m_tyre, m_hub, xs, ys, r, w, z=None):
+    for x in xs:
+        for y in ys:
+            cyl(r, w, (x, y, r if z is None else z), m_tyre, rot=(0, math.pi / 2, 0), verts=16)
+            cyl(r * 0.55, w + 0.01, (x, y, r if z is None else z), m_hub, rot=(0, math.pi / 2, 0), verts=10)
+
+def begin():
+    reset()
+    MATS.clear()
+
+# ---------------- ambulance (front at -Y) ----------------
+def ambulance():
+    begin()
+    white = mat('white', [0.86, 0.87, 0.88], rough=0.35, metal=0.15)
+    red = mat('stripe', [0.75, 0.03, 0.04], rough=0.4)
+    dark = mat('trim', [0.025, 0.025, 0.03], rough=0.75)
+    tyre = mat('tyre', [0.02, 0.02, 0.022], rough=0.9)
+    hub = mat('chrome', [0.7, 0.72, 0.75], rough=0.25, metal=1.0)
+    glass = mat('glass', [0.03, 0.05, 0.08], rough=0.06, metal=0.8)
+    head = mat('head', [1.0, 0.95, 0.82], emit=True)
+    tail = mat('tail', [0.85, 0.04, 0.04], emit=True)
+    siren = mat('siren', [0.9, 0.1, 0.1], emit=True)
+    # Box body at the back, cab and bonnet at the front
+    cube((1.4, 2.5, 1.55), (0, 0.55, 0.32 + 0.78), white, bevel=0.06)
+    cube((1.36, 1.0, 1.05), (0, -1.15, 0.32 + 0.53), white, bevel=0.1, seg=3)
+    cube((1.3, 0.6, 0.55), (0, -1.85, 0.32 + 0.28), white, bevel=0.12, seg=3)
+    ws = cube((1.2, 0.05, 0.5), (0, -1.66, 1.12), glass)
+    ws.rotation_euler.x = -0.35
+    for sx in (-1, 1):
+        cube((0.02, 0.6, 0.42), (sx * 0.69, -1.15, 1.1), glass)
+        cube((0.02, 2.5, 0.2), (sx * 0.705, 0.55, 0.95), red)  # side stripe
+        cube((0.02, 0.5, 0.14), (sx * 0.71, 0.7, 1.5), red)  # cross
+        cube((0.02, 0.14, 0.5), (sx * 0.71, 0.7, 1.5), red)
+        cube((0.02, 0.5, 0.5), (sx * 0.705, 1.3, 1.45), glass)  # rear side window
+        cube((0.1, 0.12, 0.09), (sx * 0.74, -1.5, 1.2), white, bevel=0.02)  # mirror
+        cube((0.24, 0.04, 0.12), (sx * 0.45, -2.155, 0.62), head, bevel=0.02)
+        cube((0.18, 0.04, 0.3), (sx * 0.55, 1.805, 0.9), tail, bevel=0.02)
+    cube((1.3, 0.04, 0.9), (0, 1.81, 1.15), white)  # rear doors
+    cube((0.02, 0.05, 0.9), (0, 1.84, 1.15), dark)
+    cube((1.44, 0.14, 0.16), (0, -2.2, 0.42), dark, bevel=0.04)
+    cube((1.44, 0.14, 0.16), (0, 1.88, 0.42), dark, bevel=0.04)
+    cube((1.0, 0.3, 0.14), (0, -1.15, 1.43), siren, bevel=0.04)  # light bar on the cab roof
+    cube((0.25, 0.25, 0.12), (0, 1.5, 1.93), siren, bevel=0.03)
+    wheels(tyre, hub, (-0.62, 0.62), (-1.4, 1.1), 0.32, 0.22)
+    write('ambulance')
+
+# ---------------- airliner (front at -Y, wheels on the ground) ----------------
+def airliner():
+    begin()
+    white = mat('white', [0.88, 0.88, 0.86], rough=0.35, metal=0.2)
+    grey = mat('grey', [0.55, 0.57, 0.6], rough=0.4, metal=0.5)
+    livery = mat('livery', [0.7, 0.05, 0.06], rough=0.3, metal=0.4)
+    glass = mat('glass', [0.03, 0.05, 0.08], rough=0.06, metal=0.8)
+    dark = mat('trim', [0.03, 0.03, 0.035], rough=0.7)
+    tyre = mat('tyre', [0.02, 0.02, 0.022], rough=0.9)
+    zc = 1.6
+    cyl(1.0, 9.0, (0, 0, zc), white, rot=(math.pi / 2, 0, 0), verts=24)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, segments=24, ring_count=12, location=(0, -4.5, zc))
+    nose = add(bpy.context.object, white)
+    nose.scale = (1, 1.7, 0.95)
+    tailc = cyl(1.0, 3.4, (0, 6.2, zc + 0.25), white, rot=(-math.pi / 2, 0, 0), verts=24, r2=0.22)
+    tailc.rotation_euler.x = -math.pi / 2 + 0.1
+    # Wings: swept, with a little dihedral, engines below
+    for sx in (-1, 1):
+        w = slab([(0, -1.0), (sx * 5.6, 0.9), (sx * 5.6, 1.6), (0, 1.4)], 0.16, zc - 0.55, white)
+        w.rotation_euler.y = -sx * 0.06
+        slab([(sx * 5.55, 0.9), (sx * 5.75, 1.0), (sx * 5.75, 1.6), (sx * 5.55, 1.6)], 0.7, zc - 0.5, livery)  # winglet
+        cyl(0.44, 1.7, (sx * 2.6, -0.4, zc - 0.85), grey, rot=(math.pi / 2, 0, 0), verts=18)
+        cyl(0.36, 0.06, (sx * 2.6, -1.26, zc - 0.85), dark, rot=(math.pi / 2, 0, 0), verts=18)
+        cube((0.14, 1.0, 0.4), (sx * 2.6, -0.1, zc - 0.5), white)
+        slab([(0, 5.6), (sx * 2.2, 7.0), (sx * 2.2, 7.5), (0, 7.4)], 0.1, zc + 0.35, white)  # tailplane
+        cube((0.02, 7.6, 0.16), (sx * 0.99, -0.2, zc + 0.35), glass)  # cabin windows
+        cube((0.02, 7.8, 0.14), (sx * 0.985, -0.2, zc - 0.2), livery)  # cheat line
+        for y in (-3.4, 3.6):
+            cube((0.02, 0.5, 0.95), (sx * 0.995, y, zc + 0.1), dark)  # door outlines
+    fin = slab([(0, 5.0), (0, 7.6), (0.0, 8.0), (0, 8.0)], 0.0, 0, livery)
+    bpy.data.objects.remove(fin)
+    me = bpy.data.meshes.new('fin')
+    pts = [(5.2, zc + 0.6), (7.75, zc + 0.6), (8.05, zc + 3.4), (7.2, zc + 3.4)]
+    verts = [(-0.08, y, z) for y, z in pts] + [(0.08, y, z) for y, z in pts]
+    faces = [[0, 1, 2, 3][::-1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]
+    me.from_pydata(verts, [], faces)
+    o = bpy.data.objects.new('fin', me)
+    bpy.context.scene.collection.objects.link(o)
+    add(o, livery, smooth=False)
+    cockpit = cube((1.2, 0.4, 0.22), (0, -5.15, zc + 0.42), glass, bevel=0.05)
+    cockpit.rotation_euler.x = 0.45
+    # Landing gear
+    for x, y in ((-0.45, 0.6), (0.45, 0.6)):
+        cyl(0.07, 0.7, (x, y, 0.55), grey, verts=8)
+        wheels(tyre, grey, (x - 0.08, x + 0.08), (y,), 0.22, 0.14)
+    cyl(0.06, 0.8, (0, -4.0, 0.6), grey, verts=8)
+    wheels(tyre, grey, (0,), (-4.0,), 0.18, 0.12)
+    write('airliner')
+
+# ---------------- fighter jet (front at -Y) ----------------
+def jet():
+    begin()
+    paint = mat('paint', [0.25, 0.28, 0.32], rough=0.4, metal=0.5)
+    dark = mat('trim', [0.03, 0.03, 0.035], rough=0.7)
+    glass = mat('canopy', [0.2, 0.45, 0.6], rough=0.05, metal=0.6)
+    white = mat('missile', [0.85, 0.86, 0.88], rough=0.4)
+    red = mat('tip', [0.8, 0.05, 0.05], rough=0.4)
+    z = 0.75
+    cyl(0.32, 3.0, (0, 0.3, z), paint, rot=(math.pi / 2, 0, 0), verts=14, r2=0.36)
+    cyl(0.32, 1.3, (0, -1.85, z), paint, rot=(math.pi / 2, 0, 0), verts=14, r2=0.02)  # nose cone, tip forward
+    cyl(0.3, 0.25, (0, 1.9, z), dark, rot=(math.pi / 2, 0, 0), verts=14, r2=0.24)  # nozzle
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.26, segments=14, ring_count=8, location=(0, -0.9, z + 0.25))
+    c = add(bpy.context.object, glass)
+    c.scale = (0.9, 2.1, 0.75)
+    for sx in (-1, 1):
+        slab([(0, -1.0), (sx * 1.85, 0.9), (sx * 1.85, 1.2), (0, 1.3)], 0.07, z - 0.08, paint)  # delta wing
+        slab([(sx * 0.2, 1.2), (sx * 0.95, 1.85), (sx * 0.95, 2.05), (sx * 0.2, 1.95)], 0.05, z, paint)
+        cube((0.28, 0.9, 0.3), (sx * 0.4, -0.2, z - 0.05), paint, bevel=0.06)  # intakes
+        cube((0.22, 0.04, 0.24), (sx * 0.4, -0.66, z - 0.05), dark)
+        cyl(0.05, 1.0, (sx * 1.25, 0.4, z - 0.18), white, rot=(math.pi / 2, 0, 0), verts=8)
+        cyl(0.05, 0.18, (sx * 1.25, -0.19, z - 0.18), red, rot=(math.pi / 2, 0, 0), verts=8, r2=0.0)
+        fin = cube((0.05, 0.75, 0.75), (sx * 0.22, 1.5, z + 0.5), paint)
+        fin.rotation_euler.y = sx * 0.3
+        taper(fin, 0.0, 1, 0.55)
+    for x, y in ((-0.35, 0.4), (0.35, 0.4), (0, -1.4)):
+        cyl(0.03, 0.45, (x, y, 0.32), dark, verts=6)
+        cyl(0.11, 0.08, (x, y, 0.11), dark, rot=(0, math.pi / 2, 0), verts=10)
+    write('jet')
+
+# ---------------- tank: hull and turret as two files, so the turret can turn ----------------
+def tank():
+    begin()
+    olive = mat('olive', [0.12, 0.15, 0.05], rough=0.75)
+    olive2 = mat('olive2', [0.09, 0.11, 0.035], rough=0.8)
+    track = mat('track', [0.02, 0.02, 0.022], rough=0.9)
+    steel = mat('steel', [0.25, 0.26, 0.27], rough=0.5, metal=0.6)
+    head = mat('head', [1.0, 0.95, 0.82], emit=True)
+    cube((1.5, 2.6, 0.5), (0, 0, 0.6), olive, bevel=0.05)
+    glacis = cube((1.5, 0.7, 0.08), (0, -1.45, 0.66), olive, bevel=0.02)
+    glacis.rotation_euler.x = 0.55
+    for sx in (-1, 1):
+        cube((0.42, 2.9, 0.5), (sx * 0.84, 0, 0.3), track, bevel=0.2, seg=4)
+        cube((0.48, 2.95, 0.05), (sx * 0.84, 0, 0.6), olive2, bevel=0.02)
+        for k in range(6):
+            cyl(0.19, 0.44, (sx * 0.84, -1.05 + k * 0.42, 0.26), steel, rot=(0, math.pi / 2, 0), verts=12)
+        cube((0.16, 0.06, 0.1), (sx * 0.6, -1.32, 0.86), head, bevel=0.02)
+        cube((0.3, 0.6, 0.18), (sx * 0.55, 0.9, 0.94), olive2, bevel=0.03)  # stowage boxes
+    cyl(0.12, 0.35, (0.4, 1.2, 0.95), olive2, verts=10)  # exhaust
+    write('tank_hull')
+    begin()
+    olive = mat('olive', [0.1, 0.125, 0.04], rough=0.75)
+    olive2 = mat('olive2', [0.08, 0.1, 0.03], rough=0.8)
+    steel = mat('steel', [0.08, 0.09, 0.05], rough=0.6, metal=0.3)
+    t = cube((1.05, 1.35, 0.42), (0, 0.05, 1.07), olive, bevel=0.08, seg=2)
+    taper(t, 0.0, 0.85, 0.85)
+    cyl(0.085, 1.9, (0, -1.5, 1.1), steel, rot=(math.pi / 2, 0, 0), verts=12)
+    cyl(0.13, 0.25, (0, -2.4, 1.1), steel, rot=(math.pi / 2, 0, 0), verts=12)
+    cyl(0.16, 0.3, (0, -0.65, 1.1), olive2, rot=(math.pi / 2, 0, 0), verts=12)  # mantlet
+    cyl(0.2, 0.1, (-0.2, 0.2, 1.33), olive2, verts=12)
+    cyl(0.012, 1.1, (0.38, 0.5, 1.8), steel, verts=4)
+    cube((0.8, 0.28, 0.24), (0, 0.78, 1.02), olive2, bevel=0.03)
+    write('tank_turret')
+
+# ---------------- warship (front at -Y) ----------------
+def ship():
+    begin()
+    grey = mat('hull', [0.32, 0.36, 0.4], rough=0.55, metal=0.3)
+    light = mat('deck', [0.62, 0.65, 0.68], rough=0.5)
+    red = mat('waterline', [0.45, 0.03, 0.03], rough=0.6)
+    dark = mat('trim', [0.03, 0.03, 0.035], rough=0.7)
+    glass = mat('glass', [0.03, 0.05, 0.08], rough=0.06, metal=0.8)
+    hullpts = [(-0.75, 2.4), (-0.78, 0.0), (-0.6, -2.2), (0, -3.5), (0.6, -2.2), (0.78, 0.0), (0.75, 2.4)]
+    slab(hullpts, 0.22, -0.15, red)
+    slab(hullpts, 0.62, 0.07, grey)
+    slab([(x * 0.96, y * 0.98) for x, y in hullpts], 0.03, 0.69, light)
+    cube((1.0, 1.5, 0.6), (0, 0.5, 1.0), light, bevel=0.04)
+    cube((0.8, 0.8, 0.5), (0, 0.4, 1.55), light, bevel=0.04)
+    cube((0.82, 0.02, 0.16), (0, -0.01, 1.62), glass)
+    cyl(0.04, 1.4, (0, 0.5, 2.4), dark, verts=6)
+    rad = cube((0.9, 0.08, 0.2), (0, 0.5, 2.9), dark)
+    cyl(0.18, 0.6, (0, 1.4, 1.3), grey, verts=12, r2=0.15)  # funnel
+    cyl(0.32, 0.25, (0, -1.5, 0.84), grey, verts=14)  # gun turret
+    cyl(0.05, 0.9, (0, -2.0, 0.9), dark, rot=(math.pi / 2, 0, 0), verts=8)
+    cyl(0.25, 0.2, (0, 1.95, 0.82), grey, verts=12)
+    for sx in (-1, 1):
+        cube((0.03, 4.4, 0.03), (sx * 0.72, -0.1, 0.95), light)
+    write('ship')
+
+# ---------------- street lamp and park bench ----------------
+def lamp():
+    begin()
+    metal = mat('lamp', [0.06, 0.08, 0.09], rough=0.45, metal=0.6)
+    cyl(0.14, 0.25, (0, 0, 0.12), metal, verts=12, r2=0.09)
+    cyl(0.07, 2.45, (0, 0, 1.35), metal, verts=10, r2=0.045)
+    arm = cyl(0.03, 0.5, (0.2, 0, 2.58), metal, rot=(0, math.pi / 2, 0), verts=8)
+    cube((0.34, 0.2, 0.1), (0.4, 0, 2.6), metal, bevel=0.04)
+    write('lamp')
+
+def bench():
+    begin()
+    wood = mat('slat', [0.33, 0.16, 0.06], rough=0.7)
+    iron = mat('iron', [0.04, 0.045, 0.05], rough=0.5, metal=0.5)
+    for k in range(3):
+        cube((1.3, 0.12, 0.04), (0, -0.16 + k * 0.14, 0.45), wood, bevel=0.015)
+    for k in range(2):
+        cube((1.3, 0.04, 0.11), (0, 0.25, 0.62 + k * 0.16), wood, bevel=0.015)  # backrest slats
+    for x in (-0.55, 0.55):
+        cube((0.05, 0.42, 0.05), (x, 0.0, 0.22), iron, bevel=0.01)
+        cube((0.05, 0.05, 0.85), (x, 0.24, 0.43), iron, bevel=0.01)
+        cube((0.05, 0.42, 0.04), (x, 0.03, 0.44), iron)
+        cube((0.05, 0.36, 0.04), (x, 0.0, 0.62), iron)  # arm rest
+    write('bench')
+
+ambulance()
+airliner()
+jet()
+tank()
+ship()
+lamp()
+bench()
+
 tree('round', 7, 'round')
 tree('tall', 11, 'tall')
 tree('wide', 19, 'wide')

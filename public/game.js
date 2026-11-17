@@ -770,7 +770,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -796,9 +796,10 @@ async function loadModels() {
 const modelMats = new Map();
 function modelMesh(part, paint) {
   let m;
-  if (part.key === 'paint') m = carPaint(paint);
+  if (part.key === 'paint' || part.key === 'livery') m = paint === undefined ? surface({ color: part.hex, roughness: part.rough, metalness: part.metal }) : carPaint(paint);
   else if (part.key === 'glass') m = glassMat();
   else if (part.key === 'head') m = headMat;
+  else if (part.key === 'siren') m = mat(0xe5484d);
   else if (part.key === 'tail') m = tailMat;
   else if (part.key.startsWith('leaf')) m = lookMat(part.hex, 'leaf');
   else if (part.key === 'bark') m = lookMat(part.hex, 'wood');
@@ -808,6 +809,7 @@ function modelMesh(part, paint) {
   }
   const mesh = new THREE.Mesh(part.geo, m);
   mesh.castShadow = part.key !== 'head' && part.key !== 'tail';
+  mesh.userData.key = part.key;
   mesh.receiveShadow = true;
   return mesh;
 }
@@ -2805,6 +2807,19 @@ function spawnCrew() {
 // Decorative ambulance driving along the road
 let ambulance = null;
 function buildAmbulance(animate) {
+  const made = modelGroup('ambulance');
+  if (made) {
+    // The model faces +z; the ambulance drives along +x
+    made.rotation.y = Math.PI / 2;
+    made.scale.setScalar(0.9);
+    const g = new THREE.Group();
+    g.add(made);
+    g.position.set(-40, 0, ROAD_Z - 0.8);
+    scene.add(g);
+    ambulance = { g, light: made.children.find((m) => m.userData.key === 'siren') };
+    if (animate) popIn(g);
+    return;
+  }
   const g = new THREE.Group();
   const body = box(2.6, 1.3, 1.3, 0xffffff);
   body.position.y = 0.95;
@@ -7778,15 +7793,19 @@ function treeModel(kind = 'round') {
   return g;
 }
 function benchModel() {
+  const made = modelGroup('bench');
+  if (made) return made;
   const g = new THREE.Group();
   g.add(at3(box(1.3, 0.08, 0.42, 0xb5651d), 0, 0.45, 0), at3(box(1.3, 0.36, 0.08, 0xb5651d), 0, 0.68, -0.2));
   for (const x of [-0.55, 0.55]) g.add(at3(box(0.08, 0.45, 0.4, 0x444444), x, 0.22, 0));
   return g;
 }
 function lampModel() {
-  const g = new THREE.Group();
-  g.add(at3(cylM(0.06, 0.08, 2.6, 0x37474f, 8), 0, 1.3, 0));
-  g.add(at3(box(0.5, 0.08, 0.16, 0x37474f), 0.2, 2.6, 0));
+  const g = modelGroup('lamp') || new THREE.Group();
+  if (!g.children.length) {
+    g.add(at3(cylM(0.06, 0.08, 2.6, 0x37474f, 8), 0, 1.3, 0));
+    g.add(at3(box(0.5, 0.08, 0.16, 0x37474f), 0.2, 2.6, 0));
+  }
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), new THREE.MeshBasicMaterial({ toneMapped: false,  color: 0xfff3b0 }));
   g.add(at3(bulb, 0.4, 2.5, 0));
   lampGlow(g, 0.4, 2.5, 0);
@@ -8981,6 +9000,13 @@ function generalModel(branch) {
   return p;
 }
 function tankModel() {
+  if (MODELS.tank_hull && MODELS.tank_turret) {
+    const g = modelGroup('tank_hull');
+    const turret = modelGroup('tank_turret');
+    g.add(turret);
+    g.userData.turret = turret;
+    return g;
+  }
   const g = new THREE.Group();
   const hull = box(1.6, 0.6, 2.5, OLIVE);
   hull.position.y = 0.55;
@@ -9040,6 +9066,8 @@ function armoredModel() {
   return g;
 }
 function jetModel(color = 0x8d99ae) {
+  const made = modelGroup('jet', color);
+  if (made) return made;
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.36, 3.4, 10), mat(color));
   body.rotation.x = Math.PI / 2;
@@ -9072,6 +9100,8 @@ function jetModel(color = 0x8d99ae) {
   return g;
 }
 function shipModel() {
+  const made = modelGroup('ship');
+  if (made) return made;
   const g = new THREE.Group();
   const hull = box(1.5, 0.7, 4.6, 0x8d99ae);
   hull.position.y = 0.2;
@@ -11048,6 +11078,11 @@ const AIR = { built: false, tile: null, counters: {}, gates: {}, pax: [], spawnT
 
 // --- models ---
 function airlinerModel(color) {
+  const made = modelGroup('airliner', color);
+  if (made) {
+    made.rotation.order = 'YXZ';
+    return made;
+  }
   const g = new THREE.Group();
   g.rotation.order = 'YXZ';
   const body = cylM(1.0, 1.0, 10, 0xf7f7f2, 16);
@@ -13881,4 +13916,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { MODELS, startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { MODELS, modelGroup, tankModelX: () => tankModel(), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, collectors, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
