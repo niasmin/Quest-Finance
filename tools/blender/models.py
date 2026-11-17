@@ -427,6 +427,133 @@ def bench():
         cube((0.05, 0.36, 0.04), (x, 0.0, 0.62), iron)  # arm rest
     write('bench')
 
+# ---------------- rescue helicopter: body and rotor as two files, so the rotor can spin ----------------
+def helicopter():
+    begin()
+    white = mat('white', [0.86, 0.87, 0.88], rough=0.35, metal=0.15)
+    red = mat('stripe', [0.75, 0.03, 0.04], rough=0.4)
+    dark = mat('trim', [0.03, 0.03, 0.035], rough=0.6, metal=0.3)
+    glass = mat('glass', [0.05, 0.12, 0.18], rough=0.05, metal=0.7)
+    zc = 1.1
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.8, segments=20, ring_count=12, location=(0, 0, zc))
+    b = add(bpy.context.object, white)
+    b.scale = (0.95, 1.55, 0.92)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.62, segments=18, ring_count=10, location=(0, -0.75, zc + 0.12))
+    c = add(bpy.context.object, glass)
+    c.scale = (1.15, 1.1, 0.9)
+    cyl(0.82, 0.32, (0, 0.25, zc), red, rot=(math.pi / 2, 0, 0), verts=20)  # band round the cabin
+    cyl(0.2, 2.6, (0, 2.3, zc + 0.3), white, rot=(-math.pi / 2, 0, 0), verts=12, r2=0.09)  # tail boom
+    me = bpy.data.meshes.new('fin')
+    pts = [(3.2, zc + 0.25), (3.75, zc + 0.25), (3.95, zc + 1.0), (3.55, zc + 1.0)]
+    verts = [(-0.04, y, z) for y, z in pts] + [(0.04, y, z) for y, z in pts]
+    me.from_pydata(verts, [], [[3, 2, 1, 0], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]])
+    o = bpy.data.objects.new('fin', me)
+    bpy.context.scene.collection.objects.link(o)
+    add(o, red, smooth=False)
+    cyl(0.28, 0.04, (0.06, 3.55, zc + 0.45), dark, rot=(0, math.pi / 2, 0), verts=12)  # tail rotor disc
+    cube((0.7, 0.04, 0.1), (0, 3.6, zc + 0.3), white)  # stabiliser
+    cyl(0.08, 0.35, (0, 0, zc + 0.85), dark, verts=8)  # mast
+    cube((0.5, 0.7, 0.18), (0, 0.15, zc + 0.75), white, bevel=0.06)  # engine housing
+    for sx in (-1, 1):
+        cube((0.02, 0.36, 0.36), (sx * 0.77, 0.35, zc + 0.05), red)  # cross on each side
+        cube((0.02, 0.12, 0.36), (sx * 0.775, 0.35, zc + 0.05), white)
+        cube((0.02, 0.36, 0.12), (sx * 0.775, 0.35, zc + 0.05), white)
+        sk = cyl(0.05, 2.3, (sx * 0.65, 0.0, 0.08), dark, rot=(math.pi / 2, 0, 0), verts=8)
+        for y in (-0.5, 0.55):
+            leg = cyl(0.035, 0.55, (sx * 0.6, y, 0.33), dark, verts=6)
+            leg.rotation_euler.y = sx * 0.25
+    write('heli_body')
+    begin()
+    dark = mat('trim', [0.03, 0.03, 0.035], rough=0.5, metal=0.4)
+    cyl(0.14, 0.1, (0, 0, 0), dark, verts=12)
+    for a in (0, math.pi / 2, math.pi, 3 * math.pi / 2):
+        bl = cube((2.3, 0.2, 0.03), (math.cos(a) * 1.15, math.sin(a) * 1.15, 0), dark)
+        bl.rotation_euler.z = a
+        bl.rotation_euler.x = 0.06
+    write('heli_rotor')
+
+# ---------------- armoured car (front at -Y) ----------------
+def armored():
+    begin()
+    green = mat('green', [0.13, 0.16, 0.06], rough=0.75)
+    green2 = mat('green2', [0.09, 0.11, 0.04], rough=0.8)
+    tyre = mat('tyre', [0.02, 0.02, 0.022], rough=0.9)
+    hub = mat('hub', [0.12, 0.14, 0.06], rough=0.6)
+    glass = mat('glass', [0.03, 0.05, 0.08], rough=0.06, metal=0.8)
+    steel = mat('steel', [0.08, 0.09, 0.05], rough=0.6, metal=0.3)
+    head = mat('head', [1.0, 0.95, 0.82], emit=True)
+    body = cube((1.45, 2.6, 0.75), (0, 0, 0.85), green, bevel=0.06)
+    taper(body, 0.0, 0.9, 0.95)
+    nose = cube((1.36, 0.5, 0.5), (0, -1.5, 0.72), green, bevel=0.05)
+    taper(nose, 0.0, 1.0, 0.55)  # sloped front plate
+    cube((1.1, 0.04, 0.24), (0, -1.12, 1.1), glass)
+    cyl(0.3, 0.3, (0, 0.1, 1.38), green2, verts=12)  # small turret
+    cyl(0.045, 0.8, (0, -0.4, 1.42), steel, rot=(math.pi / 2, 0, 0), verts=8)
+    cyl(0.25, 0.12, (0, 1.36, 0.95), tyre, rot=(math.pi / 2, 0, 0), verts=14)  # spare wheel
+    for sx in (-1, 1):
+        cube((0.04, 0.5, 0.22), (sx * 0.7, -0.3, 1.0), glass)
+        cube((0.16, 0.06, 0.1), (sx * 0.5, -1.72, 0.74), head, bevel=0.02)
+        cube((0.1, 2.7, 0.06), (sx * 0.78, 0, 0.52), green2)  # side skirt
+    wheels(tyre, hub, (-0.74, 0.74), (-0.85, 0.0, 0.85), 0.33, 0.26)
+    write('armored')
+
+# ---------------- body parts for people, each centred where the game places it ----------------
+def person_parts():
+    begin()
+    torso = mat('torso', [0.6, 0.6, 0.6], rough=0.7)
+    leg = mat('leg', [0.3, 0.3, 0.3], rough=0.8)
+    arm = mat('arm', [0.6, 0.6, 0.6], rough=0.7)
+    shoe = mat('shoe', [0.05, 0.05, 0.05], rough=0.6)
+    hand = mat('hand', [0.8, 0.6, 0.45], rough=0.7)
+    # Torso: shoulders wider than the waist, rounded chest, a hint of collar
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1, segments=14, ring_count=9, location=(0, 0, 0))
+    t = add(bpy.context.object, torso)
+    # Half-width by height (sphere z from -1 to 1): hips, waist, chest, broad shoulders, then the neck
+    prof = [(-1.0, 0.2), (-0.7, 0.245), (-0.25, 0.225), (0.3, 0.26), (0.68, 0.29), (0.9, 0.2), (1.0, 0.1)]
+    def width(z):
+        for (z0, w0), (z1, w1) in zip(prof, prof[1:]):
+            if z <= z1:
+                return w0 + (w1 - w0) * (z - z0) / (z1 - z0)
+        return prof[-1][1]
+    for v in t.data.vertices:
+        z = v.co.z
+        r = math.hypot(v.co.x, v.co.y) or 1
+        # Re-shape each ring: width from the profile, depth a bit less, chest slightly forward
+        v.co.x = v.co.x / r * width(z) * (1 if abs(z) < 1 else 0)
+        v.co.y = v.co.y / r * width(z) * 0.78 - (0.02 if 0.1 < z < 0.7 else 0)
+        v.co.z = z * 0.42
+    t.location = (0, 0, 0)
+    cyl(0.1, 0.08, (0, 0, 0.4), torso, verts=10)  # collar
+    write('pp_torso')
+    begin()
+    leg = mat('leg', [0.3, 0.3, 0.3], rough=0.8)
+    cyl(0.095, 0.48, (0, 0, 0), leg, verts=10, r2=0.072)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.095, segments=10, ring_count=5, location=(0, 0, 0.24))
+    add(bpy.context.object, leg)
+    write('pp_leg')
+    begin()
+    arm = mat('arm', [0.6, 0.6, 0.6], rough=0.7)
+    cyl(0.072, 0.42, (0, 0, 0.0), arm, verts=8, r2=0.058)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.074, segments=8, ring_count=5, location=(0, 0, 0.21))
+    add(bpy.context.object, arm)
+    write('pp_arm')
+    begin()
+    shoe = mat('shoe', [0.05, 0.05, 0.05], rough=0.6)
+    s = cube((0.15, 0.27, 0.12), (0, -0.04, 0.0), shoe, bevel=0.04, seg=2)
+    taper(s, 0.0, 0.9, 0.75)
+    write('pp_shoe')
+    begin()
+    hand = mat('hand', [0.8, 0.6, 0.45], rough=0.7)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.07, segments=8, ring_count=6, location=(0, 0, 0))
+    h = add(bpy.context.object, hand)
+    h.scale = (0.8, 1.0, 1.2)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.028, segments=6, ring_count=4, location=(0, -0.055, 0.02))
+    add(bpy.context.object, hand)  # thumb
+    write('pp_hand')
+
+helicopter()
+armored()
+person_parts()
 ambulance()
 airliner()
 jet()
