@@ -770,7 +770,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -10688,8 +10688,12 @@ function hospitalFacade() {
   const g = new THREE.Group();
   g.add(aoDecal(22, 3, 0, -13.4), aoDecal(FLOOR.x1 - FLOOR.x0 + 0.6, FLOOR.z1 - FLOOR.z0 + 0.6, 0, (FLOOR.z0 + FLOOR.z1) / 2));
   // Canopy over the entrance and its two posts
-  g.add(at3(box(4.6, 0.22, 2.4, 0xffffff), 7.0, 2.9, 14.6), at3(box(4.7, 0.12, 2.5, 0xe5484d), 7.0, 3.06, 14.6));
-  for (const x of [5.0, 9.0]) g.add(at3(cylM(0.12, 0.12, 2.9, 0xdfe6ee, 10), x, 1.45, 15.6));
+  const canopy = modelGroup('entrance_canopy');
+  if (canopy) g.add(at3(canopy, 7.0, 0, 14.6));
+  else {
+    g.add(at3(box(4.6, 0.22, 2.4, 0xffffff), 7.0, 2.9, 14.6), at3(box(4.7, 0.12, 2.5, 0xe5484d), 7.0, 3.06, 14.6));
+    for (const x of [5.0, 9.0]) g.add(at3(cylM(0.12, 0.12, 2.9, 0xdfe6ee, 10), x, 1.45, 15.6));
+  }
   // Planters with shrubs along the front wall, flags by the path
   for (let x = -8; x <= 3; x += 2.2) {
     const p = new THREE.Group();
@@ -10701,10 +10705,14 @@ function hospitalFacade() {
     g.add(at3(cylM(0.05, 0.05, 4, 0xdfe6ee, 8), x, 2, 15.2), at3(box(0.8, 0.5, 0.02, col, { shadow: false }), x + 0.42, 3.6, 15.2));
   }
   // The main block behind: frames round the windows, a name band and rooftop plant
-  for (let i = 0; i < 6; i++) {
-    for (let r = 0; r < 2; r++) g.add(at3(box(1.8, 0.12, 0.2, 0xdfe6ee), -8.5 + i * 3.4, 1.7 + r * 2.6, -11.8));
+  const front = modelGroup('hospital_front');
+  if (front) g.add(at3(front, 0, 0, -13.4)); // stone base, pilasters, sills, lintels and cornice from Blender
+  else {
+    for (let i = 0; i < 6; i++) {
+      for (let r = 0; r < 2; r++) g.add(at3(box(1.8, 0.12, 0.2, 0xdfe6ee), -8.5 + i * 3.4, 1.7 + r * 2.6, -11.8));
+    }
+    for (let i = 0; i < 7; i++) g.add(at3(box(0.3, 7, 0.2, 0xeceff1), -10.2 + i * 3.4, 3.5, -11.85));
   }
-  for (let i = 0; i < 7; i++) g.add(at3(box(0.3, 7, 0.2, 0xeceff1), -10.2 + i * 3.4, 3.5, -11.85));
   g.add(at3(signBoard('Dr. Quest Hospital · โรงพยาบาลดร.เควสต์', '#e5484d', 8, 0.7), 0, 6.3, -11.78));
   const top = new THREE.Group();
   roofDetails(top, 0, 22, 3, 7.5, 0);

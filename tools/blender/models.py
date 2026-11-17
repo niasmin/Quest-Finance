@@ -551,6 +551,54 @@ def person_parts():
     add(bpy.context.object, hand)  # thumb
     write('pp_hand')
 
+# ---------------- the hospital's front: trim that sits on the plain block (origin = block centre at ground) ----------------
+def hospital_front():
+    begin()
+    trim = mat('trim', [0.86, 0.85, 0.81], rough=0.6)
+    stone = mat('stone', [0.5, 0.48, 0.45], rough=0.75)
+    fy = -1.5  # the block's front face
+    cube((22.25, 0.16, 0.55), (0, fy - 0.07, 0.275), stone, bevel=0.03, seg=1)  # plinth
+    cube((22.15, 0.12, 0.16), (0, fy - 0.05, 3.7), trim, bevel=0.02, seg=1)  # band between storeys
+    cube((22.35, 0.2, 0.12), (0, fy - 0.09, 6.74), trim, bevel=0.02, seg=1)  # cornice, two steps
+    cube((22.5, 0.3, 0.09), (0, fy - 0.14, 6.86), trim, bevel=0.02, seg=1)
+    for sx in (-1, 1):  # the cornice and plinth turn the corners
+        cube((0.2, 3.0, 0.12), (sx * 11.09, 0, 6.74), trim, bevel=0.02, seg=1)
+        cube((0.16, 3.0, 0.55), (sx * 11.06, 0, 0.275), stone, bevel=0.03, seg=1)
+    for i in range(7):
+        x = -10.2 + i * 3.4
+        cube((0.36, 0.14, 6.2), (x, fy - 0.06, 3.65), trim, bevel=0.03, seg=1)  # pilaster
+        cube((0.5, 0.2, 0.32), (x, fy - 0.09, 0.71), stone, bevel=0.03, seg=1)  # base
+        cube((0.52, 0.22, 0.2), (x, fy - 0.1, 6.55), trim, bevel=0.03, seg=1)  # capital
+    for i in range(6):
+        x = -8.5 + i * 3.4
+        for zc in (2.4, 5.0):
+            cube((1.95, 0.24, 0.1), (x, fy - 0.1, zc - 0.72), trim, bevel=0.02, seg=1)  # sill
+            cube((1.9, 0.14, 0.16), (x, fy - 0.06, zc + 0.76), trim, bevel=0.02, seg=1)  # lintel
+            cube((0.24, 0.18, 0.28), (x, fy - 0.08, zc + 0.78), stone, bevel=0.02, seg=1)  # keystone
+            for sx in (-1, 1):
+                cube((0.1, 0.1, 1.34), (x + sx * 0.86, fy - 0.04, zc), trim)  # reveal
+    write('hospital_front')
+
+# ---------------- entrance canopy (origin = canopy centre at ground) ----------------
+def entrance_canopy():
+    begin()
+    white = mat('white', [0.86, 0.87, 0.88], rough=0.4, metal=0.1)
+    red = mat('fascia', [0.75, 0.04, 0.05], rough=0.4)
+    glass = mat('glass', [0.25, 0.45, 0.55], rough=0.05, metal=0.5)
+    steel = mat('steel', [0.6, 0.62, 0.65], rough=0.3, metal=0.9)
+    slab_ = cube((4.7, 2.5, 0.2), (0, 0, 2.95), white, bevel=0.06, seg=2)
+    cube((4.8, 0.14, 0.3), (0, -1.28, 3.02), red, bevel=0.03)  # front fascia
+    for sx in (-1, 1):
+        cube((0.14, 2.6, 0.3), (sx * 2.38, 0, 3.02), red, bevel=0.03)
+    cube((4.2, 2.0, 0.04), (0, 0.05, 3.08), glass)  # glass roof light
+    for sx in (-1, 1):
+        cyl(0.13, 2.8, (sx * 2.0, -1.0, 1.4), steel, verts=14)
+        cyl(0.22, 0.2, (sx * 2.0, -1.0, 0.1), white, verts=14)
+        cyl(0.18, 0.12, (sx * 2.0, -1.0, 2.82), white, verts=14)
+    write('entrance_canopy')
+
+hospital_front()
+entrance_canopy()
 helicopter()
 armored()
 person_parts()
