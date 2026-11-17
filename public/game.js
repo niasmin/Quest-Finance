@@ -770,7 +770,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -7882,8 +7882,12 @@ function campusProp(name, w = 2) {
   switch (name) {
     case 'lamp': return lampModel();
     case 'busstop': {
-      g.add(at3(box(2, 0.1, 0.9, 0x1d4ed8), 0, 2.1, 0), at3(box(1.9, 1.6, 0.06, 0xbfdbfe, { shadow: false }), 0, 1.15, -0.4));
-      for (const x of [-0.9, 0.9]) g.add(at3(box(0.08, 2.1, 0.08, 0x37474f), x, 1.05, -0.4));
+      const shelter = modelGroup('bus_shelter');
+      if (shelter) g.add(shelter);
+      else {
+        g.add(at3(box(2, 0.1, 0.9, 0x1d4ed8), 0, 2.1, 0), at3(box(1.9, 1.6, 0.06, 0xbfdbfe, { shadow: false }), 0, 1.15, -0.4));
+        for (const x of [-0.9, 0.9]) g.add(at3(box(0.08, 2.1, 0.08, 0x37474f), x, 1.05, -0.4));
+      }
       g.add(at3(benchModel(), 0, 0, -0.1));
       g.add(at3(signBoard('🚌 ป้ายรถเมล์', '#1d4ed8', 1.4, 0.35), 0, 2.4, 0));
       return g;
@@ -7953,14 +7957,14 @@ function campusProp(name, w = 2) {
       g.add(at3(awning, 0, 1.75, 1.5), at3(box(1.6, 0.9, 0.05, 0x9fd8ff, { shadow: false }), -0.6, 1.0, 1.22), at3(box(0.7, 1.4, 0.05, 0x6d4c41, { shadow: false }), 1.1, 0.7, 1.22));
       g.add(at3(signBoard(label, '#5d4037', 2.2, 0.45), 0, 2.15, 1.23));
       g.add(aoDecal(3.4, 2.4));
-      return detailWalls(g, name === 'cafe' ? 'brick' : 'siding');
+      return trimWalls(detailWalls(g, name === 'cafe' ? 'brick' : 'siding'));
     }
     default: { // houses
       const col = pick([0xfad7a0, 0xd6eaf8, 0xfadbd8, 0xd5f5e3]);
       g.add(at3(box(3, 2, 2.4, col), 0, 1, 0), at3(hipRoof(3, 2.4, 1.2, pick([0xc0392b, 0x7d3c98, 0x2874a6])), 0, 2.6, 0));
       g.add(at3(box(0.7, 1.3, 0.05, 0x6d4c41, { shadow: false }), 0.7, 0.65, 1.22), at3(box(0.8, 0.6, 0.05, 0x9fd8ff, { shadow: false }), -0.7, 1.2, 1.22));
       g.add(aoDecal(3, 2.4));
-      return detailWalls(g, 'siding');
+      return trimWalls(detailWalls(g, 'siding'));
     }
   }
 }
@@ -11416,6 +11420,14 @@ function buildGate(G) {
   AIR.piles[G.id] = AIR.piles[G.id] || new MoneyPile(v(G.x + 4.6, -13.6));
 }
 function buildTower() {
+  const made = modelGroup('control_tower');
+  if (made) {
+    made.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), LIT.red), 0.6, 13.35, 0.3)); // aircraft warning light
+    made.position.set(500, 0, -10);
+    scene.add(made);
+    addCollider(500, -10, 4, 3);
+    return;
+  }
   const g = new THREE.Group();
   g.add(at3(cylM(0.8, 1.1, 9, 0xeceff1, 14), 0, 4.5, 0), at3(cylM(1.8, 1.4, 1.6, 0x4fc3f7, 14), 0, 9.6, 0), at3(cylM(1.9, 1.9, 0.3, 0x37474f, 14), 0, 10.5, 0));
   g.children[0].material = lookMat(0xeceff1, 'block');
