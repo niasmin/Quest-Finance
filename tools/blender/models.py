@@ -86,7 +86,27 @@ def write(name):
         s.update({'pos': g['pos'], 'nor': g['nor'], 'idx': g['idx']})
         parts.append(s)
     tris = sum(len(p['idx']) // 3 for p in parts)
-    with open(os.path.join(OUT, name + '.json'), 'w') as f:
+    path = os.path.join(OUT, name + '.json')
+    # Blender can list vertices in a different order from run to run; leave the file alone when the
+    # shape itself is the same, so regenerating the set doesn't rewrite every model
+    def shape(ps):
+        out = {}
+        for p in ps:
+            pos = p['pos']
+            tri = []
+            for t in range(0, len(p['idx']), 3):
+                tri.append(tuple(sorted(tuple(pos[i * 3:i * 3 + 3]) for i in p['idx'][t:t + 3])))
+            out[p['key']] = (sorted(tri), p.get('color'), p.get('rough'), p.get('metal'), p.get('emit'))
+        return out
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                if shape(json.load(f)['parts']) == shape(parts):
+                    print(name, 'unchanged')
+                    return
+        except Exception:
+            pass
+    with open(path, 'w') as f:
         json.dump({'parts': parts}, f, separators=(',', ':'))
     print(name, 'tris', tris, 'bytes', os.path.getsize(os.path.join(OUT, name + '.json')))
 
@@ -671,6 +691,103 @@ def control_tower():
 
 bus_shelter()
 control_tower()
+
+def lower_half_off(o, z=0.0):
+    """Delete every vertex below height z (in world space, after applying transforms)."""
+    bpy.context.view_layer.objects.active = o
+    o.select_set(True)
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z + o.location.z < z - 1e-4], context='VERTS')
+    bm.to_mesh(o.data)
+    bm.free()
+    o.select_set(False)
+    return o
+
+# ---------------- arched hangar for the base, 6 wide and 5 deep (front at -Y) ----------------
+def base_hangar():
+    begin()
+    paint = mat('paint', [0.4, 0.45, 0.5], rough=0.45, metal=0.5)
+    rib = mat('rib', [0.2, 0.24, 0.27], rough=0.5, metal=0.5)
+    door = mat('door', [0.2, 0.25, 0.27], rough=0.6, metal=0.3)
+    yellow = mat('yellow', [0.95, 0.7, 0.1], rough=0.5)
+    dark = mat('trim', [0.03, 0.03, 0.035], rough=0.6)
+    concrete = mat('concrete', [0.55, 0.55, 0.53], rough=0.85)
+    glass = mat('glass', [0.05, 0.12, 0.18], rough=0.05, metal=0.7)
+    shell = cyl(3.0, 5.0, (0, 0, 0), paint, rot=(math.pi / 2, 0, 0), verts=28)
+    lower_half_off(shell)
+    bm = bmesh.new()  # keep only the curved skin (drop the half end caps), then give it thickness
+    bm.from_mesh(shell.data)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if abs(f.normal.y) > 0.9], context='FACES')
+    bm.to_mesh(shell.data)
+    bm.free()
+    sol = shell.modifiers.new('thick', 'SOLIDIFY')
+    sol.thickness = 0.06
+    for k in range(6):
+        bpy.ops.mesh.primitive_torus_add(major_radius=3.03, minor_radius=0.07, major_segments=28, minor_segments=6, location=(0, -2.4 + k * 0.96, 0), rotation=(math.pi / 2, 0, 0))
+        r = add(bpy.context.object, rib)
+        lower_half_off(r)
+    back = cyl(2.98, 0.06, (0, 2.45, 0), paint, rot=(math.pi / 2, 0, 0), verts=28)
+    lower_half_off(back)
+    frame = cyl(2.98, 0.08, (0, -2.47, 0), rib, rot=(math.pi / 2, 0, 0), verts=28)
+    lower_half_off(frame)
+    for sx in (-1, 1):
+        cube((2.3, 0.08, 2.4), (sx * 1.18, -2.53, 1.2), door, bevel=0.02, seg=1)  # sliding doors
+        for k in range(6):
+            cube((0.05, 0.02, 2.3), (sx * (0.25 + k * 0.38), -2.58, 1.2), dark)  # door ribs
+        for k in range(3):
+            cube((2.3, 0.02, 0.14), (sx * 1.18, -2.59, 0.2 + k * 0.3), yellow if k % 2 == 0 else dark)
+        cube((0.03, 3.6, 0.35), (sx * 2.2, 0, 1.9), glass)  # roof lights along the sides
+    cube((0.3, 0.06, 2.5), (0, -2.6, 1.25), yellow)  # centre post between the doors
+    cube((6.6, 1.2, 0.08), (0, -3.1, 0.04), concrete, bevel=0.02, seg=1)  # apron slab
+    write('hangar')
+
+# ---------------- Thai temple for the town strip, 4.4 wide (front at -Y) ----------------
+def temple():
+    begin()
+    base = mat('base', [0.85, 0.84, 0.8], rough=0.7)
+    wall = mat('wall', [0.92, 0.85, 0.7], rough=0.7)
+    white = mat('white', [0.9, 0.9, 0.88], rough=0.6)
+    roof = mat('roof', [0.62, 0.17, 0.02], rough=0.55)
+    green = mat('green', [0.05, 0.3, 0.12], rough=0.55)
+    gold = mat('gold', [0.85, 0.6, 0.12], rough=0.3, metal=0.8)
+    cube((4.6, 3.2, 0.3), (0, 0, 0.15), base, bevel=0.03, seg=1)
+    cube((4.3, 2.9, 0.15), (0, 0, 0.37), base, bevel=0.02, seg=1)
+    for k in range(3):  # front steps
+        cube((1.4, 0.3, 0.12), (0, -1.6 - k * 0.22, 0.32 - k * 0.11), base)
+    cube((3.4, 2.2, 1.7), (0, 0.1, 1.3), wall, bevel=0.03, seg=1)
+    for x in (-1.6, -0.95, 0.95, 1.6):  # columns along the front porch
+        cyl(0.11, 1.9, (x, -1.25, 1.39), white, verts=12)
+        cube((0.3, 0.3, 0.1), (x, -1.25, 2.38), gold)
+    cube((0.8, 0.05, 1.3), (0, -1.0, 1.1), gold, bevel=0.01, seg=1)  # doors
+    for x in (-1.15, 1.15):
+        cube((0.5, 0.05, 0.7), (x, -1.0, 1.35), gold)  # windows
+    def tier(w, d, h, z, mroof):
+        ang = math.atan2(h, d / 2)
+        slope = math.hypot(d / 2, h)
+        for sy in (-1, 1):
+            sl = cube((w, slope + 0.2, 0.1), (0, sy * d / 4, z + h / 2), mroof)
+            sl.rotation_euler.x = sy * ang
+        cube((w + 0.1, 0.16, 0.12), (0, 0, z + h + 0.04), gold)  # ridge
+        for sx in (-1, 1):
+            me = bpy.data.meshes.new('gable')
+            pts = [(-d / 2, z), (d / 2, z), (0, z + h)]
+            x = sx * w / 2
+            verts = [(x - 0.03, y, zz) for y, zz in pts] + [(x + 0.03, y, zz) for y, zz in pts]
+            me.from_pydata(verts, [], [[2, 1, 0], [3, 4, 5], [0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5]])
+            o = bpy.data.objects.new('gable', me)
+            bpy.context.scene.collection.objects.link(o)
+            add(o, gold, smooth=False)
+            ch = cyl(0.05, 0.55, (x + sx * 0.12, 0, z + h + 0.22), gold, verts=6, r2=0.01)  # chofa finial
+            ch.rotation_euler.y = sx * 0.6
+    tier(4.0, 3.0, 1.0, 2.2, roof)
+    tier(3.2, 2.3, 0.8, 2.85, green)
+    tier(2.2, 1.6, 0.6, 3.4, roof)
+    write('temple')
+
+base_hangar()
+temple()
 
 helicopter()
 armored()
