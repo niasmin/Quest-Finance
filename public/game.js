@@ -769,7 +769,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -9168,7 +9168,7 @@ function militaryPower() {
 }
 const recruitCost = () => Math.round((20000 * 1.5 ** Math.min(B().recruits, 30)) / 100) * 100;
 
-const BASE = { built: false, tile: null, stations: {}, unitMeshes: { inf: [], arm: [], tank: [], ship: [], jet: [] }, generals: [], pile: null, budgetT: 0, stand: 0, opened: false, flight: null, drones: [], defense: null, mission: null, missionTimer: 60, raidTimer: rand(360, 540), shots: [] };
+const BASE = { built: false, tile: null, stations: {}, unitMeshes: { inf: [], arm: [], tank: [], ship: [], jet: [] }, generals: [], pile: null, budgetT: 0, stand: 0, opened: false, flight: null, drones: [], defense: null, mission: null, missionTimer: 60, raidTimer: rand(360, 540), shots: [], buoys: [], guards: [], boat: null, heli: null, sortie: null, sortieT: 12, heliT: 20, heliFly: null, ex: null };
 
 // --- models ---
 const OLIVE = 0x556b2f;
@@ -9178,6 +9178,12 @@ function soldierModel(branch = 'army') {
   const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(branch === 'army' ? 0x4b5320 : branch === 'navy' ? 0xffffff : 0x3d5a80));
   helmet.position.y = 1.55;
   p.body.add(helmet);
+  // A pack and a rifle slung across the back
+  const kit = branch === 'army' ? 0x3b4a22 : branch === 'navy' ? 0x37474f : 0x2f3e55;
+  const rifle = box(0.06, 0.95, 0.07, 0x1d2226, { shadow: false });
+  rifle.position.set(0, 1.05, -0.33);
+  rifle.rotation.z = 0.75;
+  p.body.add(at3(box(0.42, 0.46, 0.2, kit), 0, 1.05, -0.27), rifle);
   return p;
 }
 function generalModel(branch) {
@@ -9444,19 +9450,86 @@ function flagPole(x, z) {
   scene.add(pole, flag);
   decorAnims.push((t) => { flag.rotation.y = Math.sin(t * 2) * 0.15; });
 }
+// Places a Blender base building (front facing +z) with a soft ground shadow and a collider; null when the model is missing
+function baseModel(name, x, z, w, d, paint) {
+  const made = modelGroup(name, paint);
+  if (!made) return null;
+  made.add(aoDecal(w, d));
+  made.position.set(x, 0, z);
+  scene.add(made);
+  addCollider(x, z, w, d);
+  return made;
+}
+// The navy basin: deep water with drifting ripples inside a concrete quay wall
+const HARBOUR = { x: 4, z: -45, w: 14, d: 10 };
+function harbourWater() {
+  const { x, z, w, d } = HARBOUR;
+  const g = new THREE.Group();
+  const deep = new THREE.Mesh(new THREE.PlaneGeometry(w, d), surface({ color: 0x1f6fae, roughness: 0.12, metalness: 0.35 }));
+  deep.rotation.x = -Math.PI / 2;
+  deep.receiveShadow = true;
+  g.add(at3(deep, 0, 0.03, 0));
+  if (!LITE) {
+    for (const [c, o, r, y] of [[0xffffff, 0.42, 1, 0.04], [0xd6f1ff, 0.3, 1.7, 0.045]]) {
+      const tex = rippleTex(r);
+      tex.repeat.set((w / 6) * r, (d / 6) * r);
+      const layer = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: c, map: tex, transparent: true, opacity: o, roughness: 0.12, metalness: 0.35, depthWrite: false }));
+      layer.rotation.x = -Math.PI / 2;
+      g.add(at3(layer, 0, y, 0));
+      LOOK.water.push(tex);
+    }
+  }
+  // Quay walls with a yellow safety edge, and tyre fenders along the inside
+  for (const [qw, qd, qx, qz] of [[w + 1, 0.5, 0, -d / 2 - 0.25], [0.5, d, -w / 2 - 0.25, 0], [0.5, d, w / 2 + 0.25, 0]]) {
+    g.add(at3(box(qw, 0.35, qd, 0xb8b5ac), qx, 0.17, qz));
+    g.add(at3(box(qw, 0.02, qd, 0xffd166, { shadow: false }), qx, 0.355, qz));
+  }
+  for (let k = -2; k <= 2; k++) g.add(at3(cylM(0.16, 0.16, 0.14, 0x16181d, 10).rotateX(Math.PI / 2), k * 2.6, 0.18, -d / 2 + 0.05));
+  // Channel buoys, red to port and green to starboard
+  for (const [bx, c] of [[-w / 2 + 1, 0xe5484d], [w / 2 - 1, 0x3fbf5f]]) {
+    const buoy = new THREE.Group();
+    buoy.add(at3(cylM(0.18, 0.26, 0.5, c, 10), 0, 0.2, 0), at3(cylM(0.02, 0.02, 0.5, 0x37474f, 4), 0, 0.65, 0), at3(new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), c === 0xe5484d ? LIT.red : LIT.green), 0, 0.92, 0));
+    g.add(at3(buoy, bx, 0, -d / 2 + 1));
+    BASE.buoys.push(buoy);
+  }
+  g.position.set(x, 0, z);
+  scene.add(g);
+}
 const BASE_BUILD = {
   hq() {
-    buildingBox(31, -33.5, 9, 3.2, 5, 0xf3ead8, 0x3a4520);
+    if (!baseModel('mil_hq', 31, -34.3, 9, 5)) buildingBox(31, -33.5, 9, 3.2, 5, 0xf3ead8, 0x3a4520);
     flagPole(24.6, -36.5);
+    // Flower beds and a pair of guards either side of the steps
+    for (const sx of [-1, 1]) {
+      scene.add(at3(box(2.2, 0.3, 0.7, 0x8d6e63), 31 + sx * 3, 0.15, -31.2), at3(box(2.0, 0.12, 0.5, 0x43a047), 31 + sx * 3, 0.36, -31.2));
+      const guard = soldierModel('army');
+      guard.group.position.set(31 + sx * 1.9, 0, -30.6);
+      scene.add(guard.group);
+      BASE.guards.push(guard);
+    }
     BASE.pile = BASE.pile || new MoneyPile(v(22.6, -35.4));
+    // An army helicopter waits on the helipad
+    BASE.heli = helicopterModel();
+    // Repaint the hospital helicopter's white and red in olive drab
+    const drab = { white: mat(0x556b2f), stripe: mat(0x2f3e1f) };
+    BASE.heli.traverse((o) => { if (o.isMesh && drab[o.userData.key]) o.material = drab[o.userData.key]; });
+    BASE.heli.position.set(HELIPAD.x, 0, HELIPAD.z);
+    scene.add(BASE.heli);
   },
   barracks() {
-    buildingBox(30.5, -42.5, 8, 2.4, 5, 0xc9c19a, 0x4b5320);
-    // Parade ground beside it
-    const pg = new THREE.Mesh(new THREE.PlaneGeometry(10, 8), mat(0x8d99ae));
+    if (!baseModel('mil_barracks', 30.5, -42.5, 8, 5)) buildingBox(30.5, -42.5, 8, 2.4, 5, 0xc9c19a, 0x4b5320);
+    // Parade ground beside it, with a reviewing stand on the east side
+    const pg = new THREE.Mesh(new THREE.PlaneGeometry(10, 8), lookMat(0x8d99ae, 'block'));
     pg.rotation.x = -Math.PI / 2;
     pg.position.set(41, 0.02, -41.5);
+    pg.receiveShadow = true;
     scene.add(pg);
+    const stand = new THREE.Group();
+    stand.add(at3(box(1.2, 0.5, 3.2, 0xd7ccc8), 0, 0.25, 0), at3(box(1.3, 0.08, 3.4, 0x3a4520), 0, 2.2, 0));
+    for (const sz of [-1.5, 1.5]) stand.add(at3(box(0.08, 1.7, 0.08, 0xd7ccc8), 0.5, 1.35, sz));
+    for (const [c, k] of [[0xe5484d, -1], [0xffffff, 0], [0x1d3a8a, 1]]) stand.add(at3(box(0.04, 0.24, 3.2, c, { shadow: false }), -0.62, 0.38 + k * 0.08, 0));
+    stand.position.set(46.6, 0, -41.5);
+    scene.add(stand);
   },
   housing() {
     for (const [x, z] of [[6, -32.5], [11, -32.5], [6, -37], [11, -37]]) {
@@ -9467,49 +9540,103 @@ const BASE_BUILD = {
     }
   },
   armored() {
-    buildingBox(30.5, -51.5, 7, 2.6, 5, 0x8d99ae, 0x3a4520);
+    if (!baseModel('mil_depot', 30.5, -51.5, 7, 5)) buildingBox(30.5, -51.5, 7, 2.6, 5, 0x8d99ae, 0x3a4520);
+    // A wash bay and fuel pump in front of the doors
+    scene.add(at3(box(1.2, 1.4, 0.6, 0xe5484d), 35.4, 0.7, -49.4), at3(box(0.8, 0.3, 0.05, 0x22303f, { shadow: false }), 35.4, 1.1, -49.08));
   },
   tanks() {
-    const g = new THREE.Group();
-    const roof = box(8, 0.2, 5, 0x3a4520);
-    roof.position.y = 3;
-    g.add(roof);
-    for (const [x, z] of [[-3.8, -2.3], [3.8, -2.3], [-3.8, 2.3], [3.8, 2.3]]) {
-      const p = box(0.25, 3, 0.25, 0x6b7a3a);
-      p.position.set(x, 1.5, z);
-      g.add(p);
+    if (!baseModel('mil_shed', 30.5, -59.5, 8, 5)) {
+      const g = new THREE.Group();
+      const roof = box(8, 0.2, 5, 0x3a4520);
+      roof.position.y = 3;
+      g.add(roof);
+      for (const [x, z] of [[-3.8, -2.3], [3.8, -2.3], [-3.8, 2.3], [3.8, 2.3]]) {
+        const p = box(0.25, 3, 0.25, 0x6b7a3a);
+        p.position.set(x, 1.5, z);
+        g.add(p);
+      }
+      g.position.set(30.5, 0, -59.5);
+      scene.add(g);
     }
-    g.position.set(30.5, 0, -59.5);
-    scene.add(g);
+    // Two tanks under the shed roof for repairs, and a firing range beyond the north fence
+    for (const x of [28.5, 32.5]) {
+      const t = tankModel();
+      t.position.set(x, 0, -59.8);
+      scene.add(t);
+    }
+    buildRange();
   },
   navy() {
-    const water = new THREE.Mesh(new THREE.PlaneGeometry(13, 8), surface({ color: 0x2f7ec2 }));
-    water.rotation.x = -Math.PI / 2;
-    water.position.set(4, 0.03, -44);
-    const pier = box(13, 0.3, 1, 0xa0703c);
-    pier.position.set(4, 0.15, -39.5);
-    scene.add(water, pier);
-    addCollider(4, -44.5, 13, 7);
-    buildingBox(-8.5, -40.5, 4, 2.4, 3, 0xffffff, 0x1d3a8a);
+    harbourWater();
+    addCollider(HARBOUR.x, HARBOUR.z - 0.5, HARBOUR.w, HARBOUR.d - 1);
+    const pier = modelGroup('navy_pier');
+    if (pier) {
+      pier.rotation.y = Math.PI; // bollards on the water side
+      pier.position.set(4, 0, -39.5);
+      scene.add(pier);
+    } else {
+      const p = box(13, 0.3, 1, 0xa0703c);
+      p.position.set(4, 0.15, -39.5);
+      scene.add(p);
+    }
+    if (!baseModel('navy_hq', -8.5, -40.5, 4, 3)) buildingBox(-8.5, -40.5, 4, 2.4, 3, 0xffffff, 0x1d3a8a);
+    // A patrol boat that circles the basin
+    BASE.boat = patrolBoat();
+    scene.add(BASE.boat);
   },
   airforce() {
-    const runway = new THREE.Mesh(new THREE.PlaneGeometry(26, 3.2), mat(0x3d4552));
+    const runway = new THREE.Mesh(new THREE.PlaneGeometry(28, 3.6), lookMat(0x3d4552, 'block'));
     runway.rotation.x = -Math.PI / 2;
     runway.position.set(2, 0.025, -56.5);
+    runway.receiveShadow = true;
     scene.add(runway);
-    for (let x = -10; x < 14; x += 2.5) {
-      const d = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.2), mat(0xffffff));
-      d.rotation.x = -Math.PI / 2;
-      d.position.set(x, 0.03, -56.5);
-      scene.add(d);
-    }
+    const marks = new THREE.Group();
+    for (let x = -8; x < 12; x += 2.5) marks.add(flatPlane(1.2, 0.16, 0xffffff, x, 0.03, -56.5));
+    for (const sz of [-1, 1]) marks.add(flatPlane(28, 0.08, 0xffffff, 2, 0.031, -56.5 + sz * 1.6));
+    // Piano-key thresholds at both ends
+    for (const ex of [-11.3, 15.3]) for (let k = -3; k <= 3; k++) marks.add(flatPlane(1.4, 0.22, 0xffffff, ex, 0.031, -56.5 + k * 0.42));
+    // Edge lights that glow at night
+    const edge = new THREE.MeshStandardMaterial({ color: 0xfff3c4, emissive: 0xffe08a, emissiveIntensity: 0 });
+    CITY_GLOW.push(edge);
+    const bulb = new THREE.SphereGeometry(0.07, 6, 5);
+    for (let x = -11.5; x <= 15.5; x += 2.25) for (const sz of [-1, 1]) marks.add(at3(new THREE.Mesh(bulb, edge), x, 0.08, -56.5 + sz * 1.95));
+    scene.add(marks);
     hangar(-6, -61.5, 6, 5, 0x8d99ae);
-    const tower = box(1.4, 4.5, 1.4, 0xf3ead8);
-    tower.position.set(-10.5, 2.25, -51.5);
-    const cab = box(2, 1, 2, 0x7fc8f8);
-    cab.position.set(-10.5, 5, -51.5);
-    scene.add(tower, cab);
-    addCollider(-10.5, -51.5, 1.4, 1.4);
+    const tower = modelGroup('control_tower');
+    if (tower) {
+      tower.scale.setScalar(0.5);
+      tower.position.set(-10.5, 0, -51.5);
+      tower.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), LIT.red), 0.6, 13.35, 0.3));
+      scene.add(tower);
+    } else {
+      const t = box(1.4, 4.5, 1.4, 0xf3ead8);
+      t.position.set(-10.5, 2.25, -51.5);
+      const cab = box(2, 1, 2, 0x7fc8f8);
+      cab.position.set(-10.5, 5, -51.5);
+      scene.add(t, cab);
+    }
+    addCollider(-10.5, -51.5, 2, 2);
+    // A radar dome with a spinning dish on the far side of the runway, and a windsock
+    const dome = modelGroup('radar_dome');
+    if (dome) {
+      dome.position.set(-11, 0, -63.5);
+      dome.scale.setScalar(0.8);
+      scene.add(dome);
+      addCollider(-11, -63.5, 2.6, 2.6);
+    }
+    const dish = new THREE.Group();
+    dish.add(at3(cylM(0.05, 0.05, 1.2, 0x546e7a, 6), 0, 0.6, 0), at3(box(2.0, 0.6, 0.08, 0xeceff1), 0, 1.3, 0));
+    dish.position.set(-7.6, 0, -52);
+    scene.add(dish);
+    BASE.dish = dish;
+    const sock = new THREE.Group();
+    sock.add(at3(cylM(0.04, 0.04, 2.4, 0xeceff1, 6), 0, 1.2, 0));
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.22, 0.9, 10, 1, true).rotateZ(Math.PI / 2), mat(0xff7f2a));
+    cone.material.side = THREE.DoubleSide;
+    sock.add(at3(cone, 0.45, 2.3, 0));
+    sock.position.set(15.6, 0, -54.2);
+    scene.add(sock);
+    BASE.sock = sock;
   },
   privatejet() {
     hangar(9, -62, 6, 5, 0xffd166);
@@ -9518,14 +9645,51 @@ const BASE_BUILD = {
     scene.add(BASE.myJet);
   },
 };
-// Where each unit type parks or stands
+// A small grey patrol boat with a cabin, a gun and a white wake behind it
+function patrolBoat() {
+  const g = new THREE.Group();
+  g.add(at3(box(0.9, 0.35, 2.4, 0x8d99ae), 0, 0.15, 0), at3(new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.8, 4).rotateX(Math.PI / 2).rotateZ(Math.PI / 4), mat(0x8d99ae)), 0, 0.15, 1.6));
+  g.add(at3(box(0.7, 0.45, 0.8, 0xdfe6ee), 0, 0.55, -0.2), at3(box(0.72, 0.14, 0.82, 0x22303f, { shadow: false }), 0, 0.66, -0.2), at3(cylM(0.03, 0.03, 0.5, 0x2b2d42, 5).rotateX(Math.PI / 2), 0, 0.45, 0.9));
+  const wake = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 3.2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false }));
+  wake.rotation.x = -Math.PI / 2;
+  g.add(at3(wake, 0, 0.05, -2.6));
+  return g;
+}
+// Targets for the tanks beyond the north fence: earth berms, wooden frames with a red-and-white bullseye
+const RANGE_Z = -72;
+function buildRange() {
+  const g = new THREE.Group();
+  g.add(at3(box(16, 1.2, 1.6, 0x8d7a55), 40, 0.6, RANGE_Z - 1.6));
+  const face = signTexture((c) => {
+    for (let r = 5; r > 0; r--) {
+      c.fillStyle = r % 2 ? '#e5484d' : '#ffffff';
+      c.beginPath();
+      c.arc(64, 64, r * 12, 0, Math.PI * 2);
+      c.fill();
+    }
+  });
+  BASE.targets = [];
+  for (let k = 0; k < 5; k++) {
+    const t = new THREE.Group();
+    t.add(at3(box(0.1, 1.6, 0.1, 0x6d4c41), -0.6, 0.8, 0), at3(box(0.1, 1.6, 0.1, 0x6d4c41), 0.6, 0.8, 0));
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), new THREE.MeshStandardMaterial({ map: face, side: THREE.DoubleSide }));
+    board.position.y = 1.3;
+    t.add(board);
+    t.position.set(34 + k * 3, 0, RANGE_Z);
+    t.scale.setScalar(1.4);
+    g.add(t);
+    BASE.targets.push(t);
+  }
+  scene.add(g);
+}
+// Where each unit type parks or stands. Ships moor bow-out side by side; jets park staggered facing the runway.
 function unitSpot(k, i) {
   switch (k) {
     case 'inf': return v(37 + (i % 6) * 1.6, -38 - Math.floor(i / 6) * 1.5);
     case 'arm': return v(37.5 + (i % 3) * 3, -49.5 - Math.floor(i / 3) * 3.4);
     case 'tank': return v(37.5 + (i % 3) * 3, -57.5 - Math.floor(i / 3) * 3.4);
-    case 'ship': return v(-0.5 + (i % 4) * 3, -44.8);
-    case 'jet': return v(-8 + i * 3.6, -59.3);
+    case 'ship': return v(-0.5 + (i % 4) * 3, -43.4);
+    case 'jet': return v(-11 + i * 3, i % 2 ? -61.4 : -59.9);
     default: return v(0, 0);
   }
 }
@@ -9542,24 +9706,31 @@ function syncUnits(animate = false) {
       else if (k === 'ship') {
         m = { group: shipModel() };
         // a sailor on the pier for each ship
-        const sailor = soldierModel('navy');
-        sailor.group.position.set(-0.5 + (i % 4) * 3, 0, -39.5);
-        scene.add(sailor.group);
+        m.crew = soldierModel('navy');
+        m.crew.group.position.set(-0.5 + (i % 4) * 3 + 0.9, 0.42, -39.6);
+        scene.add(m.crew.group);
       } else {
         m = { group: jetModel() };
-        const pilot = soldierModel('air');
-        pilot.group.position.set(-8 + i * 3.6 + 1.6, 0, -57.8);
-        scene.add(pilot.group);
+        const at = unitSpot(k, i);
+        m.crew = soldierModel('air');
+        m.crew.group.position.set(at.x + 1.4, 0, at.z + 1.6);
+        scene.add(m.crew.group);
       }
       const at = unitSpot(k, i);
       m.group.position.set(at.x, k === 'ship' ? 0.05 : 0, at.z);
-      if (k === 'ship') m.group.rotation.y = Math.PI / 2;
-      if (k === 'jet') m.group.rotation.y = Math.PI / 2;
+      if (k === 'ship') m.group.rotation.y = Math.PI;
+      if (k === 'jet') m.group.rotation.order = 'YXZ';
+      m.home = { x: at.x, z: at.z, yaw: m.group.rotation.y };
       scene.add(m.group);
       list.push(m);
       if (animate) popIn(m.group);
     }
-    while (list.length > want) scene.remove(list.pop().group);
+    while (list.length > want) {
+      const m = list.pop();
+      scene.remove(m.group);
+      if (m.crew) scene.remove(m.crew.group);
+      if (BASE.sortie?.m === m) BASE.sortie = null;
+    }
   }
 }
 function syncGenerals() {
@@ -9738,15 +9909,564 @@ function updateBase(dt) {
       BASE.budgetT = 0;
     }
   }
-  // Soldiers drill in place; tank turrets swing
-  const now = performance.now() / 1000;
-  BASE.unitMeshes.inf.forEach((s, i) => animatePerson(s, Math.floor(now + i * 0.1) % 4 < 2, dt));
-  BASE.unitMeshes.tank.forEach((m, i) => { m.group.userData.turret.rotation.y = Math.sin(now * 0.4 + i) * 0.6; });
-  BASE.generals.forEach((g) => animatePerson(g, false, dt));
+  baseLife(dt);
+  updateExercise(dt);
   updateMissions(dt);
   updateDefense(dt);
   updateFlight(dt);
 }
+
+// ---------- the base comes alive: marching, patrols, jet sorties, a helicopter, and effects ----------
+// Effects pool: glowing sparks (muzzle flashes, fire, fireworks) and lit smoke (exhaust, smoke trails), one instanced mesh each
+const FX = { glow: null, smoke: null, list: [], m4: new THREE.Matrix4(), q: new THREE.Quaternion(), sc: new THREE.Vector3(), col: new THREE.Color() };
+const FX_CAP = { glow: 240, smoke: 420 };
+function fxInit() {
+  if (FX.glow) return;
+  const geo = new THREE.SphereGeometry(1, 8, 6);
+  FX.glow = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, opacity: 0.95, depthWrite: false }), FX_CAP.glow);
+  FX.smoke = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.55, depthWrite: false }), FX_CAP.smoke);
+  for (const k of ['glow', 'smoke']) {
+    const m = FX[k];
+    m.count = 0;
+    m.frustumCulled = false;
+    m.setColorAt(0, FX.col.set(0xffffff));
+    scene.add(m);
+  }
+}
+function fxPuff(kind, pos, color, o = {}) {
+  fxInit();
+  if (FX.list.filter((p) => p.kind === kind).length >= FX_CAP[kind]) return;
+  FX.list.push({ kind, pos: pos.clone(), color, vel: o.vel ? o.vel.clone() : null, s0: o.s0 ?? 0.3, s1: o.s1 ?? 1, life: o.life ?? 1, grav: o.grav || 0, drag: o.drag || 0, onEnd: o.onEnd, age: 0 });
+}
+function updateFX(dt) {
+  if (!FX.glow) return;
+  const n = { glow: 0, smoke: 0 };
+  for (let i = FX.list.length - 1; i >= 0; i--) {
+    const p = FX.list[i];
+    p.age += dt;
+    if (p.vel) {
+      p.vel.y -= p.grav * dt;
+      if (p.drag) p.vel.multiplyScalar(Math.max(0, 1 - p.drag * dt));
+      p.pos.addScaledVector(p.vel, dt);
+    }
+    if (p.age >= p.life) {
+      FX.list.splice(i, 1);
+      p.onEnd?.(p.pos);
+      continue;
+    }
+    const k = p.age / p.life;
+    let sz = p.s0 + (p.s1 - p.s0) * (1 - (1 - k) * (1 - k));
+    if (k > 0.7) sz *= (1 - k) / 0.3; // shrink away instead of fading, so one shared material does
+    const mesh = FX[p.kind];
+    const j = n[p.kind]++;
+    FX.m4.compose(p.pos, FX.q, FX.sc.setScalar(Math.max(0.001, sz)));
+    mesh.setMatrixAt(j, FX.m4);
+    mesh.setColorAt(j, FX.col.set(p.color));
+  }
+  for (const k of ['glow', 'smoke']) {
+    FX[k].count = n[k];
+    FX[k].instanceMatrix.needsUpdate = true;
+    if (FX[k].instanceColor) FX[k].instanceColor.needsUpdate = true;
+  }
+}
+const rv = (s) => v(0, 0).set(rand(-s, s), rand(-s, s), rand(-s, s));
+function fxBoom(pos, big = 1, sound = true) {
+  fxPuff('glow', pos, 0xffe08a, { s0: 0.4 * big, s1: 1.8 * big, life: 0.28 });
+  for (let i = 0; i < 6; i++) fxPuff('glow', pos, pick([0xff7a1a, 0xffb347, 0xff4d1a]), { vel: rv(3 * big).setY(rand(1, 4) * big), s0: 0.35 * big, s1: 0.7 * big, life: rand(0.35, 0.6), drag: 2 });
+  for (let i = 0; i < 9; i++) fxPuff('smoke', pos, pick([0x4a4a4a, 0x5d5d5d, 0x6e6a64]), { vel: rv(1.4 * big).setY(rand(1, 2.6)), s0: 0.2 * big, s1: 0.85 * big, life: rand(1.2, 1.9), drag: 1 });
+  if (sound) tone(rand(55, 75), 0.35, 'sawtooth', 0.05);
+}
+function fxSplash(pos) {
+  for (let i = 0; i < 10; i++) fxPuff('smoke', pos, 0xf4fbff, { vel: v(rand(-0.6, 0.6), rand(5, 9), rand(-0.6, 0.6)), s0: 0.25, s1: 0.6, life: rand(0.9, 1.3), grav: 9 });
+  tone(90, 0.3, 'triangle', 0.04);
+}
+function fxFirework(pos) {
+  const c = pick([0xffd166, 0xe5484d, 0x3d8bfd, 0x3fbf5f, 0xff8fab, 0xffffff]);
+  for (let i = 0; i < 36; i++) {
+    const d = rv(1).normalize().multiplyScalar(rand(5, 7));
+    fxPuff('glow', pos, c, { vel: d, s0: 0.4, s1: 0.26, life: rand(1.1, 1.5), grav: 3, drag: 1.2 });
+  }
+  fxPuff('glow', pos, 0xffffff, { s0: 0.5, s1: 1.2, life: 0.2 });
+  tone(rand(500, 800), 0.12, 'triangle', 0.03);
+}
+// A shell or tracer: a spark flying to a point, with a callback where it lands
+function fxShot(from, to, speed, onHit, color = 0xffe08a, size = 0.14) {
+  const d = to.clone().sub(from);
+  const life = d.length() / speed;
+  fxPuff('glow', from, color, { vel: d.divideScalar(life), s0: size, s1: size, life, onEnd: onHit });
+}
+
+// Paths: a start pose and segments, each either a straight move ({ d, to: [x, y, z, yaw], ease }) or a curve to follow
+const EASE = { lin: (k) => k, in: (k) => k * k, out: (k) => 1 - (1 - k) * (1 - k), smooth: (k) => k * k * (3 - 2 * k) };
+const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+function makePath(start, segs) {
+  let t = 0;
+  let cur = start;
+  for (const s of segs) {
+    s.t0 = t;
+    t += s.d;
+    s.from = cur;
+    if (s.curve) {
+      const e = s.curve.getPointAt(1);
+      const tan = s.curve.getTangentAt(1);
+      s.to = [e.x, e.y, e.z, Math.atan2(tan.x, tan.z)];
+    }
+    cur = s.to;
+  }
+  return { segs, total: t };
+}
+function pathPose(P, t, obj, dt, o = {}) {
+  const s = P.segs.find((x) => t < x.t0 + x.d) || P.segs[P.segs.length - 1];
+  const k = Math.min(1, Math.max(0, (t - s.t0) / s.d));
+  const u = obj.userData;
+  if (s.curve) {
+    const p = s.curve.getPointAt(k);
+    const tan = s.curve.getTangentAt(k);
+    const yaw = Math.atan2(tan.x, tan.z);
+    const turn = dt > 0 && u.yaw !== undefined ? wrapA(yaw - u.yaw) / dt : 0;
+    u.yaw = yaw;
+    u.roll = (u.roll || 0) + (Math.max(-1, Math.min(1, -turn * 0.7)) - (u.roll || 0)) * Math.min(1, dt * 3);
+    obj.position.copy(p);
+    if (o.offset) obj.position.add(o.offset);
+    obj.rotation.set(o.level ? 0.12 : -Math.asin(Math.max(-1, Math.min(1, tan.y))), yaw, u.roll * (o.level ? 0.4 : 1));
+    return s;
+  }
+  const e = (EASE[s.ease] || EASE.smooth)(k);
+  const [x0, y0, z0, a0] = s.from;
+  const [x1, y1, z1, a1] = s.to;
+  obj.position.set(x0 + (x1 - x0) * e, y0 + (y1 - y0) * e, z0 + (z1 - z0) * e);
+  u.yaw = a0 + (a1 - a0) * EASE.smooth(k);
+  u.roll = 0;
+  obj.rotation.set(0, u.yaw, 0);
+  return s;
+}
+const curve = (pts) => new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => v(x, z).setY(y)));
+
+// Infantry march in a three-file column round the parade ground
+let PARADE = null;
+function paradeCurve() {
+  if (PARADE) return PARADE;
+  const [x0, x1, z0, z1, r] = [37.6, 44.4, -44.6, -38.4, 1.4];
+  const pts = [];
+  const corner = (cx, cz, a0) => { for (let k = 0; k <= 4; k++) { const a = a0 + (k / 4) * (Math.PI / 2); pts.push([cx + Math.cos(a) * r, 0, cz + Math.sin(a) * r]); } };
+  corner(x1 - r, z1 - r, 0); // south-east, heading round anticlockwise seen from above
+  corner(x0 + r, z1 - r, Math.PI / 2);
+  corner(x0 + r, z0 + r, Math.PI);
+  corner(x1 - r, z0 + r, Math.PI * 1.5);
+  PARADE = new THREE.CatmullRomCurve3(pts.map(([x, y, z]) => v(x, z).setY(y)), true);
+  PARADE.len = PARADE.getLength();
+  return PARADE;
+}
+const marchV = new THREE.Vector3();
+function marchSoldiers(dt, speed) {
+  const C = paradeCurve();
+  BASE.march = (BASE.march || 0) + dt * speed;
+  BASE.unitMeshes.inf.forEach((s, i) => {
+    const row = Math.floor(i / 3);
+    const col = (i % 3) - 1;
+    const u = ((((BASE.march - row * 1.05) / C.len) % 1) + 1) % 1;
+    const p = C.getPointAt(u);
+    const t = C.getTangentAt(u);
+    marchV.set(t.z, 0, -t.x); // to the side of the column
+    s.group.position.set(p.x + marchV.x * col * 0.75, 0, p.z + marchV.z * col * 0.75);
+    s.group.rotation.y = Math.atan2(t.x, t.z);
+    animatePerson(s, true, dt);
+  });
+}
+// Armour on patrol: the last armoured car and the last tank drive a loop round the vehicle park
+const PATROL = curve([[35.6, 0, -47.6], [46.6, 0, -47.6], [47.2, 0, -56], [46.6, 0, -65.2], [35.6, 0, -65.2], [35.2, 0, -56]]);
+PATROL.closed = true;
+PATROL.len = PATROL.getLength();
+function patrolVehicles(dt) {
+  const keep = [BASE.unitMeshes.arm, BASE.unitMeshes.tank];
+  keep.forEach((list, j) => {
+    if (list.length < 2) return;
+    const m = list[list.length - 1];
+    m.patrol = (m.patrol ?? j * 0.5) + (dt * 2.2) / PATROL.len;
+    const u = ((m.patrol % 1) + 1) % 1;
+    const p = PATROL.getPointAt(u);
+    const t = PATROL.getTangentAt(u);
+    m.group.position.set(p.x, 0, p.z);
+    m.group.rotation.y = Math.atan2(t.x, t.z);
+    if (Math.random() < dt * 6) fxPuff('smoke', m.group.position.clone().add(v(-t.x * 1.6, -t.z * 1.6).setY(0.5)), 0x777777, { s0: 0.12, s1: 0.4, life: 0.9, vel: v(0, 0).setY(0.6) });
+  });
+}
+function parkVehicles(yaw = 0) {
+  for (const k of ['arm', 'tank']) for (const m of BASE.unitMeshes[k]) {
+    m.group.position.set(m.home.x, 0, m.home.z);
+    m.group.rotation.y = yaw;
+    if (m.group.userData.turret) m.group.userData.turret.rotation.y = 0;
+    m.patrol = undefined;
+  }
+}
+// Jets fly sorties one at a time: taxi out, take off, loop round the world and land again
+const SORTIE_AIR = curve([[8, 0, -56.5], [18, 1.5, -56.5], [32, 6, -56.5], [48, 12, -46], [42, 16, -20], [5, 18, -10], [-30, 15, -24], [-50, 9, -48], [-36, 3, -56.5], [-20, 0.5, -56.5], [-11, 0, -56.5]]);
+function startSortie() {
+  const list = BASE.unitMeshes.jet;
+  if (!list.length) return;
+  const m = pick(list);
+  const h = m.home;
+  const P = makePath([h.x, 0, h.z, 0], [
+    // Taxi out, back along the runway to its west end, turn and roll
+    { d: 2.4, to: [h.x, 0, -56.5, 0] },
+    { d: 1.0, to: [h.x, 0, -56.5, -Math.PI / 2] },
+    { d: Math.max(0.4, (h.x + 11) / 3), to: [-11, 0, -56.5, -Math.PI / 2], ease: 'lin' },
+    { d: 1.6, to: [-11, 0, -56.5, Math.PI / 2] },
+    { d: 3.0, to: [8, 0, -56.5, Math.PI / 2], ease: 'in' },
+    { d: 17, curve: SORTIE_AIR },
+    // Land, roll out to the east end, taxi back and park facing the runway again
+    { d: 4.0, to: [14, 0, -56.5, Math.PI / 2], ease: 'out' },
+    { d: 1.6, to: [14, 0, -56.5, -Math.PI / 2] },
+    { d: (14 - h.x) / 3.5, to: [h.x, 0, -56.5, -Math.PI / 2], ease: 'lin' },
+    { d: 1.0, to: [h.x, 0, -56.5, -Math.PI] },
+    { d: 2.2, to: [h.x, 0, h.z, -Math.PI] },
+    { d: 1.6, to: [h.x, 0, h.z, -Math.PI * 2] },
+  ]);
+  BASE.sortie = { m, P, t: 0 };
+  m.crew.group.visible = false;
+}
+function updateSortie(dt) {
+  const S = BASE.sortie;
+  if (!S) {
+    BASE.sortieT -= dt;
+    if (BASE.sortieT <= 0) {
+      BASE.sortieT = rand(20, 34);
+      if (!BASE.ex && !BASE.flight) startSortie();
+    }
+    return;
+  }
+  S.t += dt;
+  const seg = pathPose(S.P, S.t, S.m.group, dt);
+  // Afterburner smoke on the take-off roll and climb
+  const i = S.P.segs.indexOf(seg);
+  if ((i === 4 || (i === 5 && S.t - seg.t0 < 4)) && Math.random() < dt * 30) {
+    const back = v(-Math.sin(S.m.group.userData.yaw) * 2.2, -Math.cos(S.m.group.userData.yaw) * 2.2).setY(0.7);
+    fxPuff('smoke', S.m.group.position.clone().add(back), 0xb0b0b0, { s0: 0.2, s1: 0.8, life: 1.2 });
+  }
+  if (i === 4 && !S.roar) {
+    S.roar = true;
+    tone(70, 1.6, 'sawtooth', 0.025);
+  }
+  if (S.t >= S.P.total) {
+    const m = S.m;
+    m.group.position.set(m.home.x, 0, m.home.z);
+    m.group.rotation.set(0, 0, 0);
+    m.crew.group.visible = true;
+    BASE.sortie = null;
+  }
+}
+// A green army helicopter that lifts off the helipad, circles the base and lands
+const HELIPAD = v(41, -33.5);
+const HELI_LOOP = curve([[41, 5, -33.5], [30, 7, -40], [20, 8, -54], [2, 8, -58], [-6, 8, -46], [10, 7, -36], [41, 5, -33.5]]);
+function updateArmyHeli(dt) {
+  const h = BASE.heli;
+  if (!h) return;
+  const r = h.userData.rotor;
+  if (!BASE.heliFly) {
+    if (r) r.rotation.y += dt * 0.6;
+    BASE.heliT -= dt;
+    if (BASE.heliT <= 0 && !BASE.ex) {
+      BASE.heliT = rand(35, 55);
+      BASE.heliFly = { t: 0, P: makePath([HELIPAD.x, 0, HELIPAD.z, 0], [{ d: 2.5, to: [HELIPAD.x, 5, HELIPAD.z, 0], ease: 'smooth' }, { d: 16, curve: HELI_LOOP }, { d: 2.5, to: [HELIPAD.x, 0, HELIPAD.z, 0], ease: 'smooth' }]) };
+    }
+    return;
+  }
+  const F = BASE.heliFly;
+  F.t += dt;
+  if (r) r.rotation.y += dt * 24;
+  pathPose(F.P, F.t, h, dt, { level: true });
+  if (F.t >= F.P.total) {
+    h.position.set(HELIPAD.x, 0, HELIPAD.z);
+    h.rotation.set(0, 0, 0);
+    BASE.heliFly = null;
+  }
+}
+function baseLife(dt) {
+  const now = performance.now() / 1000;
+  if (!BASE.ex) {
+    marchSoldiers(dt, 1.1);
+    patrolVehicles(dt);
+    BASE.unitMeshes.tank.forEach((m, i) => { m.group.userData.turret.rotation.y = Math.sin(now * 0.4 + i) * 0.6; });
+  }
+  updateSortie(dt);
+  updateArmyHeli(dt);
+  BASE.generals.forEach((g) => animatePerson(g, false, dt));
+  BASE.guards.forEach((g) => animatePerson(g, false, dt));
+  // Ships ride the swell; the patrol boat circles the basin; buoys bob
+  BASE.unitMeshes.ship.forEach((m, i) => {
+    m.group.position.y = 0.05 + Math.sin(now * 1.1 + i * 1.7) * 0.05;
+    m.group.rotation.z = Math.sin(now * 0.9 + i) * 0.025;
+    m.group.rotation.x = Math.sin(now * 0.7 + i * 2) * 0.015;
+  });
+  if (BASE.boat) {
+    const a = now * 0.35;
+    BASE.boat.position.set(HARBOUR.x + Math.cos(a) * 5.6, 0.04, HARBOUR.z - 3.4 + Math.sin(a) * 1.1);
+    BASE.boat.rotation.y = Math.atan2(-Math.sin(a) * 5.6, Math.cos(a) * 1.1);
+  }
+  BASE.buoys.forEach((b, i) => { b.position.y = Math.sin(now * 1.6 + i) * 0.06; b.rotation.z = Math.sin(now * 1.2 + i) * 0.08; });
+  if (BASE.dish) BASE.dish.rotation.y += dt * 1.2;
+  if (BASE.sock) BASE.sock.rotation.y = 0.6 + Math.sin(now * 0.5) * 0.3;
+  updateFX(dt);
+}
+
+// ---------- watch mode: the grand military exercise ----------
+// A cinematic show of every branch the player has built: parade, armour on the range, the navy's salute and an
+// air display with smoke trails, then fireworks. Taps fire extra shots for a bonus. Rewarded once every 5 minutes;
+// in between it can still be watched for fun.
+const cineEl = document.getElementById('cine');
+const EX_COOLDOWN_MS = 5 * 60 * 1000;
+const exReady = () => Date.now() >= (B().exAt || 0);
+function exReward(hits = 0) {
+  const bonus = Math.min(0.5, hits * 0.02);
+  return Math.round(((4000 + militaryPower() * 40) * priceMult() * (1 + bonus)) / 100) * 100;
+}
+function startExercise() {
+  if (BASE.ex || BASE.flight || BASE.defense || !baseHas('barracks')) return;
+  const u = B().units;
+  const acts = [{ id: 'intro', d: 4 }];
+  if (u.inf) acts.push({ id: 'parade', d: 8 });
+  if (u.tank || u.arm) acts.push({ id: 'armor', d: 9 });
+  if (u.ship) acts.push({ id: 'navy', d: 8 });
+  if (u.jet || BASE.myJet) acts.push({ id: 'air', d: 10 });
+  acts.push({ id: 'finale', d: 5 });
+  let t = 0;
+  for (const a of acts) {
+    a.t0 = t;
+    t += a.d;
+  }
+  BASE.ex = { t: 0, acts, total: t, act: -1, hits: 0, paid: exReady(), fire: 0, cam: v(0, 0), look: v(0, 0), fov: camera.fov, jets: [] };
+  if (BASE.ex.paid) B().exAt = Date.now() + EX_COOLDOWN_MS;
+  if (BASE.sortie) {
+    BASE.sortieT = 0.01;
+    BASE.sortie.t = BASE.sortie.P.total;
+    updateSortie(0);
+  }
+  milEl.style.display = 'none';
+  player.group.visible = false;
+  document.body.classList.add('cine');
+  cineEl.classList.add('show');
+  [392, 523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, 0.3, 'square', 0.035), i * 200));
+  save();
+}
+const EX_CAPS = {
+  intro: ['🎖️ ซ้อมรบใหญ่ประจำปี', 'Grand military exercise'],
+  parade: ['🪖 สวนสนามกองทัพบก', 'แถวทหารเดินผ่านแท่นรับความเคารพ'],
+  armor: ['🛡️ ยานเกราะยิงเป้า', '👆 แตะจอเพื่อสั่งยิงเพิ่ม'],
+  navy: ['⚓ กองทัพเรือยิงสลุต', '👆 แตะจอเพื่อยิงเพิ่ม'],
+  air: ['✈️ ฝูงบินผาดแผลง', '👆 แตะจอเพื่อปล่อยพลุ'],
+  finale: ['🎆 จบการซ้อมรบ', ''],
+};
+function enterAct(A) {
+  const X = BASE.ex;
+  X.snap = true;
+  X.fire = 0.3;
+  const [cap, sub] = EX_CAPS[A.id];
+  document.getElementById('cinecap').textContent = cap;
+  document.getElementById('cinesub').textContent = A.id === 'finale' ? (X.paid ? `รางวัล 💵${fmt(exReward(X.hits))} · 🏅 +1` : 'ชมฟรี · รางวัลครั้งถัดไปอีกไม่นาน') : sub;
+  if (A.id === 'armor') {
+    parkVehicles(Math.PI); // turn to face the range
+    for (const t of BASE.targets || []) t.rotation.x = 0;
+  }
+  if (A.id === 'air') {
+    // Hide the parked jets: they are the ones flying the display
+    const parked = [...BASE.unitMeshes.jet.map((m) => m.group), ...(BASE.myJet ? [BASE.myJet] : [])];
+    parked.forEach((g) => { g.visible = false; });
+    X.hidden = parked;
+    const n = Math.min(5, Math.max(1, BASE.unitMeshes.jet.length + (BASE.myJet ? 1 : 0)));
+    const slots = [[0, 0], [-2.4, -2], [-2.4, 2], [-4.8, -4], [-4.8, 4]];
+    const trails = [0xf4f4f4, 0xe5484d, 0x2a4cb0, 0xe5484d, 0x2a4cb0];
+    const C = curve([[-80, 12, -56.5], [-40, 6, -56.5], [0, 4.5, -56.5], [24, 6, -56.5], [38, 14, -56.5], [44, 30, -56.5], [40, 46, -56.5]]);
+    for (let i = 0; i < n; i++) {
+      const g = i === 0 && BASE.myJet ? jetModel(0xffd166) : jetModel();
+      g.rotation.order = 'YXZ';
+      scene.add(g);
+      X.jets.push({ g, off: v(slots[i][0], slots[i][1]), trail: trails[i], C });
+    }
+    tone(65, 3, 'sawtooth', 0.03);
+  }
+}
+function exTap(e) {
+  const X = BASE.ex;
+  if (!X || e.target?.closest?.('button')) return;
+  const A = X.acts[X.act];
+  if (!A || !['armor', 'navy', 'air'].includes(A.id)) return;
+  X.hits++;
+  X.tapShot = true;
+  document.getElementById('cinehits').textContent = `🎯 ${X.hits}`;
+}
+window.addEventListener('pointerdown', exTap, true);
+function tankFire() {
+  const pool = [...BASE.unitMeshes.tank, ...BASE.unitMeshes.arm];
+  const tg = (BASE.targets || []).filter((t) => t.rotation.x > -0.1);
+  if (!pool.length) return;
+  const m = pick(pool);
+  const isTank = BASE.unitMeshes.tank.includes(m);
+  const target = tg.length ? pick(tg) : pick(BASE.targets);
+  const to = target.position.clone().setY(1.3);
+  const from = m.group.position.clone().setY(isTank ? 1.25 : 1.45);
+  const dir = to.clone().sub(from).normalize();
+  if (isTank) m.group.userData.turret.rotation.y = Math.atan2(dir.x, dir.z) - m.group.rotation.y;
+  from.addScaledVector(dir, isTank ? 2.2 : 0.9);
+  fxPuff('glow', from, 0xfff0b0, { s0: 0.25, s1: 0.6, life: 0.12 });
+  for (let k = 0; k < 3; k++) fxPuff('smoke', from, 0xa8a8a8, { s0: 0.15, s1: 0.55, life: rand(0.8, 1.1), vel: dir.clone().multiplyScalar(rand(1, 2.5)).setY(rand(0.4, 0.9)), drag: 2 });
+  const hit = (p) => {
+    fxBoom(p, 0.8);
+    target.rotation.x = -Math.PI / 2.2;
+    target.userData.up = (BASE.ex?.t || 0) + 1.6; // a range hand stands it back up
+  };
+  if (isTank) {
+    fxShot(from, to, 70, hit, 0xffd166, 0.16);
+    tone(80, 0.25, 'square', 0.05);
+  } else {
+    for (let k = 0; k < 4; k++) setTimeout(() => fxShot(from, to.clone().add(rv(0.4)), 90, k === 3 ? hit : (p) => fxPuff('glow', p, 0xffb347, { s0: 0.15, s1: 0.4, life: 0.15 }), 0xffb347, 0.08), k * 90);
+    tone(300, 0.2, 'square', 0.025);
+  }
+}
+function navyFire() {
+  const ships = BASE.unitMeshes.ship;
+  if (!ships.length) return;
+  const m = pick(ships);
+  const from = m.group.position.clone().add(v(0, -2.2)).setY(1.1);
+  fxPuff('glow', from, 0xfff0b0, { s0: 0.3, s1: 0.8, life: 0.15 });
+  for (let k = 0; k < 4; k++) fxPuff('smoke', from, 0xd8d8d8, { s0: 0.15, s1: 0.7, life: rand(1.1, 1.5), vel: v(rand(-0.5, 0.5), -rand(0.6, 1.4)).setY(rand(0.4, 1)), drag: 1.5 });
+  tone(70, 0.35, 'square', 0.05);
+  // Shells burst high over the water, and practice charges throw up spouts in the basin
+  const burstAt = from.clone().add(v(rand(-4, 4), -rand(1, 5))).setY(rand(9, 13));
+  fxShot(from, burstAt, 45, (p) => fxBoom(p, 0.7, false), 0xffd166, 0.12);
+  setTimeout(() => { if (BASE.ex) fxSplash(v(HARBOUR.x + rand(-5, 5), HARBOUR.z - rand(3, 4.4)).setY(0.1)); }, 400);
+}
+function updateExercise(dt) {
+  const X = BASE.ex;
+  if (!X) return;
+  X.t += dt;
+  const ai = X.acts.findIndex((a) => X.t < a.t0 + a.d);
+  if (ai < 0) {
+    endExercise();
+    return;
+  }
+  const A = X.acts[ai];
+  if (ai !== X.act) {
+    X.act = ai;
+    enterAct(A);
+  }
+  const k = (X.t - A.t0) / A.d;
+  const lerp3 = (a, b, e) => v(a[0] + (b[0] - a[0]) * e, a[2] + (b[2] - a[2]) * e).setY(a[1] + (b[1] - a[1]) * e);
+  const e = EASE.smooth(k);
+  X.fire -= dt;
+  const tapped = X.tapShot;
+  X.tapShot = false;
+  switch (A.id) {
+    case 'intro':
+      X.cam.copy(lerp3([18, 34, -8], [22, 24, -22], e));
+      X.look.set(20, 0, -48);
+      marchSoldiers(dt, 1.1);
+      break;
+    case 'parade':
+      marchSoldiers(dt, 1.6);
+      if (X.fire <= 0) {
+        X.fire = 0.5;
+        tone(95, 0.08, 'triangle', 0.05); // the drum beat
+      }
+      // From the reviewing stand, panning along the column
+      X.cam.copy(lerp3([52, 6.5, -35.5], [52, 6, -47.5], e));
+      X.look.set(40.5, 0.4, -41.5);
+      break;
+    case 'armor':
+      marchSoldiers(dt, 1.1);
+      for (const tg of BASE.targets || []) if (tg.rotation.x < 0 && X.t > (tg.userData.up || 0)) tg.rotation.x = Math.min(0, tg.rotation.x + dt * 4);
+      if (X.fire <= 0 || tapped) {
+        if (X.fire <= 0) X.fire = 0.6;
+        tankFire();
+      }
+      X.cam.copy(lerp3([39, 5.5, -50], [42, 4, -53], e));
+      X.look.set(40, 0.6, RANGE_Z);
+      break;
+    case 'navy':
+      if (X.fire <= 0 || tapped) {
+        if (X.fire <= 0) X.fire = 0.65;
+        navyFire();
+      }
+      X.cam.copy(lerp3([-2, 6.2, -56.5], [10, 6.6, -56.5], e));
+      X.look.set(4, 3, -42);
+      break;
+    case 'air': {
+      const u = Math.min(1, k * 1.02);
+      const burstK = Math.max(0, u - 0.7) * 10; // the formation splits as it climbs
+      let lead = null;
+      for (const J of X.jets) {
+        const p = J.C.getPointAt(u);
+        const tan = J.C.getTangentAt(u);
+        J.g.position.copy(p).add(v(J.off.x, J.off.z * (1 + burstK)));
+        J.g.rotation.set(-Math.asin(tan.y), Math.atan2(tan.x, tan.z), J.off.z * burstK * 0.08);
+        if (Math.random() < dt * 30) fxPuff('smoke', J.g.position.clone().addScaledVector(tan, -2.2), J.trail, { s0: 0.18, s1: 0.75, life: 2.2 });
+        if (!lead) lead = J.g;
+      }
+      if (tapped && lead) for (let f = 0; f < 4; f++) fxPuff('glow', lead.position, 0xffd166, { vel: v(rand(-4, 4), rand(-1, 1)).setY(rand(-2, 1)), s0: 0.18, s1: 0.22, life: 1.4, grav: 2 });
+      X.cam.set(20, 1.6, -38);
+      if (lead) X.look.lerp(lead.position, X.snap ? 1 : Math.min(1, dt * 4));
+      break;
+    }
+    case 'finale':
+      marchSoldiers(dt, 1.1);
+      if (X.fire <= 0) {
+        X.fire = 0.35;
+        fxFirework(v(31 + rand(-9, 9), -38 + rand(-4, 4)).setY(rand(10, 15)));
+      }
+      X.cam.copy(lerp3([31, 3.5, -19], [31, 4.5, -21], e));
+      X.look.set(31, 6.5, -36);
+      break;
+  }
+}
+const exCamAt = new THREE.Vector3();
+function exerciseCamera(dt) {
+  const X = BASE.ex;
+  // Shots are framed for landscape: on a portrait phone, widen the lens and back off a little
+  // rather than moving the camera through the scenery
+  exCamAt.copy(X.cam);
+  const fov = camera.aspect < 1 ? Math.min(78, X.fov * 1.55) : X.fov;
+  if (camera.fov !== fov) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+  if (camera.aspect < 1) exCamAt.sub(X.look).multiplyScalar(1.3).add(X.look);
+  if (X.snap) {
+    camera.position.copy(exCamAt);
+    X.snap = false;
+  } else camera.position.lerp(exCamAt, Math.min(1, dt * 5));
+  camera.lookAt(X.look);
+  sun.position.set(X.look.x + 12, 15, X.look.z + 6);
+  sun.target.position.set(X.look.x, 0, X.look.z);
+  sun.target.updateMatrixWorld();
+}
+function endExercise(skipped = false) {
+  const X = BASE.ex;
+  if (!X) return;
+  BASE.ex = null;
+  for (const J of X.jets) scene.remove(J.g);
+  (X.hidden || []).forEach((g) => { g.visible = true; });
+  for (const t of BASE.targets || []) t.rotation.x = 0;
+  parkVehicles();
+  player.group.visible = true;
+  camera.fov = X.fov;
+  camera.updateProjectionMatrix();
+  document.body.classList.remove('cine');
+  cineEl.classList.remove('show');
+  document.getElementById('cinehits').textContent = '';
+  updateCamera(0, true);
+  if (X.paid) {
+    const reward = exReward(X.hits);
+    addMoney(reward);
+    B().medals++;
+    stats().exercises = (stats().exercises || 0) + 1;
+    sfxUnlock();
+    toast(`🎖️ <b>ซ้อมรบสำเร็จ!</b>${X.hits ? ` ยิงเพิ่ม ${X.hits} นัด` : ''}<br>รางวัล +${fmt(reward)} · เหรียญกล้าหาญ 🏅`, 4500);
+  } else if (!skipped) toast('🎖️ จบการซ้อมรบ · รางวัลครั้งถัดไปเมื่อครบ 5 นาที', 3000);
+  save();
+}
+document.getElementById('cineskip').addEventListener('click', () => {
+  // Skipping still pays: jump to the end
+  endExercise(true);
+});
 
 // --- private jet: a sightseeing flight over the whole map ---
 function startFlight() {
@@ -9850,7 +10570,7 @@ function updateMissions(dt) {
 // --- special mode: defend the base from a drone raid ---
 const DEFEND_HQ = v(31, -33.5);
 function startDefense() {
-  if (BASE.defense || !baseHas('barracks')) return;
+  if (BASE.defense || BASE.ex || !baseHas('barracks')) return;
   const count = 12 + Math.min(18, Math.floor(militaryPower() / 20));
   BASE.defense = { left: count, spawn: 0, killed: 0, hp: 10, t: 0 };
   toast(`🛡️ <b>โหมดพิเศษ: ป้องกันฐาน!</b><br>โดรน ${count} ลำกำลังบุก ยืนใกล้ ๆ เพื่อยิง กองทัพช่วยยิงอัตโนมัติ`, 5000);
@@ -9974,6 +10694,11 @@ function renderMilitary() {
   const dc = emEl('div', 'branchcard', `<b>🛡️ ซ้อมป้องกันฐาน (โหมดพิเศษ)</b><br><small>โดรนบุกฐาน ยิงให้หมดก่อนถึงกองบัญชาการ ชนะได้รางวัลและเหรียญ</small><br>`);
   dc.append(emButton(BASE.defense ? 'กำลังป้องกัน…' : '▶ เริ่มเลย', Boolean(BASE.defense) || !baseHas('barracks'), () => { startDefense(); milEl.style.display = 'none'; }));
   box.append(dc);
+  // Watch mode: the grand exercise
+  const left = Math.max(0, Math.ceil(((B().exAt || 0) - Date.now()) / 1000));
+  const xc = emEl('div', 'branchcard excard', `<b>🎖️ ซ้อมรบใหญ่ (โหมดชม)</b><br><small>ชมสวนสนาม ยานเกราะยิงเป้า เรือรบยิงสลุต และฝูงบินผาดแผลง แตะจอยิงเพิ่มได้โบนัส${left ? ` · รางวัลครั้งถัดไปใน ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : ` · รางวัล ~💵${fmt(exReward())} 🏅`}</small><br>`);
+  xc.append(emButton(left ? '▶ ชมอีกครั้ง (ไม่มีรางวัล)' : '▶ เริ่มซ้อมรบ', !baseHas('barracks') || Boolean(BASE.defense || BASE.ex), startExercise));
+  box.append(xc);
   // Generals
   const cost = recruitCost();
   const gc = emEl('div', 'branchcard', `<b>🎖️ แต่งตั้งนายพล</b><br><small>นายพลแต่ละคนเพิ่มพลังและความเร็วฝึกของเหล่าทัพ +5% ต่อดาว</small><br>`);
@@ -10745,6 +11470,8 @@ function updateCityLife(dt) {
 
 // --- military base: props that make it read as a real camp ---
 function sandbags(n) {
+  const made = modelGroup('sandbags');
+  if (made) return made;
   const g = new THREE.Group();
   for (let i = 0; i < n; i++) for (let r = 0; r < 2; r++) {
     const b = box(0.55, 0.26, 0.32, r ? 0xc2a878 : 0xb39a6b);
@@ -10754,6 +11481,8 @@ function sandbags(n) {
   return g;
 }
 function watchtower() {
+  const made = modelGroup('watchtower');
+  if (made) return made;
   const g = new THREE.Group();
   for (const [x, z] of [[-0.6, -0.6], [0.6, -0.6], [-0.6, 0.6], [0.6, 0.6]]) g.add(at3(box(0.12, 3.2, 0.12, 0x6d4c41), x, 1.6, z));
   g.add(at3(box(1.6, 0.12, 1.6, 0x8d6e63), 0, 3.2, 0), at3(box(1.6, 0.6, 0.08, 0x6b7a3a), 0, 3.55, 0.78), at3(box(1.6, 0.6, 0.08, 0x6b7a3a), 0, 3.55, -0.78));
@@ -12393,7 +13122,7 @@ function syncLinkRoad() {
 }
 
 // --- the river south of town, with a bridge on the south road ---
-function waterLayer(color, opacity, repeat, y) {
+function rippleTex(repeat) {
   const tex = canvasTexture(256, 256, (g) => {
     g.clearRect(0, 0, 256, 256);
     let s = 7 + repeat;
@@ -12414,6 +13143,10 @@ function waterLayer(color, opacity, repeat, y) {
     }
   });
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+function waterLayer(color, opacity, repeat, y) {
+  const tex = rippleTex(repeat);
   tex.repeat.set(repeat * 10, repeat * 0.6);
   const m = new THREE.Mesh(new THREE.PlaneGeometry(220, RIVER.z1 - RIVER.z0), new THREE.MeshStandardMaterial({ color, map: opacity < 1 ? tex : null, transparent: opacity < 1, opacity, roughness: 0.12, metalness: 0.35, depthWrite: opacity >= 1 }));
   if (REAL) realMats.push(m.material);
@@ -12767,6 +13500,10 @@ function collide(pos, r = 0.35) {
 }
 
 function updatePlayer(dt) {
+  if (BASE.ex) {
+    animatePerson(player, false, dt);
+    return;
+  }
   if (updateElevator(dt)) return;
   readInput();
   autopilot(dt);
@@ -13938,7 +14675,8 @@ let dnTimer = 0;
 let saveTimer = 0;
 let running = false;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  // A frame's timestamp can fall just before the last clock read, so never step time backwards
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
   if (running) for (let k = 0; k < gameSpeed; k++) simulate(dt);
   trackPerf(now);
@@ -13994,6 +14732,7 @@ function frameRest(dt, now) {
   updateWeather(dt);
   updateFloats(dt);
   if (!running && startEl.style.display !== 'none') titleCamera(now);
+  else if (BASE.ex) exerciseCamera(dt);
   else updateCamera(dt);
   updateBag();
   updateUpgradeDot();

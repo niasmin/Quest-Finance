@@ -789,6 +789,181 @@ def temple():
 base_hangar()
 temple()
 
+# ---------------- military base buildings (front at -Y, origin = footprint centre at ground) ----------------
+def mil_common():
+    return dict(
+        wall=mat('milwall', [0.62, 0.58, 0.45], rough=0.8),
+        wall2=mat('milwall2', [0.5, 0.47, 0.36], rough=0.8),
+        roof=mat('milroof', [0.12, 0.15, 0.06], rough=0.7),
+        trim=mat('miltrim', [0.82, 0.8, 0.72], rough=0.7),
+        glass=mat('milglass', [0.04, 0.08, 0.1], rough=0.1, metal=0.6),
+        door=mat('mildoor', [0.22, 0.25, 0.18], rough=0.7),
+        steel=mat('steel', [0.3, 0.32, 0.33], rough=0.5, metal=0.7),
+        sand=mat('sandbag', [0.55, 0.48, 0.32], rough=0.95),
+        star=mat('star', [0.95, 0.75, 0.15], rough=0.4, metal=0.5),
+    )
+
+def windows_row(m, w, y, z0, z1, n, h=0.55, wd=0.6):
+    for i in range(n):
+        x = -w / 2 + (i + 0.5) * w / n
+        cube((wd, 0.06, h), (x, y, (z0 + z1) / 2), m['glass'])
+        cube((wd + 0.14, 0.09, 0.08), (x, y - 0.02, (z0 + z1) / 2 - h / 2 - 0.04), m['trim'])  # sill
+
+def mil_hq():
+    begin(); m = mil_common()
+    w, d, h = 9, 5, 3.2
+    cube((w, d, h), (0, 0, h / 2), m['wall'], bevel=0.04, seg=1)
+    cube((w + 0.3, d + 0.3, 0.25), (0, 0, h + 0.12), m['roof'], bevel=0.03, seg=1)
+    cube((w + 0.1, d + 0.1, 0.4), (0, 0, 0.2), m['wall2'], bevel=0.02, seg=1)
+    for zc in (1.1, 2.4):
+        windows_row(m, w - 1.5, -d / 2 - 0.01, zc - 0.3, zc + 0.3, 6)
+    # Portico with columns, a pediment and a star
+    cube((3.2, 1.2, 0.2), (0, -d / 2 - 0.6, 2.6), m['trim'], bevel=0.03, seg=1)
+    for x in (-1.3, -0.45, 0.45, 1.3):
+        cyl(0.13, 2.5, (x, -d / 2 - 1.05, 1.3), m['trim'], verts=12)
+    me = bpy.data.meshes.new('ped')
+    pts = [(-1.7, 2.7), (1.7, 2.7), (0, 3.4)]
+    verts = [(x, -d / 2 - 1.2, z) for x, z in pts] + [(x, -d / 2 + 0.0, z) for x, z in pts]
+    me.from_pydata(verts, [], [[2, 1, 0], [3, 4, 5], [0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5]])
+    o = bpy.data.objects.new('ped', me); bpy.context.scene.collection.objects.link(o); add(o, m['trim'], smooth=False)
+    cyl(0.22, 0.05, (0, -d / 2 - 1.22, 3.0), m['star'], rot=(math.pi / 2, 0, 0), verts=5)
+    cube((1.2, 0.08, 1.8), (0, -d / 2 - 0.01, 0.9), m['door'])
+    for k in range(3):  # steps
+        cube((3.0, 0.3, 0.12), (0, -d / 2 - 1.5 - k * 0.25, 0.3 - k * 0.1), m['wall2'])
+    cube((0.9, 0.9, 0.5), (2.6, 0.8, h + 0.5), m['steel'], bevel=0.04, seg=1)  # rooftop plant
+    cyl(0.04, 2.2, (-3.2, 0.5, h + 1.1), m['steel'], verts=6)  # radio mast
+    write('mil_hq')
+
+def mil_barracks():
+    begin(); m = mil_common()
+    w, d, h = 8, 5, 2.4
+    cube((w, d, h), (0, 0, h / 2), m['wall'], bevel=0.04, seg=1)
+    r = cube((w + 0.4, d + 0.5, 0.14), (0, 0, h + 0.5), m['roof'])
+    for sy in (-1, 1):
+        sl = cube((w + 0.4, d / 2 + 0.45, 0.12), (0, sy * 1.38, h + 0.43), m['roof'])
+        sl.rotation_euler.x = -sy * 0.36
+    bpy.data.objects.remove(r)
+    # Gable ends under the roof
+    me = bpy.data.meshes.new('gable')
+    verts = []
+    for x in (-w / 2, w / 2):
+        verts += [(x, -d / 2, h), (x, d / 2, h), (x, 0, h + 0.85)]
+    me.from_pydata(verts, [], [[0, 1, 2], [5, 4, 3]])
+    o = bpy.data.objects.new('gable', me); bpy.context.scene.collection.objects.link(o); add(o, m['wall'], smooth=False)
+    windows_row(m, w - 1, -d / 2 - 0.01, 0.9, 1.8, 6)
+    windows_row(m, w - 1, d / 2 + 0.01, 0.9, 1.8, 6)
+    for x in (-2.5, 2.5):
+        cube((1.0, 0.08, 1.7), (x, -d / 2 - 0.01, 0.85), m['door'])
+        cube((1.4, 0.6, 0.08), (x, -d / 2 - 0.3, 1.95), m['roof'])  # door canopy
+    # Sandbag wall in front
+    for k in range(9):
+        cube((0.8, 0.4, 0.28), (-3.6 + k * 0.9, -d / 2 - 2.0, 0.14 + (k % 2) * 0.0), m['sand'], bevel=0.1, seg=2)
+        cube((0.8, 0.4, 0.28), (-3.15 + k * 0.9, -d / 2 - 2.0, 0.42), m['sand'], bevel=0.1, seg=2) if k < 8 else None
+    write('mil_barracks')
+
+def mil_depot():
+    begin(); m = mil_common()
+    w, d, h = 7, 5, 2.6
+    cube((w, d, h), (0, 0, h / 2), m['wall2'], bevel=0.04, seg=1)
+    cube((w + 0.3, d + 0.3, 0.2), (0, 0, h + 0.1), m['roof'], bevel=0.03, seg=1)
+    for x in (-2.2, 0, 2.2):
+        cube((1.8, 0.08, 1.9), (x, -d / 2 - 0.01, 0.95), m['steel'])
+        for k in range(8):
+            cube((1.8, 0.02, 0.03), (x, -d / 2 - 0.06, 0.15 + k * 0.23), m['door'])
+        cube((2.0, 0.1, 0.12), (x, -d / 2 - 0.03, 1.95), m['trim'])
+    windows_row(m, w - 1, d / 2 + 0.01, 1.4, 2.1, 5, h=0.4)
+    cyl(0.12, 0.8, (2.8, 1.6, h + 0.5), m['steel'], verts=10)  # exhaust stack
+    write('mil_depot')
+
+def mil_shed():
+    begin(); m = mil_common()
+    w, d = 8, 5
+    for x in (-3.8, -1.27, 1.27, 3.8):
+        for y in (-2.3, 2.3):
+            cube((0.22, 0.22, 3.0), (x, y, 1.5), m['steel'])
+        tr = cube((0.12, d, 0.12), (x, 0, 3.0), m['steel'])
+    for sy in (-1, 1):
+        sl = cube((w + 0.4, d / 2 + 0.5, 0.1), (0, sy * 1.47, 3.25), m['roof'])
+        sl.rotation_euler.x = -sy * 0.2
+    cube((w, 0.12, 0.14), (0, 0, 3.5), m['steel'])
+    cube((w, 0.25, 1.2), (0, d / 2, 0.6), m['wall2'])  # back wall
+    cube((w + 0.4, d + 0.4, 0.06), (0, 0, 0.03), m['wall2'])  # concrete slab
+    write('mil_shed')
+
+def navy_pier():
+    begin(); m = mil_common()
+    wood = mat('pier', [0.35, 0.22, 0.12], rough=0.85)
+    cube((13, 1.2, 0.18), (0, 0, 0.32), wood, bevel=0.02, seg=1)
+    for x in [i * 1.3 - 6.2 for i in range(10)]:
+        cyl(0.1, 0.9, (x, -0.55, 0.0), m['steel'], verts=8)
+        cyl(0.1, 0.9, (x, 0.55, 0.0), m['steel'], verts=8)
+        cyl(0.09, 0.22, (x, -0.5, 0.52), m['door'], verts=8)  # bollard
+    for k in range(13):
+        cube((0.04, 1.18, 0.01), (-6.0 + k, 0, 0.415), m['door'])  # plank joints
+    # A small dockside crane
+    cube((0.5, 0.5, 3.2), (5.8, 0.3, 2.0), m['star'])
+    arm = cube((3.0, 0.25, 0.25), (4.6, 0.3, 3.6), m['star'])
+    cyl(0.02, 1.4, (3.3, 0.3, 2.9), m['steel'], verts=4)
+    for x in (-5.5, 0, 5.0):
+        cyl(0.05, 1.6, (x, 0.5, 1.2), m['steel'], verts=6)
+        cube((0.25, 0.12, 0.12), (x, 0.4, 2.0), m['trim'])
+    write('navy_pier')
+
+def navy_hq():
+    begin(); m = mil_common()
+    white = mat('navywhite', [0.88, 0.88, 0.86], rough=0.6)
+    blue = mat('navyblue', [0.03, 0.08, 0.3], rough=0.6)
+    cube((4, 3, 2.4), (0, 0, 1.2), white, bevel=0.04, seg=1)
+    cube((4.3, 3.3, 0.22), (0, 0, 2.5), blue, bevel=0.03, seg=1)
+    windows_row(m, 3, -1.51, 1.0, 1.8, 3, h=0.5)
+    cube((0.9, 0.06, 1.6), (1.4, -1.51, 0.8), blue)
+    # Anchor emblem
+    cube((0.08, 0.04, 0.7), (-0.2, -1.53, 1.6), m['star'])
+    cube((0.4, 0.04, 0.08), (-0.2, -1.53, 1.85), m['star'])
+    cyl(0.2, 0.04, (-0.2, -1.53, 1.3), m['star'], rot=(math.pi / 2, 0, 0), verts=12)
+    cyl(0.04, 2.2, (1.6, 1.0, 3.6), m['steel'], verts=6)
+    write('navy_hq')
+
+def watchtower():
+    begin(); m = mil_common()
+    wood = mat('wtwood', [0.32, 0.22, 0.12], rough=0.85)
+    for x in (-0.8, 0.8):
+        for y in (-0.8, 0.8):
+            l = cyl(0.08, 4.0, (x * 0.85, y * 0.85, 2.0), wood, verts=6)
+    for z in (1.2, 2.6):
+        cube((1.8, 0.06, 0.06), (0, -0.7, z), wood); cube((1.8, 0.06, 0.06), (0, 0.7, z), wood)
+    cube((2.2, 2.2, 0.15), (0, 0, 4.0), wood)
+    for sy in (-1, 1):
+        cube((2.2, 0.06, 0.7), (0, sy * 1.07, 4.45), wood)
+        cube((0.06, 2.2, 0.7), (sy * 1.07, 0, 4.45), wood)
+    for sy in (-1, 1):
+        sl = cube((2.6, 1.5, 0.08), (0, sy * 0.66, 5.44), m['roof'])
+        sl.rotation_euler.x = -sy * 0.5
+    cyl(0.12, 0.25, (0.7, -1.1, 4.9), m['steel'], rot=(math.pi / 2, 0, 0), verts=10)  # searchlight
+    write('watchtower')
+
+def radar_dome():
+    begin(); m = mil_common()
+    white = mat('radarwhite', [0.86, 0.86, 0.84], rough=0.5)
+    cyl(1.3, 1.6, (0, 0, 0.8), m['wall2'], verts=16)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=24, ring_count=12, radius=1.5, location=(0, 0, 2.0))
+    add(bpy.context.object, white, smooth=True)
+    cube((3.2, 3.2, 0.1), (0, 0, 0.05), m['wall2'])
+    write('radar_dome')
+
+def sandbags():
+    begin(); m = mil_common()
+    for row in range(3):
+        n = 6 - row
+        for k in range(n):
+            a = -0.9 + (k + 0.5 + row * 0.5) * (1.8 / 6)
+            x, y = math.sin(a) * 1.6, -math.cos(a) * 1.6 + 1.6
+            b = cube((0.55, 0.32, 0.24), (x, y, 0.12 + row * 0.23), m['sand'], bevel=0.09, seg=2)
+            b.rotation_euler.z = a
+    write('sandbags')
+
+mil_hq(); mil_barracks(); mil_depot(); mil_shed(); navy_pier(); navy_hq(); watchtower(); radar_dome(); sandbags()
+
 helicopter()
 armored()
 person_parts()
