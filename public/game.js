@@ -6515,6 +6515,8 @@ homeBtn.addEventListener('click', () => {
   updateCamera(0, true);
 });
 const airBtn = document.getElementById('airbtn');
+const schedBtn = document.getElementById('schedbtn');
+schedBtn.addEventListener('click', openSchedule);
 airBtn.addEventListener('click', () => {
   if (player.floor !== 0 || lift.riding || BASE.flight) return;
   if (inside) inside = null;
@@ -6553,6 +6555,8 @@ function updateHomeBtn() {
     hudState.atAirport = there;
     updateGoal();
   }
+  const sched = running && there && player.floor === 0 && Object.keys(AIR.gates).length > 0;
+  if (schedBtn.style.display !== (sched ? 'block' : 'none')) schedBtn.style.display = sched ? 'block' : 'none';
 }
 
 // ---------- 3D empire maps: province, region, country and a globe ----------
@@ -11313,7 +11317,49 @@ const GATES = [
   { id: 'g2', x: 473, needs: 'gate2' },
 ];
 const FLAG_ORIGINS = ['🇯🇵', '🇨🇳', '🇰🇷', '🇸🇬', '🇦🇺', '🇬🇧', '🇺🇸', '🇩🇪', '🇮🇳', '🇦🇪'];
-const defaultAirport = () => ({ step: 0, paid: 0, hired: [], cash: {}, flights: 0 });
+const defaultAirport = () => ({ step: 0, paid: 0, hired: [], cash: {}, flights: 0, sched: {}, seen: 1, ontime: 0, contracts: 0 });
+// --- airlines and the flight schedule ---
+// Airlines open up as the airport handles more flights. Each one pays a contract fee per scheduled
+// flight (×1.5 when the plane is at the gate within 20 minutes of its slot) and brings medical tourists.
+const AIRLINES = [
+  { id: 'quest', icon: '🩺', name: 'QuestAir', color: 0x1e88e5, from: '🇹🇭', fee: 400, need: 0 },
+  { id: 'lotus', icon: '🪷', name: 'Lotus Wings', color: 0xd81b60, from: '🇮🇳', fee: 600, need: 10 },
+  { id: 'sakura', icon: '🌸', name: 'Sakura Jet', color: 0xf48fb1, from: '🇯🇵', fee: 800, need: 25 },
+  { id: 'merlion', icon: '🦁', name: 'Merlion Air', color: 0xf9a825, from: '🇸🇬', fee: 1000, need: 45 },
+  { id: 'outback', icon: '🦘', name: 'Outback Link', color: 0xef6c00, from: '🇦🇺', fee: 1300, need: 70 },
+  { id: 'pearl', icon: '🐚', name: 'Desert Pearl', color: 0x8e24aa, from: '🇦🇪', fee: 1700, need: 100 },
+  { id: 'nordic', icon: '❄️', name: 'Nordic Blue', color: 0x00838f, from: '🇩🇪', fee: 2200, need: 150 },
+];
+const SLOTS = 12; // two-hour slots in a game day
+const SLOT_MIN = (24 * 60) / SLOTS;
+const airlineOf = (id) => AIRLINES.find((a) => a.id === id);
+const airlinesOpen = () => AIRLINES.filter((a) => (AP().flights || 0) >= a.need);
+const curSlot = () => Math.floor(cityState().min / SLOT_MIN) % SLOTS;
+const gateSched = (gid) => {
+  const sc = (AP().sched = AP().sched || {});
+  if (!sc[gid] || sc[gid].length !== SLOTS) sc[gid] = Array(SLOTS).fill(null);
+  return sc[gid];
+};
+const contractPay = (a, onTime) => Math.round(a.fee * priceMult() * (onTime ? 1.5 : 1));
+function setLivery(plane, color) {
+  plane.traverse((m) => { if (m.userData?.key === 'livery') m.material = carPaint(color); });
+}
+// Fill every empty slot with the best-paying airline open (used by the panel button and by AUTO)
+function autoFillSchedule() {
+  const best = airlinesOpen().sort((a, b) => b.fee - a.fee)[0];
+  if (!best) return 0;
+  let n = 0;
+  for (const gid of Object.keys(AIR.gates)) {
+    const row = gateSched(gid);
+    row.forEach((v0, i) => {
+      if (!v0) {
+        row[i] = best.id;
+        n++;
+      }
+    });
+  }
+  return n;
+}
 const AP = () => {
   if (!state.airport) state.airport = defaultAirport();
   return state.airport;
@@ -11799,6 +11845,74 @@ function updatePassengers(dt) {
   }
 }
 
+// --- the 🗓️ flight schedule panel ---
+let schedTab = 'plan';
+function openSchedule() {
+  let el = document.getElementById('schedsheet');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'schedsheet';
+    el.className = 'sheet promptsheet';
+    el.innerHTML = '<div class="box"></div>';
+    document.body.append(el);
+    el.addEventListener('click', (e) => { if (e.target === el) el.style.display = 'none'; });
+  }
+  renderSchedule();
+  el.style.display = 'flex';
+}
+function renderSchedule() {
+  const el = document.getElementById('schedsheet');
+  const box = el.querySelector('.box');
+  const open = airlinesOpen();
+  box.innerHTML = `<h3>🗓️ ${tx('ตารางบิน', 'Flight schedule')}</h3><p class="sub">${tx('ตอนนี้', 'Now')} ${clockText()} · ${tx('เที่ยวบินทั้งหมด', 'flights')} ${AP().flights || 0} · ${tx('ตรงเวลา', 'on time')} ${AP().ontime || 0}/${AP().contracts || 0}</p>`;
+  const tabs = emEl('div', 'hubtabs');
+  for (const [id, label] of [['plan', tx('🗓️ ตาราง', '🗓️ Plan')], ['air', tx('✈️ สายการบิน', '✈️ Airlines')]]) {
+    const b = emEl('button', schedTab === id ? 'on' : '', label);
+    b.addEventListener('click', () => { schedTab = id; renderSchedule(); });
+    tabs.append(b);
+  }
+  box.append(tabs);
+  if (schedTab === 'plan') {
+    box.append(emEl('p', 'emhint', tx('แตะช่องเพื่อเปลี่ยนสายการบิน · ช่องละ 2 ชั่วโมงในเกม · ถึงประตูภายใน 20 นาทีแรก = ตรงเวลา ×1.5', 'Tap a slot to change airline · each slot is 2 game hours · at the gate in the first 20 minutes = on time ×1.5')));
+    const grid = emEl('div', 'schedgrid');
+    grid.style.gridTemplateColumns = `56px repeat(${SLOTS}, 1fr)`;
+    grid.append(emEl('div', 'sh', ''));
+    for (let i = 0; i < SLOTS; i++) grid.append(emEl('div', `sh${i === curSlot() ? ' now' : ''}`, String(i * 2).padStart(2, '0')));
+    for (const gid of Object.keys(AIR.gates)) {
+      grid.append(emEl('div', 'sg', `🚪 ${gid === 'g1' ? 1 : 2}`));
+      const row = gateSched(gid);
+      row.forEach((id, i) => {
+        const a = airlineOf(id);
+        const cell = emEl('button', `sc${i === curSlot() ? ' now' : ''}`, a ? a.icon : '·');
+        if (a) cell.style.background = `#${new THREE.Color(a.color).getHexString()}`;
+        cell.title = a ? a.name : '';
+        cell.addEventListener('click', () => {
+          // Cycle: empty → each open airline → empty
+          const ids = [null, ...open.map((x) => x.id)];
+          row[i] = ids[(ids.indexOf(id) + 1) % ids.length];
+          save();
+          renderSchedule();
+        });
+        grid.append(cell);
+      });
+    }
+    box.append(grid);
+    const fill = emButton(tx('✨ เติมช่องว่างด้วยสายการบินที่จ่ายดีที่สุด', '✨ Fill empty slots with the best-paying airline'), !Object.keys(AIR.gates).length, () => { autoFillSchedule(); save(); renderSchedule(); });
+    const clear = emButton(tx('ล้างตาราง', 'Clear'), false, () => { for (const gid of Object.keys(AIR.gates)) gateSched(gid).fill(null); save(); renderSchedule(); });
+    clear.classList.add('ghost');
+    box.append(fill, clear);
+  } else {
+    for (const a of AIRLINES) {
+      const ok = (AP().flights || 0) >= a.need;
+      const row = emEl('div', `uprow${ok ? '' : ' locked'}`, `<div class="upico" style="background:#${new THREE.Color(a.color).getHexString()}">${a.icon}</div><div class="upinfo"><b>${a.name}</b> ${a.from}<br><small>${ok ? `${tx('ค่าสัญญา', 'Contract')} 💵${fmt(contractPay(a, false))} · ${tx('ตรงเวลา', 'on time')} 💵${fmt(contractPay(a, true))}` : `🔒 ${tx('เปิดเมื่อครบ', 'opens at')} ${a.need} ${tx('เที่ยวบิน', 'flights')}`}</small></div>`);
+      box.append(row);
+    }
+  }
+  const close = emButton(tx('ปิด', 'Close'), false, () => { el.style.display = 'none'; });
+  close.classList.add('ghost');
+  box.append(close);
+}
+
 // --- planes: land, taxi to the gate, board, push back, take off ---
 function planePath(gate, kind) {
   const gx = gate.G.x;
@@ -11813,12 +11927,24 @@ function updatePlanes(dt) {
     const pl = gate.plane;
     if (gate.state === 'away') {
       gate.t -= dt;
+      // A scheduled flight whose slot has come round goes in at once; otherwise a charter fills the gap
+      const slot = curSlot();
+      const key = `${cityState().day}:${slot}`;
+      const due = gateSched(gate.G.id)[slot];
+      if (due && gate.served !== key) gate.t = Math.min(gate.t, 0);
       if (gate.t <= 0) {
+        const a = due && gate.served !== key ? airlineOf(due) : null;
+        gate.airline = a;
+        if (a) {
+          gate.served = key;
+          gate.onTime = cityState().min % SLOT_MIN <= 20;
+        }
         gate.state = 'arrive';
         gate.path = planePath(gate, 'arrive');
         pl.position.copy(gate.path[0].p);
         pl.visible = true;
-        gate.flag = pick(FLAG_ORIGINS);
+        gate.flag = a ? a.from : pick(FLAG_ORIGINS);
+        setLivery(pl, a ? a.color : pick([0x78909c, 0x5c6bc0, 0x26a69a]));
       }
       continue;
     }
@@ -11874,6 +12000,22 @@ function updatePlanes(dt) {
           gate.t = rand(8, 14) * fast;
           pl.visible = false;
           pl.rotation.set(0, 0, 0);
+          if (gate.airline) {
+            // The contract pays when the flight leaves
+            const a = gate.airline;
+            const pay = contractPay(a, gate.onTime);
+            AIR.piles[gate.G.id].add(pay);
+            AP().contracts = (AP().contracts || 0) + 1;
+            if (gate.onTime) AP().ontime = (AP().ontime || 0) + 1;
+            if (inAirport(player.group.position)) toast(`${a.icon} <b>${a.name}</b> ${gate.onTime ? tx('ออกตรงเวลา', 'left on time') : tx('ออกแล้ว', 'departed')} · ${tx('ค่าสัญญา', 'contract')} 💵${fmt(pay)}`, 2200);
+            gate.airline = null;
+          }
+          const open = airlinesOpen().length;
+          if (open > (AP().seen || 1)) {
+            AP().seen = open;
+            const n = airlinesOpen().slice(-1)[0];
+            toast(`✈️ <b>${tx('สายการบินใหม่!', 'New airline!')}</b> ${n.icon} ${n.name} ${n.from}<br><small>${tx('ใส่ลงตารางบินได้แล้ว', 'add it to the flight schedule')} · ${tx('ค่าสัญญา', 'contract')} 💵${fmt(contractPay(n, false))}</small>`, 4500);
+          }
         }
       }
     }
@@ -11971,7 +12113,7 @@ function updateAirport(dt) {
   updateMedevac(dt);
 }
 // Medical tourists fly in through the airport
-const airportTourism = () => (AP().step ? Math.min(8, AP().step + Object.keys(AIR.gates).length) : 0);
+const airportTourism = () => (AP().step ? Math.min(8, AP().step + Object.keys(AIR.gates).length) + Math.min(6, new Set(Object.values(AP().sched || {}).flat().filter(Boolean)).size) : 0);
 const airportPiles = () => Object.values(AIR.piles);
 function airportSnapshot() {
   return { ...AP(), cash: Object.fromEntries(Object.entries(AIR.piles).map(([k, p]) => [k, p.amount])) };
@@ -12583,10 +12725,15 @@ function autoTasks() {
 
 // AUTO keeps the city's power, water and waste up with demand: it upgrades the utility that is
 // shortest, or builds one on the empty lot with the fewest homes nearby, keeping a cash buffer
+function autoSchedule() {
+  if (!AP().step || !Object.keys(AIR.gates).length) return;
+  if (autoFillSchedule()) save();
+}
 function autoUtilities(dt) {
   autoUtilities.t = (autoUtilities.t || 0) + dt;
   if (autoUtilities.t < 8) return;
   autoUtilities.t = 0;
+  autoSchedule();
   const e = emp();
   if (!district.built || !e || !cityPopulation()) return;
   const short = UTILS.map((u) => ({ id: u.id, c: utilCover(u.id) })).filter((u) => u.c < 1).sort((a, b) => a.c - b.c)[0];
@@ -13669,10 +13816,129 @@ function frameRest(dt, now) {
     // The shadow pass is most of the frame on phones: redraw it every other frame
     shadowTick = !shadowTick;
     renderer.shadowMap.needsUpdate = shadowTick;
-    renderer.render(scene, camera);
+    renderFrame();
   }
   requestAnimationFrame(frame);
 }
+
+// ---------- high-quality mode: ambient occlusion and a soft glow, added in one extra pass ----------
+// The scene renders into an HDR target (with depth); a full-screen shader darkens creases where
+// surfaces meet, adds bloom from a small blurred copy of the bright parts, then tone-maps to the screen.
+// Off by default and never in low-power mode: it costs a few extra full-screen passes.
+let hqOn = false;
+try {
+  hqOn = !LITE && localStorage.getItem('drquest-hq') === 'on';
+} catch {
+  hqOn = false;
+}
+const HQ = { size: new THREE.Vector2(), rt: null, small: [], quad: null, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), mats: {} };
+const fullVert = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+function hqSetup(w, h) {
+  HQ.rt?.dispose();
+  HQ.small.forEach((t) => t.dispose());
+  HQ.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4 });
+  HQ.rt.depthTexture = new THREE.DepthTexture(w, h);
+  HQ.rt.depthTexture.type = THREE.UnsignedIntType;
+  const sw = Math.max(1, Math.floor(w / 4));
+  const sh = Math.max(1, Math.floor(h / 4));
+  HQ.small = [0, 1].map(() => new THREE.WebGLRenderTarget(sw, sh, { type: THREE.HalfFloatType }));
+  if (!HQ.quad) {
+    HQ.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+    HQ.quad.frustumCulled = false;
+    HQ.scene = new THREE.Scene();
+    HQ.scene.add(HQ.quad);
+    HQ.mats.bright = new THREE.ShaderMaterial({
+      uniforms: { tColor: { value: null } }, vertexShader: fullVert, toneMapped: false, depthTest: false, depthWrite: false,
+      fragmentShader: `uniform sampler2D tColor; varying vec2 vUv;
+        void main(){ vec3 c = texture2D(tColor, vUv).rgb; float l = max(c.r, max(c.g, c.b));
+          gl_FragColor = vec4(c * smoothstep(1.0, 1.8, l), 1.0); }`,
+    });
+    HQ.mats.blur = new THREE.ShaderMaterial({
+      uniforms: { tColor: { value: null }, dir: { value: new THREE.Vector2() } }, vertexShader: fullVert, toneMapped: false, depthTest: false, depthWrite: false,
+      fragmentShader: `uniform sampler2D tColor; uniform vec2 dir; varying vec2 vUv;
+        void main(){ vec3 c = texture2D(tColor, vUv).rgb * 0.227;
+          c += (texture2D(tColor, vUv + dir * 1.385).rgb + texture2D(tColor, vUv - dir * 1.385).rgb) * 0.316;
+          c += (texture2D(tColor, vUv + dir * 3.23).rgb + texture2D(tColor, vUv - dir * 3.23).rgb) * 0.07;
+          gl_FragColor = vec4(c, 1.0); }`,
+    });
+    HQ.mats.final = new THREE.ShaderMaterial({
+      uniforms: { tColor: { value: null }, tDepth: { value: null }, tBloom: { value: null }, res: { value: new THREE.Vector2() }, near: { value: 0.1 }, far: { value: 200 } },
+      vertexShader: fullVert, depthTest: false, depthWrite: false,
+      fragmentShader: `#include <packing>
+        uniform sampler2D tColor; uniform sampler2D tDepth; uniform sampler2D tBloom; uniform vec2 res; uniform float near; uniform float far; varying vec2 vUv;
+        float lin(vec2 uv){ return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, near, far); }
+        void main(){
+          vec3 col = texture2D(tColor, vUv).rgb;
+          float raw = texture2D(tDepth, vUv).x;
+          float ao = 1.0;
+          if (raw < 0.9999) {
+            float d = lin(vUv);
+            float r = clamp(260.0 / d, 3.0, 22.0) * (res.y / 900.0);
+            float occ = 0.0;
+            for (int i = 0; i < 12; i++) {
+              float a = float(i) * 2.39996;
+              float k = (float(i) + 0.5) / 12.0;
+              vec2 o = vec2(cos(a), sin(a)) * r * sqrt(k) / res;
+              float diff = d - lin(vUv + o);
+              occ += smoothstep(0.03, 0.35, diff) * (1.0 - smoothstep(0.6, 2.2, diff));
+            }
+            ao = 1.0 - 0.55 * occ / 12.0;
+          }
+          col = col * ao + texture2D(tBloom, vUv).rgb * 0.6;
+          gl_FragColor = vec4(col, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }`,
+    });
+  }
+}
+function hqPass(mat, target) {
+  HQ.quad.material = mat;
+  renderer.setRenderTarget(target);
+  renderer.render(HQ.scene, HQ.cam);
+}
+function renderFrame() {
+  if (!hqOn) {
+    renderer.render(scene, camera);
+    return;
+  }
+  renderer.getDrawingBufferSize(HQ.size);
+  if (!HQ.rt || HQ.rt.width !== HQ.size.x || HQ.rt.height !== HQ.size.y) hqSetup(HQ.size.x, HQ.size.y);
+  renderer.setRenderTarget(HQ.rt);
+  renderer.render(scene, camera);
+  const [a, b] = HQ.small;
+  HQ.mats.bright.uniforms.tColor.value = HQ.rt.texture;
+  hqPass(HQ.mats.bright, a);
+  HQ.mats.blur.uniforms.tColor.value = a.texture;
+  HQ.mats.blur.uniforms.dir.value.set(1 / a.width, 0);
+  hqPass(HQ.mats.blur, b);
+  HQ.mats.blur.uniforms.tColor.value = b.texture;
+  HQ.mats.blur.uniforms.dir.value.set(0, 1 / a.height);
+  hqPass(HQ.mats.blur, a);
+  const f = HQ.mats.final.uniforms;
+  f.tColor.value = HQ.rt.texture;
+  f.tDepth.value = HQ.rt.depthTexture;
+  f.tBloom.value = a.texture;
+  f.res.value.copy(HQ.size);
+  f.near.value = camera.near;
+  f.far.value = camera.far;
+  hqPass(HQ.mats.final, null);
+}
+const hqBtn = document.getElementById('hqbtn');
+const hqLabel = () => {
+  hqBtn.textContent = `✨ ${tx('ภาพคุณภาพสูง', 'High-quality graphics')}: ${hqOn ? tx('เปิด', 'on') : tx('ปิด', 'off')}`;
+  hqBtn.style.display = LITE ? 'none' : '';
+};
+hqLabel();
+hqBtn.addEventListener('click', () => {
+  hqOn = !hqOn;
+  try {
+    localStorage.setItem('drquest-hq', hqOn ? 'on' : 'off');
+  } catch {
+    // just this session
+  }
+  hqLabel();
+});
 
 // ---------- start ----------
 await loadModels();
@@ -14201,4 +14467,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
