@@ -351,7 +351,6 @@ function setEnvLevel(f) {
 
 renderer.shadowMap.autoUpdate = false;
 renderer.shadowMap.needsUpdate = true;
-let shadowTick = false;
 
 function resize() {
   const w = window.innerWidth;
@@ -11229,7 +11228,7 @@ function trackPerf(now) {
   const fps = perf.n / sec;
   const bucket = fps >= 55 ? 60 : fps >= 40 ? 45 : fps >= 28 ? 30 : fps >= 18 ? 20 : 10;
   const mobile = matchMedia('(pointer: coarse)').matches ? 'm' : 'd';
-  logProgress(`fps${bucket}_${mobile}_${LITE ? 'lite' : 'full'}`);
+  logProgress(`fps${bucket}_${mobile}_${LITE ? 'lite' : 'full'}_r${Math.round(quality.pr * 100)}`);
 }
 
 // --- 6. English for the main interface (the world's signs and story stay Thai for now) ---
@@ -13700,6 +13699,48 @@ function updateCamera(dt, snap = false) {
 
 // Slow phone? After 12 s of play, suggest low-power mode once
 const fpsWatch = { start: 0, frames: 0, done: LITE };
+// --- adaptive quality: keep the frame rate up on slow machines by lowering the resolution first ---
+// Real players reported 10 fps on some laptops (big screens at 2× pixel ratio). Every 3 s this looks at
+// the frame rate: below 27 fps it steps the pixel ratio down (to 0.75 at the lowest), then redraws the
+// shadows less often, then turns off high-quality mode; above 57 fps it slowly steps back up.
+let shadowN = 0;
+const quality = { maxPR: Math.min(window.devicePixelRatio || 1, LITE ? 1 : 2), pr: 0, shadowEvery: 2, t0: 0, n: 0, lastUp: 0 };
+quality.pr = quality.maxPR;
+function adaptQuality(now) {
+  if (!running || mapView.active || document.hidden) {
+    quality.t0 = 0;
+    return;
+  }
+  if (!quality.t0) {
+    quality.t0 = now;
+    quality.n = 0;
+    return;
+  }
+  quality.n++;
+  if (now - quality.t0 < 3000) return;
+  const fps = (quality.n * 1000) / (now - quality.t0);
+  quality.t0 = now;
+  quality.n = 0;
+  if (fps < 27) {
+    if (quality.pr > 0.75) {
+      quality.pr = Math.max(0.75, quality.pr - 0.25);
+      renderer.setPixelRatio(quality.pr);
+    } else if (quality.shadowEvery < 4) {
+      quality.shadowEvery++;
+    } else if (hqOn) {
+      hqOn = false;
+      hqLabel();
+      toast(tx('✨ ปิดภาพคุณภาพสูงให้ เพราะเครื่องนี้เล่นไม่ลื่น', '✨ High-quality graphics turned off: this device was struggling'), 3500);
+    }
+  } else if (fps > 57 && now - quality.lastUp > 10000) {
+    quality.lastUp = now;
+    if (quality.shadowEvery > 2) quality.shadowEvery--;
+    else if (quality.pr < quality.maxPR) {
+      quality.pr = Math.min(quality.maxPR, quality.pr + 0.25);
+      renderer.setPixelRatio(quality.pr);
+    }
+  }
+}
 function watchFps(now) {
   if (fpsWatch.done || !running) return;
   if (!fpsWatch.start) fpsWatch.start = now;
@@ -13804,6 +13845,7 @@ function frameRest(dt, now) {
   updateEventHud();
   tickMoneyDisplay(dt);
   watchFps(now);
+  adaptQuality(now);
   updateHomeBtn();
   dnTimer -= dt;
   if (dnTimer <= 0) {
@@ -13813,9 +13855,9 @@ function frameRest(dt, now) {
   }
   if (mapView.active) renderMapView(dt);
   else {
-    // The shadow pass is most of the frame on phones: redraw it every other frame
-    shadowTick = !shadowTick;
-    renderer.shadowMap.needsUpdate = shadowTick;
+    // The shadow pass is most of the frame on phones: redraw it every other frame (or less, see adaptQuality)
+    shadowN = (shadowN + 1) % quality.shadowEvery;
+    renderer.shadowMap.needsUpdate = shadowN === 0;
     renderFrame();
   }
   requestAnimationFrame(frame);
@@ -14467,4 +14509,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
