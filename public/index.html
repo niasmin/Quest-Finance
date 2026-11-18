@@ -343,6 +343,16 @@
   .ach small { display: block; font-size: 9px; color: #4b5a70; margin-top: 2px; }
   .ach.got { filter: none; opacity: 1; background: #fff6d6; }
   #military { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 13; }
+  /* Watch mode: letterbox bars over the game, the HUD hidden underneath */
+  #cine { position: fixed; inset: 0; pointer-events: none; z-index: 16; display: none; }
+  #cine.show { display: block; }
+  #cine .cbar { position: absolute; left: 0; right: 0; height: 12vh; min-height: 64px; background: #000; color: #fff; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 0 16px; box-sizing: border-box; font-family: Mitr, sans-serif; animation: cinein .5s ease-out; }
+  #cine .ctop { top: 0; padding-top: env(safe-area-inset-top); font-size: 20px; }
+  #cine .cbot { bottom: 0; padding-bottom: env(safe-area-inset-bottom); font-size: 15px; color: #ffd166; }
+  #cine #cineskip { position: absolute; right: 10px; pointer-events: auto; padding: 6px 12px; font-size: 13px; color: #fff; border-color: rgba(255,255,255,.4); }
+  #cine #cinehits { color: #fff; }
+  @keyframes cinein { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+  body.cine #hud, body.cine #dock, body.cine #tut, body.cine #goal, body.cine #hint, body.cine #joy, body.cine #autobadge, body.cine #evchips, body.cine #liftpick, body.cine #toast, body.cine .float { visibility: hidden !important; }
   #military .box { background: #f6f3e7; color: #1d2433; border-radius: 22px; padding: 18px; width: min(390px, 92vw); max-height: 88dvh; overflow-y: auto; border: 4px solid #6b7a3a; }
   #military h3 { margin: 0 0 4px; text-align: center; }
   #military .sub { text-align: center; color: #3a4520; font-size: 13px; margin: 0 0 8px; }
@@ -437,6 +447,7 @@
 </div>
 <div id="toast"></div>
 <div id="military"><div class="box"></div></div>
+<div id="cine"><div class="cbar ctop"><b id="cinecap"></b><button id="cineskip" class="btn ghost">ข้าม ⏭</button></div><div class="cbar cbot"><span id="cinesub"></span><b id="cinehits"></b></div></div>
 <div id="storypanel"><div class="box"></div></div>
 <div id="cityhub"><div class="box"></div></div>
 <div id="ending"><div class="box"></div></div>
