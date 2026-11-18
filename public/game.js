@@ -11316,18 +11316,37 @@ const GATES = [
   { id: 'g2', x: 473, needs: 'gate2' },
 ];
 const FLAG_ORIGINS = ['🇯🇵', '🇨🇳', '🇰🇷', '🇸🇬', '🇦🇺', '🇬🇧', '🇺🇸', '🇩🇪', '🇮🇳', '🇦🇪'];
-const defaultAirport = () => ({ step: 0, paid: 0, hired: [], cash: {}, flights: 0, sched: {}, seen: 1, ontime: 0, contracts: 0 });
+const defaultAirport = () => ({ step: 0, paid: 0, hired: [], cash: {}, flights: 0, sched: {}, seen: 1, ontime: 0, contracts: 0, stand: {}, svc: [], themes: [], theme: null });
 // --- airlines and the flight schedule ---
 // Airlines open up as the airport handles more flights. Each one pays a contract fee per scheduled
 // flight (×1.5 when the plane is at the gate within 20 minutes of its slot) and brings medical tourists.
 const AIRLINES = [
-  { id: 'quest', icon: '🩺', name: 'QuestAir', color: 0x1e88e5, from: '🇹🇭', fee: 400, need: 0 },
-  { id: 'lotus', icon: '🪷', name: 'Lotus Wings', color: 0xd81b60, from: '🇮🇳', fee: 600, need: 10 },
-  { id: 'sakura', icon: '🌸', name: 'Sakura Jet', color: 0xf48fb1, from: '🇯🇵', fee: 800, need: 25 },
-  { id: 'merlion', icon: '🦁', name: 'Merlion Air', color: 0xf9a825, from: '🇸🇬', fee: 1000, need: 45 },
-  { id: 'outback', icon: '🦘', name: 'Outback Link', color: 0xef6c00, from: '🇦🇺', fee: 1300, need: 70 },
-  { id: 'pearl', icon: '🐚', name: 'Desert Pearl', color: 0x8e24aa, from: '🇦🇪', fee: 1700, need: 100 },
-  { id: 'nordic', icon: '❄️', name: 'Nordic Blue', color: 0x00838f, from: '🇩🇪', fee: 2200, need: 150 },
+  { id: 'quest', icon: '🩺', name: 'QuestAir', color: 0x1e88e5, from: '🇹🇭', fee: 400, need: 0, size: 1 },
+  { id: 'lotus', icon: '🪷', name: 'Lotus Wings', color: 0xd81b60, from: '🇮🇳', fee: 600, need: 10, size: 1 },
+  { id: 'sakura', icon: '🌸', name: 'Sakura Jet', color: 0xf48fb1, from: '🇯🇵', fee: 800, need: 25, size: 1 },
+  { id: 'merlion', icon: '🦁', name: 'Merlion Air', color: 0xf9a825, from: '🇸🇬', fee: 1000, need: 45, size: 2 },
+  { id: 'outback', icon: '🦘', name: 'Outback Link', color: 0xef6c00, from: '🇦🇺', fee: 1300, need: 70, size: 2 },
+  { id: 'pearl', icon: '🐚', name: 'Desert Pearl', color: 0x8e24aa, from: '🇦🇪', fee: 1700, need: 100, size: 3 },
+  { id: 'nordic', icon: '❄️', name: 'Nordic Blue', color: 0x00838f, from: '🇩🇪', fee: 2200, need: 150, size: 3 },
+];
+// Stands come in three sizes; an airline's aircraft only fits a stand at least as big as it
+const STAND_SIZES = [null, { name: 'ขนาดกลาง', en: 'Medium', scale: 1 }, { name: 'ขนาดใหญ่', en: 'Large', scale: 1.2, cost: 300000 }, { name: 'ขนาดจัมโบ้', en: 'Jumbo', scale: 1.4, cost: 900000 }];
+const standOf = (gid) => (AP().stand = AP().stand || {})[gid] || 1;
+const fits = (a, gid) => !a || a.size <= standOf(gid);
+// Ground services: each one cuts the time a plane spends at the gate by 15%
+const SERVICES = [
+  { id: 'fuel', icon: '⛽', name: 'รถเติมน้ำมัน', en: 'Fuel truck', cost: 120000, color: 0xe53935 },
+  { id: 'catering', icon: '🍱', name: 'รถอาหารบนเครื่อง', en: 'Catering truck', cost: 180000, color: 0xffffff },
+  { id: 'baggage', icon: '🧳', name: 'รถลำเลียงกระเป๋า', en: 'Baggage loader', cost: 240000, color: 0xffd166 },
+];
+const hasSvc = (id) => (AP().svc || []).includes(id);
+const svcMult = () => 1 - 0.15 * (AP().svc || []).length;
+// Terminal themes: one shows at a time; the one on show makes passengers pay 10% more and draws tourists
+const THEMES_AIR = [
+  { id: 'thai', icon: '🛕', name: 'ไทย', en: 'Thai', cost: 150000 },
+  { id: 'japan', icon: '⛩️', name: 'ญี่ปุ่น', en: 'Japanese', cost: 220000 },
+  { id: 'arabian', icon: '🕌', name: 'ตะวันออกกลาง', en: 'Arabian', cost: 300000 },
+  { id: 'nordic', icon: '🌲', name: 'นอร์ดิก', en: 'Nordic', cost: 380000 },
 ];
 const SLOTS = 12; // two-hour slots in a game day
 const SLOT_MIN = (24 * 60) / SLOTS;
@@ -11345,10 +11364,10 @@ function setLivery(plane, color) {
 }
 // Fill every empty slot with the best-paying airline open (used by the panel button and by AUTO)
 function autoFillSchedule() {
-  const best = airlinesOpen().sort((a, b) => b.fee - a.fee)[0];
-  if (!best) return 0;
   let n = 0;
   for (const gid of Object.keys(AIR.gates)) {
+    const best = airlinesOpen().filter((a) => fits(a, gid)).sort((a, b) => b.fee - a.fee)[0];
+    if (!best) continue;
     const row = gateSched(gid);
     row.forEach((v0, i) => {
       if (!v0) {
@@ -11708,6 +11727,7 @@ function buildAirport() {
   buildAirportGround();
   for (let i = 0; i < AP().step; i++) AIR_BUILD[AIRPORT_UNLOCKS[i].id]?.();
   for (const [id, amt] of Object.entries(AP().cash || {})) AIR.piles[id]?.add(amt);
+  buildAirTheme();
   showAirTile();
 }
 function showAirTile() {
@@ -11835,13 +11855,91 @@ function updatePassengers(dt) {
         scene.remove(pax.p.group);
         AIR.pax.splice(i, 1);
         if (pax.stage === 'board') {
-          const amt = boardingPay();
+          const amt = Math.round(boardingPay() * (pax.gate.paxMult || 1));
           AIR.piles[pax.gate.G.id].add(amt);
           missionProgress('earn', amt);
         }
       }
     }
   }
+}
+
+// Service vehicles drive up beside a parked plane and leave before it pushes back
+function serviceTruck(color, kind) {
+  const g = new THREE.Group();
+  g.add(at3(box(0.9, 0.55, 1.1, 0x37474f), 0, 0.55, 0.9), at3(box(0.86, 0.32, 0.9, 0x22303f, { shadow: false }), 0, 0.82, 1.05));
+  if (kind === 'fuel') g.add(at3(cylM(0.5, 0.5, 1.8, color, 14).rotateX(Math.PI / 2), 0, 0.75, -0.6));
+  else if (kind === 'catering') g.add(at3(box(1.0, 1.0, 1.8, color), 0, 1.15, -0.6), at3(box(1.05, 0.12, 1.85, 0x90a4ae), 0, 0.6, -0.6));
+  else {
+    const belt = box(0.5, 0.08, 2.4, 0x263238);
+    belt.rotation.x = -0.4;
+    g.add(at3(box(1.0, 0.3, 1.8, color), 0, 0.4, -0.6), at3(belt, 0, 1.0, -1.1));
+  }
+  for (const x of [-0.42, 0.42]) for (const z of [-1.1, 1.0]) g.add(at3(cylM(0.2, 0.2, 0.14, 0x16181d, 10).rotateZ(Math.PI / 2), x, 0.2, z));
+  return g;
+}
+function showServices(gate, on) {
+  if (!gate.trucks) gate.trucks = {};
+  const spots = { fuel: [-3.6, -31.5, 0.6], catering: [2.6, -26.5, -0.4], baggage: [-2.4, -34.5, 0.3] };
+  for (const s of SERVICES) {
+    let t = gate.trucks[s.id];
+    if (on && hasSvc(s.id) && !t) {
+      t = gate.trucks[s.id] = serviceTruck(s.color, s.id);
+      scene.add(t);
+    }
+    if (!t) continue;
+    t.visible = on && hasSvc(s.id);
+    const [dx, z, ry] = spots[s.id];
+    t.position.set(gate.G.x + dx * (gate.plane.scale.x || 1), 0, z);
+    t.rotation.y = ry;
+  }
+}
+// The theme decor in the middle of the terminal: rebuilt when the theme changes
+function buildAirTheme() {
+  if (AIR.themeDecor) scene.remove(AIR.themeDecor);
+  AIR.themeDecor = null;
+  const th = AP().theme;
+  if (!th || !AP().step) return;
+  const g = new THREE.Group();
+  const spots = [[460, -15], [457, -13.2], [463, -13.2], [439.5, -11], [481.5, -17]];
+  if (th === 'thai') {
+    const sala = new THREE.Group();
+    for (const [x, z] of [[-1, -0.8], [1, -0.8], [-1, 0.8], [1, 0.8]]) sala.add(at3(cylM(0.08, 0.08, 1.8, 0xffffff, 8), x, 0.9, z));
+    sala.add(at3(box(2.4, 0.12, 2, 0xd9c7a0), 0, 0.06, 0), at3(thaiRoof(2.6, 2.2, 0.9, 0xd35400), 0, 1.8, 0));
+    g.add(at3(sala, ...[spots[0][0], 0, spots[0][1]]));
+    for (const [x, z] of spots.slice(1)) g.add(at3(cylM(0.35, 0.28, 0.5, 0xb8860b, 10), x, 0.29, z), at3(new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.7, 8), mat(0xffd166)), x, 0.9, z));
+  } else if (th === 'japan') {
+    const torii = new THREE.Group();
+    for (const x of [-1, 1]) torii.add(at3(cylM(0.1, 0.12, 2.4, 0xd32f2f, 10), x, 1.2, 0));
+    torii.add(at3(box(2.8, 0.16, 0.24, 0x263238), 0, 2.48, 0), at3(box(2.4, 0.12, 0.18, 0xd32f2f), 0, 2.1, 0));
+    g.add(at3(torii, spots[0][0], 0, spots[0][1]));
+    for (const [x, z] of spots.slice(1)) {
+      const t = treeModel('sakura');
+      t.scale.setScalar(0.7);
+      g.add(at3(t, x, 0.04, z));
+    }
+  } else if (th === 'arabian') {
+    const dome = new THREE.Group();
+    dome.add(at3(cylM(1.0, 1.0, 1.2, 0xf4e3c3, 16), 0, 0.6, 0), at3(new THREE.Mesh(new THREE.SphereGeometry(1.0, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xd4a017)), 0, 1.2, 0));
+    dome.add(at3(cylM(0.04, 0.04, 0.5, 0xd4a017, 6), 0, 2.4, 0));
+    g.add(at3(dome, spots[0][0], 0, spots[0][1]));
+    for (const [x, z] of spots.slice(1)) {
+      const p = TREES.palm();
+      p.scale.setScalar(0.55);
+      g.add(at3(p, x, 0.04, z));
+    }
+  } else {
+    const cabin = new THREE.Group();
+    cabin.add(at3(box(2.2, 1.3, 1.6, 0x8d5a2b), 0, 0.65, 0), at3(gableRoof(2.2, 1.6, 0.8, 0x37474f), 0, 1.3, 0), at3(box(0.5, 0.8, 0.05, 0xffd166), 0, 0.4, 0.82));
+    g.add(at3(cabin, spots[0][0], 0, spots[0][1]));
+    for (const [x, z] of spots.slice(1)) {
+      const t = treeModel('cone');
+      t.scale.setScalar(0.7);
+      g.add(at3(t, x, 0.04, z));
+    }
+  }
+  scene.add(g);
+  AIR.themeDecor = g;
 }
 
 // --- the 🗓️ flight schedule panel ---
@@ -11865,7 +11963,7 @@ function renderSchedule() {
   const open = airlinesOpen();
   box.innerHTML = `<h3>🗓️ ${tx('ตารางบิน', 'Flight schedule')}</h3><p class="sub">${tx('ตอนนี้', 'Now')} ${clockText()} · ${tx('เที่ยวบินทั้งหมด', 'flights')} ${AP().flights || 0} · ${tx('ตรงเวลา', 'on time')} ${AP().ontime || 0}/${AP().contracts || 0}</p>`;
   const tabs = emEl('div', 'hubtabs');
-  for (const [id, label] of [['plan', tx('🗓️ ตาราง', '🗓️ Plan')], ['air', tx('✈️ สายการบิน', '✈️ Airlines')]]) {
+  for (const [id, label] of [['plan', tx('🗓️ ตาราง', '🗓️ Plan')], ['air', tx('✈️ สายการบิน', '✈️ Airlines')], ['ops', tx('🚚 ลานจอด', '🚚 Stands')], ['deco', tx('🎨 ตกแต่ง', '🎨 Decor')]]) {
     const b = emEl('button', schedTab === id ? 'on' : '', label);
     b.addEventListener('click', () => { schedTab = id; renderSchedule(); });
     tabs.append(b);
@@ -11878,7 +11976,7 @@ function renderSchedule() {
     grid.append(emEl('div', 'sh', ''));
     for (let i = 0; i < SLOTS; i++) grid.append(emEl('div', `sh${i === curSlot() ? ' now' : ''}`, String(i * 2).padStart(2, '0')));
     for (const gid of Object.keys(AIR.gates)) {
-      grid.append(emEl('div', 'sg', `🚪 ${gid === 'g1' ? 1 : 2}`));
+      grid.append(emEl('div', 'sg', `🚪 ${gid === 'g1' ? 1 : 2}<br><small>${['', 'M', 'L', 'XL'][standOf(gid)]}</small>`));
       const row = gateSched(gid);
       row.forEach((id, i) => {
         const a = airlineOf(id);
@@ -11887,7 +11985,7 @@ function renderSchedule() {
         cell.title = a ? a.name : '';
         cell.addEventListener('click', () => {
           // Cycle: empty → each open airline → empty
-          const ids = [null, ...open.map((x) => x.id)];
+          const ids = [null, ...open.filter((x) => fits(x, gid)).map((x) => x.id)];
           row[i] = ids[(ids.indexOf(id) + 1) % ids.length];
           save();
           renderSchedule();
@@ -11900,10 +11998,65 @@ function renderSchedule() {
     const clear = emButton(tx('ล้างตาราง', 'Clear'), false, () => { for (const gid of Object.keys(AIR.gates)) gateSched(gid).fill(null); save(); renderSchedule(); });
     clear.classList.add('ghost');
     box.append(fill, clear);
-  } else {
+  } else if (schedTab === 'air') {
     for (const a of AIRLINES) {
       const ok = (AP().flights || 0) >= a.need;
-      const row = emEl('div', `uprow${ok ? '' : ' locked'}`, `<div class="upico" style="background:#${new THREE.Color(a.color).getHexString()}">${a.icon}</div><div class="upinfo"><b>${a.name}</b> ${a.from}<br><small>${ok ? `${tx('ค่าสัญญา', 'Contract')} 💵${fmt(contractPay(a, false))} · ${tx('ตรงเวลา', 'on time')} 💵${fmt(contractPay(a, true))}` : `🔒 ${tx('เปิดเมื่อครบ', 'opens at')} ${a.need} ${tx('เที่ยวบิน', 'flights')}`}</small></div>`);
+      const row = emEl('div', `uprow${ok ? '' : ' locked'}`, `<div class="upico" style="background:#${new THREE.Color(a.color).getHexString()}">${a.icon}</div><div class="upinfo"><b>${a.name}</b> ${a.from} · ${tx('ลาน', 'stand')} ${tx(STAND_SIZES[a.size].name, STAND_SIZES[a.size].en)}<br><small>${ok ? `${tx('ค่าสัญญา', 'Contract')} 💵${fmt(contractPay(a, false))} · ${tx('ตรงเวลา', 'on time')} 💵${fmt(contractPay(a, true))}` : `🔒 ${tx('เปิดเมื่อครบ', 'opens at')} ${a.need} ${tx('เที่ยวบิน', 'flights')}`}</small></div>`);
+      box.append(row);
+    }
+  } else if (schedTab === 'ops') {
+    box.append(emEl('p', 'emhint', tx('ลานใหญ่ขึ้นรับเครื่องบินลำใหญ่ได้ (ผู้โดยสารจ่ายมากขึ้น ×1.5 / ×2) · รถบริการแต่ละคันทำให้เครื่องบินจอดสั้นลง 15%', 'Bigger stands take bigger aircraft (passengers pay ×1.5 / ×2) · each service vehicle cuts the time at the gate by 15%')));
+    for (const gid of Object.keys(AIR.gates)) {
+      const cur = standOf(gid);
+      const next = STAND_SIZES[cur + 1];
+      const cost = next ? Math.round(next.cost * priceMult()) : 0;
+      const row = emEl('div', 'uprow', `<div class="upico">🚪</div><div class="upinfo"><b>${tx('ประตู', 'Gate')} ${gid === 'g1' ? 1 : 2}</b> · ${tx(STAND_SIZES[cur].name, STAND_SIZES[cur].en)}<br><small>${next ? `${tx('ขยายเป็น', 'Upgrade to')} ${tx(next.name, next.en)}` : tx('ใหญ่ที่สุดแล้ว', 'Largest stand')}</small></div>`);
+      row.append(emButton(next ? `💵${fmt(cost)}` : '✓', !next || state.money < cost, () => {
+        if (state.money < cost) return;
+        state.money -= cost;
+        updateMoney();
+        AP().stand[gid] = cur + 1;
+        sfxUnlock();
+        save();
+        renderSchedule();
+      }));
+      box.append(row);
+    }
+    for (const sv of SERVICES) {
+      const own = hasSvc(sv.id);
+      const cost = Math.round(sv.cost * priceMult());
+      const row = emEl('div', `uprow${own ? ' owned' : ''}`, `<div class="upico">${sv.icon}</div><div class="upinfo"><b>${tx(sv.name, sv.en)}</b><br><small>${tx('เครื่องบินจอดสั้นลง 15%', 'planes turn round 15% faster')}</small></div>`);
+      row.append(emButton(own ? tx('มีแล้ว ✓', 'Owned ✓') : `💵${fmt(cost)}`, own || state.money < cost, () => {
+        if (state.money < cost) return;
+        state.money -= cost;
+        updateMoney();
+        (AP().svc = AP().svc || []).push(sv.id);
+        sfxUnlock();
+        save();
+        renderSchedule();
+      }));
+      box.append(row);
+    }
+  } else {
+    box.append(emEl('p', 'emhint', tx('ตกแต่งอาคารผู้โดยสารได้ทีละธีม ธีมที่ใช้อยู่ทำให้ผู้โดยสารจ่ายเพิ่ม 10% และดึงนักท่องเที่ยว · ซื้อแล้วสลับได้ฟรี', 'One theme shows at a time; it makes passengers pay 10% more and draws tourists · switch freely once bought')));
+    for (const t of THEMES_AIR) {
+      const own = (AP().themes || []).includes(t.id);
+      const on = AP().theme === t.id;
+      const cost = Math.round(t.cost * priceMult());
+      const row = emEl('div', `uprow${on ? ' owned' : ''}`, `<div class="upico">${t.icon}</div><div class="upinfo"><b>${tx('ธีม', 'Theme')} ${tx(t.name, t.en)}</b><br><small>${on ? tx('ใช้อยู่', 'on show') : own ? tx('มีแล้ว', 'owned') : ''}</small></div>`);
+      row.append(emButton(on ? '✓' : own ? tx('ใช้ธีมนี้', 'Use') : `💵${fmt(cost)}`, on || (!own && state.money < cost), () => {
+        if (!own) {
+          if (state.money < cost) return;
+          state.money -= cost;
+          updateMoney();
+          (AP().themes = AP().themes || []).push(t.id);
+          sfxUnlock();
+        }
+        AP().theme = t.id;
+        buildAirTheme();
+        save();
+        renderSchedule();
+      }));
       box.append(row);
     }
   }
@@ -11929,7 +12082,8 @@ function updatePlanes(dt) {
       // A scheduled flight whose slot has come round goes in at once; otherwise a charter fills the gap
       const slot = curSlot();
       const key = `${cityState().day}:${slot}`;
-      const due = gateSched(gate.G.id)[slot];
+      const booked = gateSched(gate.G.id)[slot];
+      const due = fits(airlineOf(booked), gate.G.id) ? booked : null; // a booking too big for this stand is skipped
       if (due && gate.served !== key) gate.t = Math.min(gate.t, 0);
       if (gate.t <= 0) {
         const a = due && gate.served !== key ? airlineOf(due) : null;
@@ -11944,6 +12098,10 @@ function updatePlanes(dt) {
         pl.visible = true;
         gate.flag = a ? a.from : pick(FLAG_ORIGINS);
         setLivery(pl, a ? a.color : pick([0x78909c, 0x5c6bc0, 0x26a69a]));
+        // Bigger aircraft look bigger and each passenger pays more
+        const size = a ? a.size : 1;
+        pl.scale.setScalar(STAND_SIZES[size].scale);
+        gate.paxMult = (1 + 0.5 * (size - 1)) * (AP().theme ? 1.1 : 1);
       }
       continue;
     }
@@ -11985,12 +12143,14 @@ function updatePlanes(dt) {
       if (!gate.path.length) {
         if (gate.state === 'arrive') {
           gate.state = 'parked';
-          gate.t = 14 * fast;
+          gate.t = 14 * fast * svcMult();
+          showServices(gate, true);
           gate.boarded = 0;
           pl.rotation.set(0, 0, 0);
           AP().flights++;
           if (inAirport(player.group.position)) floatText(pl.position.clone().add(v(0, 3)), `${gate.flag} ${tx('เที่ยวบินลงจอด', 'Flight landed')}`, '#bfe9ff');
         } else if (gate.state === 'push') {
+          showServices(gate, false);
           gate.reverse = false;
           gate.state = 'depart';
           gate.path = planePath(gate, 'depart');
@@ -12112,7 +12272,7 @@ function updateAirport(dt) {
   updateMedevac(dt);
 }
 // Medical tourists fly in through the airport
-const airportTourism = () => (AP().step ? Math.min(8, AP().step + Object.keys(AIR.gates).length) + Math.min(6, new Set(Object.values(AP().sched || {}).flat().filter(Boolean)).size) : 0);
+const airportTourism = () => (AP().step ? Math.min(8, AP().step + Object.keys(AIR.gates).length) + Math.min(6, new Set(Object.values(AP().sched || {}).flat().filter(Boolean)).size) + (AP().theme ? 2 : 0) : 0);
 const airportPiles = () => Object.values(AIR.piles);
 function airportSnapshot() {
   return { ...AP(), cash: Object.fromEntries(Object.entries(AIR.piles).map(([k, p]) => [k, p.amount])) };
