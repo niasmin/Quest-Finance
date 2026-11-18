@@ -381,6 +381,14 @@
   .newsrow span { font-size: 26px; line-height: 1.1; }
   .newsrow small { color: #5a6274; }
   #airbtn { background: linear-gradient(#42a5f5, #1e88e5); }
+  #schedbtn { background: linear-gradient(#7e57c2, #5e35b1); }
+  .schedgrid { display: grid; gap: 3px; margin: 6px 0 10px; font-size: 11px; }
+  .schedgrid .sh { text-align: center; color: #5a6274; }
+  .schedgrid .sh.now { color: #e5484d; font-weight: 700; }
+  .schedgrid .sg { font-size: 12px; align-self: center; }
+  .schedgrid .sc { border: none; border-radius: 6px; min-height: 30px; padding: 0; font-size: 15px; background: #eef1f6; color: #fff; }
+  .schedgrid .sc.now { outline: 2px solid #e5484d; }
+  .uprow.locked { opacity: .55; }
   #airbtn.ready { background: linear-gradient(#ffc94d, #f5a623); color: #3a2a00; box-shadow: 0 0 12px rgba(255, 200, 80, .8); }
   #toast { font-size: 13.5px !important; line-height: 1.4 !important; padding: 8px 14px !important; }
   #start .startcard #startbtn { order: -1; font-size: 22px; padding: 14px 44px; }
@@ -419,6 +427,7 @@
     <div id="hudicons"><button id="speedbtn" class="hudbtn wide" aria-label="ความเร็ว" style="display:none">⏩1×</button><button id="zoombtn" class="hudbtn" aria-label="ซูม">🔍</button><button id="menubtn" class="hudbtn" aria-label="เมนู">⚙️</button></div>
     <button id="homebtn" class="evbtn ready" style="display:none">🏥 กลับ รพ.</button>
     <button id="airbtn" class="evbtn" style="display:none">✈️ สนามบิน</button>
+    <button id="schedbtn" class="evbtn" style="display:none">🗓️ ตารางบิน</button>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
     <div id="evchips"></div>
   </div>
@@ -474,6 +483,7 @@
     <button id="resume" class="btn ghost">เล่นต่อ</button>
     <button id="soundbtn" class="btn ghost">🔊 เสียง: เปิด</button>
     <button id="litebtn" class="btn ghost">⚡ โหมดประหยัด: ปิด</button>
+    <button id="hqbtn" class="btn ghost">✨ ภาพคุณภาพสูง: ปิด</button>
     <button id="invitebtn" class="btn">👥 ชวนเพื่อน (ได้โบนัสทั้งคู่)</button>
     <button id="menushare" class="btn ghost">📸 แชร์โรงพยาบาลของฉัน</button>
     <button id="installbtn" class="btn ghost">📲 เพิ่มลงหน้าจอโฮม</button>
