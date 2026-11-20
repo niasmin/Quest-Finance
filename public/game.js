@@ -47,7 +47,7 @@ const PLAYER_START = v(-0.8, -6.7); // clear of every unlock tile, so switching 
 
 // Unlocks are bought one at a time, in this order
 const UNLOCKS = [
-  { id: 'cashier1', label: 'จ้างพยาบาลแคชเชียร์', icon: '👩‍⚕️', price: 60, at: v(-1.4, -5.2) },
+  { id: 'cashier1', label: 'จ้างพยาบาลแคชเชียร์', icon: '👩‍⚕️', price: 30, at: v(-1.4, -5.2) },
   { id: 'bag1', label: 'กระเป๋าใหญ่ขึ้น', icon: '🎒', price: 120, at: v(-2.2, -9.4) },
   { id: 'vaccine', label: 'ห้องฉีดวัคซีน', icon: '💉', price: 200, at: v(-6, -1) },
   { id: 'cashier2', label: 'จ้างแคชเชียร์วัคซีน', icon: '👩‍⚕️', price: 260, at: v(-1.4, 0.8) },
@@ -769,7 +769,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags', 'terminal_back'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -2937,6 +2937,7 @@ function updateTile(dt) {
   if (state.paid >= u.price) {
     state.paid = 0;
     state.step++;
+    if (state.step <= 30 && state.branch === 0) logProgress(`step${state.step}`); // the early unlock funnel
     state.unlocked.add(u.id);
     applyUnlock(u.id, true);
     const at = u.at.clone().setY(FLOOR_Y[u.floor || 0]);
@@ -7157,7 +7158,7 @@ function doPrestige() {
     style: state.style, challenge: state.challenge, room: state.room, tips: state.tips, week: state.week,
     stats: state.stats, achievements: state.achievements, cards: state.cards, cardPulls: state.cardPulls, quiz: state.quiz,
     conquests: state.conquests, conquestRun: state.conquestRun,
-    login: state.login, welcomed: true, installAsked: state.installAsked, refUsed: state.refUsed, refClaimed: state.refClaimed, seasonSeen: state.seasonSeen,
+    login: state.login, welcomed: true, teaserSeen: true, installAsked: state.installAsked, refUsed: state.refUsed, refClaimed: state.refClaimed, seasonSeen: state.seasonSeen,
     prestige: { ...p, stars: p.stars + gain, total: p.total + gain, runs: p.runs + 1, base: state.earned },
     empire: defaultEmpire(), research: { done: [], cur: null }, savedAt: data.savedAt,
   });
@@ -9917,30 +9918,58 @@ function updateBase(dt) {
 }
 
 // ---------- the base comes alive: marching, patrols, jet sorties, a helicopter, and effects ----------
-// Effects pool: glowing sparks (muzzle flashes, fire, fireworks) and lit smoke (exhaust, smoke trails), one instanced mesh each
-const FX = { glow: null, smoke: null, list: [], m4: new THREE.Matrix4(), q: new THREE.Quaternion(), sc: new THREE.Vector3(), col: new THREE.Color() };
-const FX_CAP = { glow: 240, smoke: 420 };
+// Effects pool: glowing sparks (muzzle flashes, fire, fireworks) and soft smoke (exhaust, smoke trails).
+// Each kind is one instanced mesh of camera-facing quads with a soft round texture; a per-instance alpha
+// lets every puff fade in and out on its own.
+const FX = { glow: null, smoke: null, list: [], n: { glow: 0, smoke: 0 }, m4: new THREE.Matrix4(), q: new THREE.Quaternion(), rq: new THREE.Quaternion(), sc: new THREE.Vector3(), col: new THREE.Color(), z: new THREE.Vector3(0, 0, 1) };
+const FX_CAP = { glow: 260, smoke: 460 };
+function softTex(core) {
+  const tex = canvasTexture(64, 64, (g) => {
+    g.clearRect(0, 0, 64, 64);
+    const r = g.createRadialGradient(32, 32, 0, 32, 32, 31);
+    r.addColorStop(0, 'rgba(255,255,255,1)');
+    r.addColorStop(core, 'rgba(255,255,255,0.75)');
+    r.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = r;
+    g.fillRect(0, 0, 64, 64);
+  });
+  tex.colorSpace = THREE.NoColorSpace;
+  return tex;
+}
+function fadeMat(m) {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aAlpha;\nvarying float vAlpha;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvAlpha = aAlpha;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vAlpha;').replace('#include <alphamap_fragment>', '#include <alphamap_fragment>\ndiffuseColor.a *= vAlpha;');
+  };
+  return m;
+}
 function fxInit() {
   if (FX.glow) return;
-  const geo = new THREE.SphereGeometry(1, 8, 6);
-  FX.glow = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, opacity: 0.95, depthWrite: false }), FX_CAP.glow);
-  FX.smoke = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.55, depthWrite: false }), FX_CAP.smoke);
+  const geo = new THREE.PlaneGeometry(2, 2);
+  FX.glow = new THREE.InstancedMesh(geo, fadeMat(new THREE.MeshBasicMaterial({ map: softTex(0.25), toneMapped: false, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })), FX_CAP.glow);
+  FX.smoke = new THREE.InstancedMesh(geo, fadeMat(new THREE.MeshBasicMaterial({ map: softTex(0.45), transparent: true, depthWrite: false })), FX_CAP.smoke);
   for (const k of ['glow', 'smoke']) {
     const m = FX[k];
+    m.geometry = geo.clone();
+    m.geometry.setAttribute('aAlpha', new THREE.InstancedBufferAttribute(new Float32Array(FX_CAP[k]), 1));
     m.count = 0;
     m.frustumCulled = false;
+    m.renderOrder = 3;
     m.setColorAt(0, FX.col.set(0xffffff));
     scene.add(m);
   }
+  FX.smoke.material.color.setScalar(1 - Math.max(0, LOOK.night) * 0.6);
 }
 function fxPuff(kind, pos, color, o = {}) {
   fxInit();
-  if (FX.list.filter((p) => p.kind === kind).length >= FX_CAP[kind]) return;
-  FX.list.push({ kind, pos: pos.clone(), color, vel: o.vel ? o.vel.clone() : null, s0: o.s0 ?? 0.3, s1: o.s1 ?? 1, life: o.life ?? 1, grav: o.grav || 0, drag: o.drag || 0, onEnd: o.onEnd, age: 0 });
+  if (FX.n[kind] >= FX_CAP[kind]) return;
+  FX.n[kind]++;
+  FX.list.push({ kind, pos: pos.clone(), color, vel: o.vel ? o.vel.clone() : null, s0: o.s0 ?? 0.3, s1: o.s1 ?? 1, life: o.life ?? 1, grav: o.grav || 0, drag: o.drag || 0, onEnd: o.onEnd, age: 0, roll: Math.random() * Math.PI * 2, a: o.alpha ?? 1 });
 }
 function updateFX(dt) {
   if (!FX.glow) return;
   const n = { glow: 0, smoke: 0 };
+  const camQ = camera.quaternion;
   for (let i = FX.list.length - 1; i >= 0; i--) {
     const p = FX.list[i];
     p.age += dt;
@@ -9951,49 +9980,55 @@ function updateFX(dt) {
     }
     if (p.age >= p.life) {
       FX.list.splice(i, 1);
+      FX.n[p.kind]--;
       p.onEnd?.(p.pos);
       continue;
     }
     const k = p.age / p.life;
-    let sz = p.s0 + (p.s1 - p.s0) * (1 - (1 - k) * (1 - k));
-    if (k > 0.7) sz *= (1 - k) / 0.3; // shrink away instead of fading, so one shared material does
+    const sz = p.s0 + (p.s1 - p.s0) * (1 - (1 - k) * (1 - k));
+    // Smoke fades in, then thins out over its second half; sparks stay bright and fade at the end
+    const alpha = p.a * (p.kind === 'smoke' ? Math.min(1, k * 8) * Math.min(1, (1 - k) * 2) : Math.min(1, (1 - k) * 2.5));
     const mesh = FX[p.kind];
     const j = n[p.kind]++;
+    FX.rq.setFromAxisAngle(FX.z, p.roll);
+    FX.q.copy(camQ).multiply(FX.rq);
     FX.m4.compose(p.pos, FX.q, FX.sc.setScalar(Math.max(0.001, sz)));
     mesh.setMatrixAt(j, FX.m4);
     mesh.setColorAt(j, FX.col.set(p.color));
+    mesh.geometry.attributes.aAlpha.array[j] = alpha;
   }
   for (const k of ['glow', 'smoke']) {
     FX[k].count = n[k];
     FX[k].instanceMatrix.needsUpdate = true;
     if (FX[k].instanceColor) FX[k].instanceColor.needsUpdate = true;
+    FX[k].geometry.attributes.aAlpha.needsUpdate = true;
   }
 }
 const rv = (s) => v(0, 0).set(rand(-s, s), rand(-s, s), rand(-s, s));
 function fxBoom(pos, big = 1, sound = true) {
-  fxPuff('glow', pos, 0xffe08a, { s0: 0.4 * big, s1: 1.8 * big, life: 0.28 });
-  for (let i = 0; i < 6; i++) fxPuff('glow', pos, pick([0xff7a1a, 0xffb347, 0xff4d1a]), { vel: rv(3 * big).setY(rand(1, 4) * big), s0: 0.35 * big, s1: 0.7 * big, life: rand(0.35, 0.6), drag: 2 });
-  for (let i = 0; i < 9; i++) fxPuff('smoke', pos, pick([0x4a4a4a, 0x5d5d5d, 0x6e6a64]), { vel: rv(1.4 * big).setY(rand(1, 2.6)), s0: 0.2 * big, s1: 0.85 * big, life: rand(1.2, 1.9), drag: 1 });
-  if (sound) tone(rand(55, 75), 0.35, 'sawtooth', 0.05);
+  fxPuff('glow', pos, 0xffe08a, { s0: 0.8 * big, s1: 3.0 * big, life: 0.3 });
+  for (let i = 0; i < 7; i++) fxPuff('glow', pos, pick([0xff7a1a, 0xffb347, 0xff4d1a]), { vel: rv(3 * big).setY(rand(1, 4) * big), s0: 0.6 * big, s1: 1.1 * big, life: rand(0.35, 0.6), drag: 2 });
+  for (let i = 0; i < 10; i++) fxPuff('smoke', pos, pick([0x3e3e3e, 0x555555, 0x6e6a64]), { vel: rv(1.4 * big).setY(rand(1, 2.6)), s0: 0.5 * big, s1: 1.9 * big, life: rand(1.4, 2.2), drag: 1, alpha: 0.75 });
+  if (sound) sfxBoom(big);
 }
 function fxSplash(pos) {
-  for (let i = 0; i < 10; i++) fxPuff('smoke', pos, 0xf4fbff, { vel: v(rand(-0.6, 0.6), rand(5, 9), rand(-0.6, 0.6)), s0: 0.25, s1: 0.6, life: rand(0.9, 1.3), grav: 9 });
-  tone(90, 0.3, 'triangle', 0.04);
+  for (let i = 0; i < 14; i++) fxPuff('smoke', pos, 0xf4fbff, { vel: v(rand(-0.7, 0.7), rand(5, 9), rand(-0.7, 0.7)), s0: 0.4, s1: 1.1, life: rand(0.9, 1.3), grav: 9, alpha: 0.85 });
+  sfxSplash();
 }
 function fxFirework(pos) {
   const c = pick([0xffd166, 0xe5484d, 0x3d8bfd, 0x3fbf5f, 0xff8fab, 0xffffff]);
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < 40; i++) {
     const d = rv(1).normalize().multiplyScalar(rand(5, 7));
-    fxPuff('glow', pos, c, { vel: d, s0: 0.4, s1: 0.26, life: rand(1.1, 1.5), grav: 3, drag: 1.2 });
+    fxPuff('glow', pos, c, { vel: d, s0: 0.5, s1: 0.35, life: rand(1.1, 1.6), grav: 3, drag: 1.2 });
   }
-  fxPuff('glow', pos, 0xffffff, { s0: 0.5, s1: 1.2, life: 0.2 });
-  tone(rand(500, 800), 0.12, 'triangle', 0.03);
+  fxPuff('glow', pos, 0xffffff, { s0: 1, s1: 2.4, life: 0.22 });
+  sfxCrackle();
 }
 // A shell or tracer: a spark flying to a point, with a callback where it lands
 function fxShot(from, to, speed, onHit, color = 0xffe08a, size = 0.14) {
   const d = to.clone().sub(from);
   const life = d.length() / speed;
-  fxPuff('glow', from, color, { vel: d.divideScalar(life), s0: size, s1: size, life, onEnd: onHit });
+  fxPuff('glow', from, color, { vel: d.divideScalar(life), s0: size * 2, s1: size * 2, life, onEnd: onHit });
 }
 
 // Paths: a start pose and segments, each either a straight move ({ d, to: [x, y, z, yaw], ease }) or a curve to follow
@@ -10073,6 +10108,21 @@ function marchSoldiers(dt, speed) {
     animatePerson(s, true, dt);
   });
 }
+function paradeColumn(t) {
+  const head = -34.5 - t * 1.5;
+  BASE.unitMeshes.inf.forEach((s, i) => {
+    const row = Math.floor(i / 3);
+    s.group.position.set(43.6 + ((i % 3) - 1) * 0.75, 0, head + row * 1.05);
+    s.group.rotation.y = Math.PI;
+    animatePerson(s, true, BASE.ex ? 1 / 30 : 0);
+  });
+  // The generals take the salute on the stand
+  BASE.generals.forEach((g, i) => {
+    g.group.position.set(46.4, 0.5, -40.4 - i * 0.7);
+    g.group.rotation.y = -Math.PI / 2;
+  });
+  return head;
+}
 // Armour on patrol: the last armoured car and the last tank drive a loop round the vehicle park
 const PATROL = curve([[35.6, 0, -47.6], [46.6, 0, -47.6], [47.2, 0, -56], [46.6, 0, -65.2], [35.6, 0, -65.2], [35.2, 0, -56]]);
 PATROL.closed = true;
@@ -10088,7 +10138,7 @@ function patrolVehicles(dt) {
     const t = PATROL.getTangentAt(u);
     m.group.position.set(p.x, 0, p.z);
     m.group.rotation.y = Math.atan2(t.x, t.z);
-    if (Math.random() < dt * 6) fxPuff('smoke', m.group.position.clone().add(v(-t.x * 1.6, -t.z * 1.6).setY(0.5)), 0x777777, { s0: 0.12, s1: 0.4, life: 0.9, vel: v(0, 0).setY(0.6) });
+    if (Math.random() < dt * 6) fxPuff('smoke', m.group.position.clone().add(v(-t.x * 1.6, -t.z * 1.6).setY(0.5)), 0x777777, { s0: 0.2, s1: 0.7, life: 1.0, vel: v(0, 0).setY(0.6), alpha: 0.5 });
   });
 }
 function parkVehicles(yaw = 0) {
@@ -10141,11 +10191,11 @@ function updateSortie(dt) {
   const i = S.P.segs.indexOf(seg);
   if ((i === 4 || (i === 5 && S.t - seg.t0 < 4)) && Math.random() < dt * 30) {
     const back = v(-Math.sin(S.m.group.userData.yaw) * 2.2, -Math.cos(S.m.group.userData.yaw) * 2.2).setY(0.7);
-    fxPuff('smoke', S.m.group.position.clone().add(back), 0xb0b0b0, { s0: 0.2, s1: 0.8, life: 1.2 });
+    fxPuff('smoke', S.m.group.position.clone().add(back), 0xb0b0b0, { s0: 0.35, s1: 1.4, life: 1.3, alpha: 0.6 });
   }
   if (i === 4 && !S.roar) {
     S.roar = true;
-    tone(70, 1.6, 'sawtooth', 0.025);
+    sfxJet(2.4, 0.5);
   }
   if (S.t >= S.P.total) {
     const m = S.m;
@@ -10206,7 +10256,44 @@ function baseLife(dt) {
   BASE.buoys.forEach((b, i) => { b.position.y = Math.sin(now * 1.6 + i) * 0.06; b.rotation.z = Math.sin(now * 1.2 + i) * 0.08; });
   if (BASE.dish) BASE.dish.rotation.y += dt * 1.2;
   if (BASE.sock) BASE.sock.rotation.y = 0.6 + Math.sin(now * 0.5) * 0.3;
-  updateFX(dt);
+}
+
+// A taste of what's coming: right after the tutorial, three jets trail smoke over the hospital once
+const teaser = { jets: [], t: 0, wait: 0 };
+function teaserFlyby() {
+  if (teaser.jets.length || state.teaserSeen) return;
+  state.teaserSeen = true;
+  const p = player.group.position;
+  // Low across the middle of the view (the camera sits about 15 up and 11 back), then a climb away
+  const C = curve([[p.x - 70, 7, p.z + 1], [p.x - 30, 5, p.z + 2.5], [p.x, 4.6, p.z + 2.5], [p.x + 22, 5.5, p.z + 2], [p.x + 40, 14, p.z - 4], [p.x + 50, 34, p.z - 12]]);
+  [[0, 0, 0xf4f4f4], [-2.4, -2, 0xe5484d], [-2.4, 2, 0x2a4cb0]].forEach(([dx, dz, trail], i) => {
+    const g = jetModel(i ? 0x8d99ae : 0xffd166);
+    g.rotation.order = 'YXZ';
+    scene.add(g);
+    teaser.jets.push({ g, off: v(dx, dz), trail, C });
+  });
+  teaser.t = 0;
+  setTimeout(() => sfxJet(3, 1), 1800);
+  setTimeout(() => toast('✈️ <b>อยากมีฝูงบินแบบนี้ไหม?</b><br><small>ขยายโรงพยาบาลครบ 24 ขั้น เพื่อเปิดค่ายทหาร เครื่องบินรบ เรือรบ และรถถังของคุณเอง</small>', 6000), 2600);
+  logProgress('teaser');
+  save();
+}
+function updateTeaser(dt) {
+  if (teaser.wait > 0 && (teaser.wait -= dt) <= 0) teaserFlyby();
+  if (!teaser.jets.length) return;
+  teaser.t += dt;
+  const u = Math.min(1, teaser.t / 7);
+  for (const J of teaser.jets) {
+    const p = J.C.getPointAt(u);
+    const tan = J.C.getTangentAt(u);
+    J.g.position.copy(p).add(J.off);
+    J.g.rotation.set(-Math.asin(tan.y), Math.atan2(tan.x, tan.z), 0);
+    if (Math.random() < dt * 34) fxPuff('smoke', J.g.position.clone().addScaledVector(tan, -2.2), J.trail, { s0: 0.3, s1: 0.9, life: 1.6, alpha: 0.7 });
+  }
+  if (u >= 1) {
+    for (const J of teaser.jets) scene.remove(J.g);
+    teaser.jets = [];
+  }
 }
 
 // ---------- watch mode: the grand military exercise ----------
@@ -10242,6 +10329,7 @@ function startExercise() {
     updateSortie(0);
   }
   milEl.style.display = 'none';
+  parkVehicles(); // the patrol pulls in for the show
   player.group.visible = false;
   document.body.classList.add('cine');
   cineEl.classList.add('show');
@@ -10282,7 +10370,7 @@ function enterAct(A) {
       scene.add(g);
       X.jets.push({ g, off: v(slots[i][0], slots[i][1]), trail: trails[i], C });
     }
-    tone(65, 3, 'sawtooth', 0.03);
+    setTimeout(() => sfxJet(3.2, 1), 2500); // the roar arrives as the formation passes
   }
 }
 function exTap(e) {
@@ -10307,8 +10395,8 @@ function tankFire() {
   const dir = to.clone().sub(from).normalize();
   if (isTank) m.group.userData.turret.rotation.y = Math.atan2(dir.x, dir.z) - m.group.rotation.y;
   from.addScaledVector(dir, isTank ? 2.2 : 0.9);
-  fxPuff('glow', from, 0xfff0b0, { s0: 0.25, s1: 0.6, life: 0.12 });
-  for (let k = 0; k < 3; k++) fxPuff('smoke', from, 0xa8a8a8, { s0: 0.15, s1: 0.55, life: rand(0.8, 1.1), vel: dir.clone().multiplyScalar(rand(1, 2.5)).setY(rand(0.4, 0.9)), drag: 2 });
+  fxPuff('glow', from, 0xfff0b0, { s0: 0.5, s1: 1.1, life: 0.12 });
+  for (let k = 0; k < 4; k++) fxPuff('smoke', from, 0xa8a8a8, { s0: 0.3, s1: 1.1, life: rand(0.9, 1.3), vel: dir.clone().multiplyScalar(rand(1, 2.5)).setY(rand(0.4, 0.9)), drag: 2, alpha: 0.7 });
   const hit = (p) => {
     fxBoom(p, 0.8);
     target.rotation.x = -Math.PI / 2.2;
@@ -10316,10 +10404,10 @@ function tankFire() {
   };
   if (isTank) {
     fxShot(from, to, 70, hit, 0xffd166, 0.16);
-    tone(80, 0.25, 'square', 0.05);
+    sfxBoom(0.6);
   } else {
     for (let k = 0; k < 4; k++) setTimeout(() => fxShot(from, to.clone().add(rv(0.4)), 90, k === 3 ? hit : (p) => fxPuff('glow', p, 0xffb347, { s0: 0.15, s1: 0.4, life: 0.15 }), 0xffb347, 0.08), k * 90);
-    tone(300, 0.2, 'square', 0.025);
+    for (let k = 0; k < 4; k++) setTimeout(sfxGun, k * 90);
   }
 }
 function navyFire() {
@@ -10327,17 +10415,30 @@ function navyFire() {
   if (!ships.length) return;
   const m = pick(ships);
   const from = m.group.position.clone().add(v(0, -2.2)).setY(1.1);
-  fxPuff('glow', from, 0xfff0b0, { s0: 0.3, s1: 0.8, life: 0.15 });
-  for (let k = 0; k < 4; k++) fxPuff('smoke', from, 0xd8d8d8, { s0: 0.15, s1: 0.7, life: rand(1.1, 1.5), vel: v(rand(-0.5, 0.5), -rand(0.6, 1.4)).setY(rand(0.4, 1)), drag: 1.5 });
-  tone(70, 0.35, 'square', 0.05);
+  fxPuff('glow', from, 0xfff0b0, { s0: 0.6, s1: 1.4, life: 0.15 });
+  for (let k = 0; k < 5; k++) fxPuff('smoke', from, 0xd8d8d8, { s0: 0.3, s1: 1.3, life: rand(1.2, 1.7), vel: v(rand(-0.5, 0.5), -rand(0.6, 1.4)).setY(rand(0.4, 1)), drag: 1.5, alpha: 0.75 });
+  sfxBoom(0.8);
   // Shells burst high over the water, and practice charges throw up spouts in the basin
   const burstAt = from.clone().add(v(rand(-4, 4), -rand(1, 5))).setY(rand(9, 13));
   fxShot(from, burstAt, 45, (p) => fxBoom(p, 0.7, false), 0xffd166, 0.12);
   setTimeout(() => { if (BASE.ex) fxSplash(v(HARBOUR.x + rand(-5, 5), HARBOUR.z - rand(3, 4.4)).setY(0.1)); }, 400);
 }
+// Panels and sheets that cover the game: AUTO never starts a show over one of them
+const COVERS = ['military', 'storypanel', 'cityhub', 'ending', 'quiz', 'share', 'mapview', 'board', 'branches', 'missions', 'upgrades', 'style', 'away', 'menu'];
+const coverOpen = () => COVERS.some((id) => { const el = document.getElementById(id); return el && getComputedStyle(el).display !== 'none'; }) || [...document.querySelectorAll('.promptsheet')].some((el) => getComputedStyle(el).display !== 'none');
 function updateExercise(dt) {
   const X = BASE.ex;
-  if (!X) return;
+  if (!X) {
+    // With AUTO playing, the exercise runs by itself whenever its reward is ready
+    BASE.exCheck = (BASE.exCheck || 0) - dt;
+    if (BASE.exCheck > 0) return;
+    BASE.exCheck = 5;
+    if (running && auto.on && autoBadge.classList.contains('show') && exReady() && baseHas('barracks') && (B().units.inf || 0) > 0 && !BASE.defense && !BASE.flight && !mapView.active && !document.hidden && player.floor === 0 && !lift.riding && !coverOpen()) {
+      startExercise();
+      toast('🤖 AUTO เปิดการซ้อมรบใหญ่ให้แล้ว (กด ข้าม ได้)', 3000);
+    }
+    return;
+  }
   X.t += dt;
   const ai = X.acts.findIndex((a) => X.t < a.t0 + a.d);
   if (ai < 0) {
@@ -10361,16 +10462,14 @@ function updateExercise(dt) {
       X.look.set(20, 0, -48);
       marchSoldiers(dt, 1.1);
       break;
-    case 'parade':
-      marchSoldiers(dt, 1.6);
-      if (X.fire <= 0) {
-        X.fire = 0.5;
-        tone(95, 0.08, 'triangle', 0.05); // the drum beat
-      }
-      // From the reviewing stand, panning along the column
-      X.cam.copy(lerp3([52, 6.5, -35.5], [52, 6, -47.5], e));
-      X.look.set(40.5, 0.4, -41.5);
+    case 'parade': {
+      // A straight column marches north past the reviewing stand; the camera watches from beside the stand
+      const head = paradeColumn(X.t - A.t0);
+      // Ahead of the column, past the stand, so it marches towards the camera
+      X.cam.copy(lerp3([48, 2.8, -49.5], [48.6, 3.3, -50.5], e));
+      X.look.lerp(v(43.2, head + 3).setY(0.8), X.snap ? 1 : Math.min(1, dt * 3));
       break;
+    }
     case 'armor':
       marchSoldiers(dt, 1.1);
       for (const tg of BASE.targets || []) if (tg.rotation.x < 0 && X.t > (tg.userData.up || 0)) tg.rotation.x = Math.min(0, tg.rotation.x + dt * 4);
@@ -10398,10 +10497,13 @@ function updateExercise(dt) {
         const tan = J.C.getTangentAt(u);
         J.g.position.copy(p).add(v(J.off.x, J.off.z * (1 + burstK)));
         J.g.rotation.set(-Math.asin(tan.y), Math.atan2(tan.x, tan.z), J.off.z * burstK * 0.08);
-        if (Math.random() < dt * 30) fxPuff('smoke', J.g.position.clone().addScaledVector(tan, -2.2), J.trail, { s0: 0.18, s1: 0.75, life: 2.2 });
+        if (Math.random() < dt * 34) fxPuff('smoke', J.g.position.clone().addScaledVector(tan, -2.2), J.trail, { s0: 0.4, s1: 1.5, life: 2.4, alpha: 0.85 });
         if (!lead) lead = J.g;
       }
-      if (tapped && lead) for (let f = 0; f < 4; f++) fxPuff('glow', lead.position, 0xffd166, { vel: v(rand(-4, 4), rand(-1, 1)).setY(rand(-2, 1)), s0: 0.18, s1: 0.22, life: 1.4, grav: 2 });
+      if (tapped && lead) {
+        for (let f = 0; f < 4; f++) fxPuff('glow', lead.position, 0xffd166, { vel: v(rand(-4, 4), rand(-1, 1)).setY(rand(-2, 1)), s0: 0.4, s1: 0.5, life: 1.4, grav: 2 });
+        sfxCrackle();
+      }
       X.cam.set(20, 1.6, -38);
       if (lead) X.look.lerp(lead.position, X.snap ? 1 : Math.min(1, dt * 4));
       break;
@@ -10410,10 +10512,10 @@ function updateExercise(dt) {
       marchSoldiers(dt, 1.1);
       if (X.fire <= 0) {
         X.fire = 0.35;
-        fxFirework(v(31 + rand(-9, 9), -38 + rand(-4, 4)).setY(rand(10, 15)));
+        fxFirework(v(31 + rand(-9, 9), -37 + rand(-3, 3)).setY(rand(7, 10.5)));
       }
-      X.cam.copy(lerp3([31, 3.5, -19], [31, 4.5, -21], e));
-      X.look.set(31, 6.5, -36);
+      X.cam.copy(lerp3([31, 2.0, -23.5], [31, 2.4, -24.5], e));
+      X.look.set(31, 4.2, -35);
       break;
   }
 }
@@ -10446,6 +10548,10 @@ function endExercise(skipped = false) {
   (X.hidden || []).forEach((g) => { g.visible = true; });
   for (const t of BASE.targets || []) t.rotation.x = 0;
   parkVehicles();
+  BASE.generals.forEach((g, i) => {
+    g.group.position.set(26 + i * 1.1, 0, -30.6);
+    g.group.rotation.y = 0;
+  });
   player.group.visible = true;
   camera.fov = X.fov;
   camera.updateProjectionMatrix();
@@ -11505,9 +11611,9 @@ function baseProps() {
   for (const x of [-11, 47]) g.add(at3(watchtower(), x, 0, -30.4));
   for (const x of [16.2, 23.8]) g.add(at3(sandbags(4), x, 0, -30.6));
   // Fuel drums, crates and camo nets dotted around the yard
-  const drums = [[44, -36], [44.7, -36.4], [44.3, -35.3], [-9, -47], [-8.4, -47.5], [46, -62]];
+  const drums = [[47.6, -35.6], [48.2, -36.1], [47.9, -35], [-9, -47], [-8.4, -47.5], [46, -62]]; // clear of the parade route
   for (const [x, z] of drums) g.add(at3(cylM(0.28, 0.28, 0.8, pick([0x556b2f, 0x2e4a1f, 0x8b0000]), 12), x, 0.4, z));
-  const crates = [[45.5, -44.5], [46.2, -44.5], [45.8, -44.5, 0.6], [-10.5, -36], [-9.8, -36.4]];
+  const crates = [[33.5, -46.6], [34.2, -46.6], [33.8, -46.6, 0.6], [-10.5, -36], [-9.8, -36.4]];
   for (const [x, z, y = 0] of crates) g.add(at3(box(0.6, 0.6, 0.6, 0x9c7a4a), x, 0.3 + y, z));
   for (const [x, z] of [[-4, -33], [-1, -33]]) g.add(at3(tent(), x, 0, z));
   // Parade-ground markings, a helipad by the HQ, and painted lane lines on the camp road
@@ -12297,6 +12403,13 @@ function buildTerminal() {
     addCollider((a + b) / 2, GATE_WALL_Z, w, 0.3);
   }
   g.add(at3(signBoard('✈️ ท่าอากาศยาน Dr. Quest International', '#0d47a1', 9, 0.9), 460, 3.4, 0.4));
+  // The tall glass facade and wave roof over the gates (behind the hall, so it never hides the player)
+  const back = modelGroup('terminal_back');
+  if (back) {
+    back.position.set(460, 0, GATE_WALL_Z);
+    g.add(back);
+    g.add(at3(signBoard('✈️ GATES · ประตูขึ้นเครื่อง', '#0d47a1', 6, 0.7), 460, 5.3, GATE_WALL_Z + 0.25));
+  }
   // A departures board
   const board = new THREE.Mesh(new THREE.PlaneGeometry(5, 1.4), new THREE.MeshBasicMaterial({ toneMapped: false, map: canvasTexture(512, 144, (c) => {
     c.fillStyle = '#10151f';
@@ -13329,6 +13442,7 @@ function updateWorldLook(dt) {
     const k = Math.max(0, (n - 0.35) / 0.65);
     for (const m of NIGHT_FX) m.opacity = m.userData.max * k;
     for (const m of CITY_GLOW) m.emissiveIntensity = n * 1.6;
+    if (FX.smoke) FX.smoke.material.color.setScalar(1 - n * 0.6); // unlit smoke dims with the light
     headMat.color.setHex(n > 0.5 ? 0xffffff : 0xfff6d8);
   }
 }
@@ -14207,11 +14321,16 @@ const TUTORIAL = [
   { text: '💊 เดินเข้า<b>วงสีขาว</b>หน้าเครื่อง เพื่อเก็บยาขึ้นหลัง', at: () => LINES.pill.pickup, done: () => player.stack.total >= 3 },
   { text: '📦 เอายาไปวางที่<b>วงสีเหลือง</b>หลังเคาน์เตอร์', at: () => LINES.pill.drop, done: () => tut.dropped },
   { text: '💚 ยืนใน<b>วงสีเขียว</b>เพื่อจ่ายยาให้คนไข้', at: () => LINES.pill.cashier, done: () => tut.served },
-  { text: '🎯 ยืนบน<b>ช่องราคา</b>เพื่อจ้างพยาบาลแคชเชียร์คนแรก (ทำต่อจนมีเงินพอ)', at: () => UNLOCKS[0].at, done: () => state.step >= 1 },
+  { text: () => `🎯 ยืนบน<b>ช่องราคา</b>เพื่อจ้างพยาบาลแคชเชียร์คนแรก<br><small>${state.money + state.paid >= UNLOCKS[0].price ? 'เงินพอแล้ว! ไปยืนบนช่องราคาเลย' : `ขายยาต่ออีกนิด 💵${fmt(state.money + state.paid)}/${UNLOCKS[0].price}`}</small>`, at: () => UNLOCKS[0].at, done: () => state.step >= 1, live: true },
 ];
 const tutorialDone = () => state.tutorial >= TUTORIAL.length;
 const tutEl = document.getElementById('tut');
 let tutShown = -1;
+let tutText = '';
+// Where new players leave: the tutorial step they were on when the page went to the background
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && running && !tutorialDone()) logProgress(`left_tut${state.tutorial + 1}`);
+});
 
 function updateTutorial() {
   if (tutorialDone()) {
@@ -14227,19 +14346,23 @@ function updateTutorial() {
   const step = TUTORIAL[state.tutorial];
   if (step.done()) {
     state.tutorial++;
+    logProgress(`tut${state.tutorial}`); // which tutorial steps players finish
     sfxCoin();
     if (tutorialDone()) {
       floatText(player.group.position, '🎉 เก่งมาก! ปลดล็อกปุ่มใหม่แล้ว', '#ffd166');
       welcomeGift();
       goalEl.style.display = 'block';
+      teaser.wait = 6; // a moment after the welcome gift
       save();
     }
     return;
   }
+  const text = typeof step.text === 'function' ? step.text() : step.text;
+  if (step.live && tutShown === state.tutorial && tutText !== text) document.getElementById('tuttext').innerHTML = tutText = text;
   if (tutShown !== state.tutorial) {
     tutShown = state.tutorial;
     document.getElementById('tutstep').textContent = `บทสอน ${state.tutorial + 1}/${TUTORIAL.length}`;
-    document.getElementById('tuttext').innerHTML = step.text;
+    document.getElementById('tuttext').innerHTML = tutText = text;
     tutEl.style.display = 'block';
     goalEl.style.display = 'none';
     document.getElementById('hint').style.display = 'none';
@@ -14313,6 +14436,45 @@ function tone(freq, dur, type = 'sine', vol = 0.06, at = null) {
   o.stop(t + dur);
 }
 
+// Filtered noise for bangs, drums and engines: a shared second of white noise played through a filter
+let noiseBuf = null;
+function noise(dur, vol, { type = 'lowpass', f0 = 800, f1 = f0, q = 0.8, attack = 0.005 } = {}) {
+  if (!audio) return;
+  if (!noiseBuf) {
+    noiseBuf = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const t = audio.currentTime;
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuf;
+  src.loop = true;
+  const f = audio.createBiquadFilter();
+  f.type = type;
+  f.Q.value = q;
+  f.frequency.setValueAtTime(f0, t);
+  f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+  const g = audio.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f).connect(g).connect(master);
+  src.start(t, Math.random() * 0.5);
+  src.stop(t + dur + 0.05);
+}
+function sfxBoom(big = 1) {
+  noise(0.7 + big * 0.3, 0.16 * Math.min(1.2, big), { f0: 900, f1: 60 });
+  tone(55, 0.4, 'sine', 0.1 * Math.min(1, big));
+}
+function sfxGun() { noise(0.07, 0.06, { type: 'highpass', f0: 1200 }); }
+function sfxSplash() { noise(0.6, 0.07, { type: 'bandpass', f0: 1400, f1: 400, q: 0.6, attack: 0.03 }); }
+function sfxCrackle() { for (let i = 0; i < 5; i++) setTimeout(() => noise(0.05, 0.035, { type: 'highpass', f0: 3000 }), 300 + i * rand(40, 90)); }
+function sfxJet(dur = 3, vol = 1) { noise(dur, 0.07 * vol, { f0: 300, f1: 1800, q: 1.2, attack: dur * 0.45 }); }
+function sfxSnare(at) {
+  if (!audio) return;
+  noise(0.09, 0.05, { type: 'highpass', f0: 1800 });
+}
+
 const midi = (n) => 440 * 2 ** ((n - 69) / 12);
 // Two 4-bar phrases over C - Am - F - G, one note per eighth (0 = rest)
 const MELODY = [
@@ -14336,12 +14498,14 @@ const MUSIC_STYLE = {
   desert: { wave: 'sawtooth', shift: -2, tempo: 0.95, minor: true, flat2: true, vol: 0.7 },
   // Zones outside the hospital have their own take on the tune
   base: { wave: 'square', shift: -5, tempo: 1.18, drum: true, march: true, vol: 0.9 },
+  parade: { wave: 'square', shift: -2, tempo: 1.28, march: true, snare: true, vol: 1.2 },
   campus: { wave: 'triangle', shift: 5, tempo: 0.92, vol: 1.5 },
   care: { wave: 'sine', shift: 12, tempo: 0.8, vol: 1.9 },
   district: { wave: 'square', shift: 7, tempo: 1.06, vol: 0.9 },
 };
 // The tune follows the player: base, campus (and inside its centres), the city district, or the branch's own style
 function musicStyle() {
+  if (BASE.ex) return MUSIC_STYLE.parade;
   const p = player.group.position;
   if (inBase(p)) return MUSIC_STYLE.base;
   if (inInterior(p)) return MUSIC_STYLE.care;
@@ -14372,6 +14536,7 @@ function startMusic() {
       }
       if (st.drum && musicStep % 4 === 2) tone(110, 0.08, 'square', 0.03, musicTime);
       if (st.march && musicStep % 4 === 0) tone(70, 0.1, 'square', 0.035, musicTime); // marching bass drum
+      if (st.snare && musicStep % 4 === 2) setTimeout(sfxSnare, Math.max(0, (musicTime - audio.currentTime) * 1000));
       musicTime += step;
       musicStep++;
     }
@@ -14434,7 +14599,7 @@ function saveData() {
     challenge: state.challenge, room: state.room, tips: state.tips,
     prestige: state.prestige, cards: state.cards, cardPulls: state.cardPulls, research: state.research,
     stats: state.stats, achievements: state.achievements, quiz: state.quiz, week: state.week,
-    login: state.login, welcomed: state.welcomed, installAsked: state.installAsked, refUsed: state.refUsed, refClaimed: state.refClaimed, seasonSeen: state.seasonSeen,
+    login: state.login, welcomed: state.welcomed, teaserSeen: state.teaserSeen, installAsked: state.installAsked, refUsed: state.refUsed, refClaimed: state.refClaimed, seasonSeen: state.seasonSeen,
     city: state.city, story: state.story, conquests: state.conquests || 0, conquestRun: state.conquestRun ?? -1,
     base: { ...state.base, cash: BASE.pile?.amount || 0 },
     airport: airportSnapshot(),
@@ -14515,7 +14680,7 @@ function load() {
   state.week = data.week || null;
   state.story = data.story ? { ...defaultStory(), ...data.story } : { ch: 0, catchup: true };
   state.conquests = data.conquests || 0;
-  Object.assign(state, { login: data.login || null, welcomed: data.welcomed ?? (data.tutorial >= TUTORIAL.length), installAsked: data.installAsked || false, refUsed: data.refUsed || null, refClaimed: data.refClaimed || 0, seasonSeen: data.seasonSeen || '' });
+  Object.assign(state, { login: data.login || null, welcomed: data.welcomed ?? (data.tutorial >= TUTORIAL.length), teaserSeen: data.teaserSeen ?? (data.tutorial >= TUTORIAL.length), installAsked: data.installAsked || false, refUsed: data.refUsed || null, refClaimed: data.refClaimed || 0, seasonSeen: data.seasonSeen || '' });
   state.city = { ...defaultCity(), ...(data.city || {}) };
   state.conquestRun = data.conquestRun ?? -1;
   state.base = { ...defaultBase(), ...(data.base || {}) };
@@ -14728,6 +14893,8 @@ function frameRest(dt, now) {
   updateFlyers(dt);
   updatePops(dt);
   updateConfetti(dt);
+  updateFX(dt);
+  updateTeaser(dt);
   updateDecor();
   updateWeather(dt);
   updateFloats(dt);
@@ -15408,4 +15575,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };

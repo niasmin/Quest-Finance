@@ -964,6 +964,51 @@ def sandbags():
 
 mil_hq(); mil_barracks(); mil_depot(); mil_shed(); navy_pier(); navy_hq(); watchtower(); radar_dome(); sandbags()
 
+# ---------------- airport terminal: the tall north facade over the gates, with a wave roof over the apron ----------------
+# Origin is the middle of the gate wall at ground level; the interior lies at -Y (game +z), so it stays open to the camera.
+def terminal_back():
+    begin()
+    glass = mat('tglass', [0.36, 0.62, 0.78], rough=0.08, metal=0.5)
+    steel = mat('tsteel', [0.78, 0.8, 0.82], rough=0.35, metal=0.6)
+    roof = mat('troof', [0.93, 0.94, 0.95], rough=0.5, metal=0.2)
+    under = mat('tunder', [0.85, 0.7, 0.5], rough=0.7)
+    stripe = mat('tstripe', [0.05, 0.28, 0.62], rough=0.5)
+    w = 50
+    # Upper glass band above the existing 2.4 m gate wall, with mullions and a transom
+    cube((w, 0.12, 3.9), (0, 0, 4.35), glass, smooth=False)
+    for k in range(21):
+        cube((0.14, 0.24, 3.9), (-w / 2 + k * w / 20, -0.04, 4.35), steel, smooth=False)
+    for z in (2.42, 4.3, 6.28):
+        cube((w, 0.26, 0.12), (0, -0.04, z), steel, smooth=False)
+    # Wave roof: a thin shell from 1.2 m inside the hall out over the apron, curling upward at the edge
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=2, y_subdivisions=16, size=1, location=(0, 0, 0))
+    o = bpy.context.object
+    o.scale = (w + 1.6, 1, 1)
+    bpy.ops.object.transform_apply(scale=True)
+    for v in o.data.vertices:
+        t = v.co.y + 0.5            # 0 at the hall side, 1 at the apron edge
+        y = -1.2 + t * 6.6           # from -1.2 (inside) to +5.4 (over the apron)
+        v.co.y = y
+        v.co.z = 6.55 + 0.35 * math.sin(t * math.pi) + 0.9 * t ** 2.2
+    sol = o.modifiers.new('solid', 'SOLIDIFY')
+    sol.thickness = 0.22
+    sol.offset = 1
+    add(o, roof, smooth=True)
+    # Warm timber underside, a blue fascia stripe and the end walls that close the roof's ends
+    cube((w + 1.4, 6.4, 0.05), (0, 2.1, 6.45), under, smooth=False)
+    cube((w + 1.7, 0.1, 0.3), (0, 5.45, 7.85), stripe, smooth=False)
+    for sx in (-1, 1):
+        cube((0.9, 0.9, 7.4), (sx * (w / 2 + 0.45), 0, 3.7), roof, bevel=0.06, seg=2)
+        cube((0.92, 0.92, 0.5), (sx * (w / 2 + 0.45), 0, 5.6), stripe, smooth=False)
+    # Slim struts tying the roof edge back to the facade
+    for k in range(6):
+        x = -w / 2 + 2 + k * (w - 4) / 5
+        s = cube((0.1, 5.8, 0.1), (x, 2.6, 6.9), steel, smooth=False)
+        s.rotation_euler.x = -0.12
+    write('terminal_back')
+
+terminal_back()
+
 helicopter()
 armored()
 person_parts()
