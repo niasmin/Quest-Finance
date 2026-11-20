@@ -10530,7 +10530,9 @@ function exerciseCamera(dt) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
   }
-  if (camera.aspect < 1) exCamAt.sub(X.look).multiplyScalar(1.3).add(X.look);
+  // Only for shots that look at something close: backing off from a far target (the air display tracks jets
+  // up to 80 m away) would put the camera through walls or under the ground
+  if (camera.aspect < 1 && X.cam.distanceTo(X.look) < 20) exCamAt.sub(X.look).multiplyScalar(1.3).add(X.look);
   if (X.snap) {
     camera.position.copy(exCamAt);
     X.snap = false;
