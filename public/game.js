@@ -9172,7 +9172,7 @@ function militaryPower() {
 }
 const recruitCost = () => Math.round((20000 * 1.5 ** Math.min(B().recruits, 30)) / 100) * 100;
 
-const BASE = { built: false, tile: null, stations: {}, unitMeshes: { inf: [], arm: [], tank: [], ship: [], jet: [], sub: [] }, generals: [], pile: null, budgetT: 0, stand: 0, opened: false, flight: null, drones: [], defense: null, mission: null, missionTimer: 60, raidTimer: rand(360, 540), shots: [], fleet: [], barges: [], subRun: null, subT: 25, buoys: [], guards: [], boat: null, heli: null, sortie: null, sortieT: 12, heliT: 20, heliFly: null, ex: null };
+const BASE = { built: false, tile: null, stations: {}, unitMeshes: { inf: [], arm: [], tank: [], ship: [], jet: [], sub: [] }, generals: [], pile: null, budgetT: 0, stand: 0, opened: false, flight: null, drones: [], defense: null, mission: null, missionTimer: 60, raidTimer: rand(360, 540), shots: [], rising: [], commanders: [], convoy: [], heliAway: false, fleet: [], barges: [], subRun: null, subT: 25, buoys: [], guards: [], boat: null, heli: null, sortie: null, sortieT: 12, heliT: 20, heliFly: null, ex: null };
 
 // --- models ---
 const OLIVE = 0x556b2f;
@@ -9842,7 +9842,7 @@ function syncUnits(animate = false) {
       m.home = { x: at.x, z: at.z, yaw: m.group.rotation.y };
       scene.add(m.group);
       list.push(m);
-      if (animate) popIn(m.group);
+      if (animate) arrive(k, m);
     }
     while (list.length > want) {
       const m = list.pop();
@@ -9910,7 +9910,18 @@ function showBaseTile() {
   BASE.tile.draw(B().paid, u.price);
 }
 function applyBaseUnlock(id, animate) {
+  const before = new Set(scene.children);
   BASE_BUILD[id]?.();
+  if (animate) {
+    // Everything the step just built grows up out of the ground, in a cloud of dust
+    for (const o of scene.children) if (!before.has(o)) {
+      BASE.rising.push({ o, sy: o.scale.y, t: 0 });
+      o.scale.y = 0.01;
+    }
+    const at = BASE_UNLOCKS.find((x) => x.id === id).at;
+    const c = at.clone().add(v(at.x > 20 ? 7 : -7, 0));
+    for (let i = 0; i < 18; i++) fxPuff('smoke', c.clone().add(v(rand(-5, 5), rand(-3, 3))).setY(0.3), 0xc8b89a, { vel: v(rand(-1, 1), rand(-1, 1)).setY(rand(0.4, 1.2)), s0: 0.6, s1: 2.2, life: rand(1.2, 2), drag: 1, alpha: 0.6 });
+  }
   const type = Object.entries(UNIT_TYPES).find(([, t]) => t.from === id);
   const u = BASE_UNLOCKS.find((x) => x.id === id);
   if (type) {
@@ -9931,9 +9942,16 @@ function applyBaseUnlock(id, animate) {
   }
 }
 const commanderCost = (k) => Math.round(UNIT_TYPES[k].power * 6000);
-function postCommander(S) {
+function postCommander(S, animate = false) {
   const p = generalModel(UNIT_TYPES[S.k].branch);
-  p.group.position.copy(S.at).add(v(S.at.x > 20 ? 1.2 : -1.2, -0.8));
+  const post = S.at.clone().add(v(S.at.x > 20 ? 1.2 : -1.2, -0.8));
+  p.group.position.copy(post);
+  // A new commander walks from the HQ steps down the camp road to the station
+  if (animate) {
+    p.group.position.set(31, 0, -30.4);
+    p.route = [v(20.8, -30.4), v(20.8, post.z), post];
+  }
+  BASE.commanders.push(p);
   scene.add(p.group);
   S.staffed = true;
   if (S.hire) {
@@ -10002,7 +10020,7 @@ function updateBase(dt) {
     if (S.hire && onFloor && flatDist(pos, S.hireAt) < 1.1 && state.money > 0) {
       if (payTile(S.hire, commanderCost(S.k), dt)) {
         B().hired.push(S.id);
-        postCommander(S);
+        postCommander(S, true);
         sfxUnlock();
         save();
       }
@@ -10222,8 +10240,21 @@ function marchSoldiers(dt, speed) {
     const p = C.getPointAt(u);
     const t = C.getTangentAt(u);
     marchV.set(t.z, 0, -t.x); // to the side of the column
-    s.group.position.set(p.x + marchV.x * col * 0.75, 0, p.z + marchV.z * col * 0.75);
-    s.group.rotation.y = Math.atan2(t.x, t.z);
+    const tx = p.x + marchV.x * col * 0.75;
+    const tz = p.z + marchV.z * col * 0.75;
+    if (s.join) {
+      // A new recruit jogs from the barracks door to their place in the column
+      s.join.t += dt;
+      const k = Math.min(1, s.join.t / 2.6);
+      const x = s.join.x + (tx - s.join.x) * k;
+      const z = s.join.z + (tz - s.join.z) * k;
+      s.group.rotation.y = Math.atan2(x - s.group.position.x, z - s.group.position.z) || s.group.rotation.y;
+      s.group.position.set(x, 0, z);
+      if (k >= 1) s.join = null;
+    } else {
+      s.group.position.set(tx, 0, tz);
+      s.group.rotation.y = Math.atan2(t.x, t.z);
+    }
     animatePerson(s, true, dt);
   });
 }
@@ -10242,6 +10273,220 @@ function paradeColumn(t) {
   });
   return head;
 }
+// --- arrivals: a freshly trained unit comes out of its building and takes its place ---
+function arrive(k, m) {
+  const h = m.home;
+  if (k === 'inf') {
+    m.join = { x: 30.5, z: -39.6, t: 0 };
+    m.group.position.set(30.5, 0, -39.6);
+    return;
+  }
+  let P = null;
+  if (k === 'arm' || k === 'tank') {
+    const doorZ = k === 'arm' ? -48.6 : -56.6;
+    const lane = k === 'arm' ? -47.2 : -55.6;
+    P = makePath([30.5, 0, doorZ, 0], [
+      { d: 0.9, to: [30.5, 0, lane, 0], ease: 'in' },
+      { d: 0.9, to: [30.5, 0, lane, Math.PI / 2] },
+      { d: Math.max(0.5, Math.abs(h.x - 30.5) / 4), to: [h.x, 0, lane, Math.PI / 2], ease: 'lin' },
+      { d: 0.9, to: [h.x, 0, lane, 0] },
+      { d: Math.max(0.6, Math.abs(h.z - lane) / 2), to: [h.x, 0, h.z, 0] }, // reverse into the bay
+    ]);
+  } else if (k === 'jet') {
+    const side = h.x < -6 ? -Math.PI / 2 : Math.PI / 2;
+    P = makePath([-6, 0, -61.2, 0], [
+      { d: 1.8, to: [-6, 0, -57.8, 0], ease: 'in' },
+      { d: 1.0, to: [-6, 0, -57.8, side] },
+      { d: Math.max(0.4, Math.abs(h.x + 6) / 3), to: [h.x, 0, -57.8, side], ease: 'lin' },
+      { d: 1.0, to: [h.x, 0, -57.8, 0] },
+      { d: 1.5, to: [h.x, 0, h.z, 0] }, // pushed back onto its stand
+    ]);
+  } else if (k === 'ship') {
+    P = makePath([h.x, 0.05, -49.4, Math.PI], [{ d: 3.6, to: [h.x, 0.05, h.z, Math.PI], ease: 'out' }]);
+  } else if (k === 'sub') {
+    P = makePath([h.x, -2.2, h.z, Math.PI], [{ d: 2.6, to: [h.x, 0, h.z, Math.PI], ease: 'out' }]);
+  }
+  if (!P) return;
+  m.arrive = { P, t: 0, k, y: -9 };
+  pathPose(P, 0, m.group, 0);
+}
+function updateArrivals(dt) {
+  for (const k of ['arm', 'tank', 'jet', 'ship', 'sub']) for (const m of BASE.unitMeshes[k]) {
+    const A = m.arrive;
+    if (!A) continue;
+    A.t += dt;
+    const g = m.group;
+    pathPose(A.P, A.t, g, dt);
+    g.rotation.x = g.rotation.z = 0;
+    if ((k === 'arm' || k === 'tank') && Math.random() < dt * 8) fxPuff('smoke', g.position.clone().setY(0.5), 0x777777, { s0: 0.2, s1: 0.7, life: 0.9, vel: v(0, 0).setY(0.6), alpha: 0.5 });
+    if (k === 'sub' && A.y < -0.6 && g.position.y >= -0.6) fxSplash(g.position.clone().setY(0.1));
+    if (k === 'ship' && Math.random() < dt * 6) fxPuff('smoke', g.position.clone().add(v(0, -2.4)).setY(0.12), 0xffffff, { s0: 0.3, s1: 0.9, life: 1.2, alpha: 0.5 });
+    A.y = g.position.y;
+    if (A.t >= A.P.total) {
+      m.arrive = null;
+      if (A.leave) {
+        // Out of sight: away on the mission
+        m.away = true;
+        g.visible = false;
+      } else {
+        g.position.set(m.home.x, k === 'ship' ? 0.05 : 0, m.home.z);
+        g.rotation.set(0, m.home.yaw, 0);
+        if (m.crew) m.crew.group.visible = true;
+      }
+    }
+  }
+}
+
+// --- missions: the units that go out on one, and their way out of the base and back ---
+const notBusy = (m) => !m.arrive && !m.away && BASE.sortie?.m !== m && BASE.subRun?.m !== m;
+const SORTIE_OUT = curve([[8, 0, -56.5], [18, 1.5, -56.5], [34, 7, -58], [70, 22, -72], [140, 48, -100]]);
+const SORTIE_IN = curve([[-140, 48, -80], [-70, 22, -62], [-36, 3, -56.5], [-20, 0.5, -56.5], [-11, 0, -56.5]]);
+const HELI_OUT = curve([[41, 6, -33.5], [50, 9, -20], [72, 14, 8], [120, 22, 40]]);
+const HELI_IN = curve([[120, 22, 40], [72, 14, 8], [50, 9, -20], [41, 6, -33.5]]);
+function convoyPath(k, m, out, delay) {
+  const h = m.home;
+  if (k === 'arm' || k === 'tank') {
+    const lane = k === 'arm' ? -47.2 : -55.6;
+    if (out) return makePath([h.x, 0, h.z, 0], [
+      { d: delay + 0.01, to: [h.x, 0, h.z, 0] },
+      { d: Math.max(0.8, Math.abs(lane - h.z) / 2.5), to: [h.x, 0, lane, 0], ease: 'in' },
+      { d: 0.9, to: [h.x, 0, lane, -Math.PI / 2] },
+      { d: Math.abs(h.x - 20.8) / 4.5, to: [20.8, 0, lane, -Math.PI / 2], ease: 'lin' },
+      { d: 0.9, to: [20.8, 0, lane, 0] },
+      { d: (lane + 8) / -5, to: [20.8, 0, -8, 0], ease: 'lin' }, // down the camp road and out of the gate
+    ]);
+    return makePath([20.8, 0, -8, Math.PI], [
+      { d: delay + 0.01, to: [20.8, 0, -8, Math.PI] },
+      { d: (lane + 8) / -5, to: [20.8, 0, lane, Math.PI], ease: 'lin' },
+      { d: 0.9, to: [20.8, 0, lane, Math.PI / 2] },
+      { d: Math.abs(h.x - 20.8) / 4.5, to: [h.x, 0, lane, Math.PI / 2], ease: 'lin' },
+      { d: 0.9, to: [h.x, 0, lane, 0] },
+      { d: Math.max(0.8, Math.abs(lane - h.z) / 2.5), to: [h.x, 0, h.z, 0] },
+    ]);
+  }
+  if (k === 'jet') {
+    if (out) return makePath([h.x, 0, h.z, 0], [
+      { d: delay + 0.01, to: [h.x, 0, h.z, 0] },
+      { d: 2.4, to: [h.x, 0, -56.5, 0] },
+      { d: 1.0, to: [h.x, 0, -56.5, -Math.PI / 2] },
+      { d: Math.max(0.4, (h.x + 11) / 3), to: [-11, 0, -56.5, -Math.PI / 2], ease: 'lin' },
+      { d: 1.6, to: [-11, 0, -56.5, Math.PI / 2] },
+      { d: 3.0, to: [8, 0, -56.5, Math.PI / 2], ease: 'in' },
+      { d: 7, curve: SORTIE_OUT },
+    ]);
+    return makePath([-140, 48, -80, Math.PI / 2], [
+      { d: delay + 0.01, to: [-140, 48, -80, Math.PI / 2] },
+      { d: 8, curve: SORTIE_IN },
+      { d: 4.0, to: [14, 0, -56.5, Math.PI / 2], ease: 'out' },
+      { d: 1.6, to: [14, 0, -56.5, -Math.PI / 2] },
+      { d: (14 - h.x) / 3.5, to: [h.x, 0, -56.5, -Math.PI / 2], ease: 'lin' },
+      { d: 1.0, to: [h.x, 0, -56.5, -Math.PI] },
+      { d: 2.2, to: [h.x, 0, h.z, -Math.PI] },
+      { d: 1.6, to: [h.x, 0, h.z, -Math.PI * 2] },
+    ]);
+  }
+  if (k === 'sub') {
+    if (out) return makePath([h.x, 0, h.z, Math.PI], [
+      { d: delay + 0.01, to: [h.x, 0, h.z, Math.PI] },
+      { d: 5, to: [h.x, 0, -108, Math.PI], ease: 'in' },
+      { d: 6, to: [h.x, -2.2, -160, Math.PI], ease: 'lin' },
+    ]);
+    return makePath([h.x, -2.2, -160, 0], [
+      { d: delay + 0.01, to: [h.x, -2.2, -160, 0] },
+      { d: 6, to: [h.x, 0, -108, 0], ease: 'lin' },
+      { d: 5, to: [h.x, 0, h.z, 0], ease: 'out' },
+      { d: 3, to: [h.x, 0, h.z, Math.PI] },
+    ]);
+  }
+  return null;
+}
+function launchConvoy(branch) {
+  const pickFree = (k, n, skipLast) => {
+    const l = BASE.unitMeshes[k];
+    return (skipLast ? l.slice(0, -1) : l).filter(notBusy).slice(-n).map((m) => [k, m]);
+  };
+  const go = branch === 'army' ? [...pickFree('arm', 2, true), ...pickFree('tank', 2, true)]
+    : branch === 'air' ? pickFree('jet', 3, false)
+      : pickFree('sub', 2, false);
+  BASE.convoy = [];
+  go.forEach(([k, m], i) => {
+    const P = convoyPath(k, m, true, i * 1.1);
+    if (!P) return;
+    m.arrive = { P, t: 0, k, y: 0, leave: true };
+    if (m.crew) m.crew.group.visible = false;
+    BASE.convoy.push([k, m]);
+  });
+  // The army helicopter flies out with every mission
+  if (BASE.heli && !BASE.heliAway) {
+    BASE.heliFly = { t: 0, away: true, P: makePath([HELIPAD.x, 0, HELIPAD.z, 0], [{ d: 2.5, to: [HELIPAD.x, 6, HELIPAD.z, 0], ease: 'smooth' }, { d: 7, curve: HELI_OUT }]) };
+  }
+}
+function recallConvoy() {
+  BASE.convoy.forEach(([k, m], i) => {
+    if (!BASE.unitMeshes[k].includes(m)) return; // lost on the mission
+    const P = convoyPath(k, m, false, i * 1.1);
+    m.away = false;
+    m.group.visible = true;
+    m.arrive = { P, t: 0, k, y: -9 };
+    pathPose(P, 0, m.group, 0);
+  });
+  BASE.convoy = [];
+  if (BASE.heli && BASE.heliAway) {
+    BASE.heliAway = false;
+    BASE.heli.visible = true;
+    BASE.heliFly = { t: 0, P: makePath([120, 22, 40, 0], [{ d: 7, curve: HELI_IN }, { d: 2.5, to: [HELIPAD.x, 0, HELIPAD.z, 0], ease: 'smooth' }]) };
+  }
+}
+
+// --- a progress bar over each training station: what it is making, how far along, how many so far ---
+function updateStationBars() {
+  for (const S of Object.values(BASE.stations)) {
+    const t = UNIT_TYPES[S.k];
+    const n = B().units[S.k] || 0;
+    const cap = unitCap(S.k);
+    const full = n >= cap;
+    const key = `${n}|${cap}|${full ? 'f' : Math.floor((S.progress / t.time) * 24)}`;
+    if (!S.bar) {
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = 72;
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      S.bar = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, toneMapped: false }));
+      S.bar.scale.set(2.6, 0.73, 1);
+      S.bar.position.set(S.at.x, 2.5, S.at.z);
+      S.bar.renderOrder = 5;
+      S.bar.userData.c = c;
+      scene.add(S.bar);
+    }
+    S.bar.visible = !BASE.ex;
+    if (S.bar.userData.key === key) continue;
+    S.bar.userData.key = key;
+    const c = S.bar.userData.c;
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, 256, 72);
+    g.fillStyle = 'rgba(16,24,40,0.82)';
+    roundRect(g, 2, 2, 252, 68, 18);
+    g.fill();
+    g.font = '700 30px Mitr, sans-serif';
+    g.textBaseline = 'middle';
+    g.fillStyle = '#ffffff';
+    g.fillText(`${t.icon} ${n}/${cap}`, 14, 25);
+    g.fillStyle = 'rgba(255,255,255,0.18)';
+    roundRect(g, 14, 46, 228, 14, 7);
+    g.fill();
+    g.fillStyle = full ? '#ffd166' : '#5dd37a';
+    roundRect(g, 14, 46, full ? 228 : Math.max(10, 228 * Math.min(1, S.progress / t.time)), 14, 7);
+    g.fill();
+    if (full) {
+      g.fillStyle = '#ffd166';
+      g.textAlign = 'right';
+      g.fillText('เต็ม ✓', 242, 25);
+      g.textAlign = 'left';
+    }
+    S.bar.material.map.needsUpdate = true;
+  }
+}
 // Armour on patrol: the last armoured car and the last tank drive a loop round the vehicle park
 const PATROL = curve([[35.6, 0, -47.6], [46.6, 0, -47.6], [47.2, 0, -56], [46.6, 0, -65.2], [35.6, 0, -65.2], [35.2, 0, -56]]);
 PATROL.closed = true;
@@ -10249,8 +10494,23 @@ PATROL.len = PATROL.getLength();
 function patrolVehicles(dt) {
   const keep = [BASE.unitMeshes.arm, BASE.unitMeshes.tank];
   keep.forEach((list, j) => {
+    // A vehicle that was patrolling until a newer one took over drives back to its bay
+    list.forEach((o, i) => {
+      if (i === list.length - 1 || o.patrol === undefined || o.arrive || o.away) return;
+      o.patrol = undefined;
+      const g = o.group;
+      const lane = j === 0 ? -47.2 : -55.6;
+      const toLane = Math.atan2(o.home.x - g.position.x, lane - g.position.z);
+      o.arrive = { t: 0, k: j === 0 ? 'arm' : 'tank', y: 0, P: makePath([g.position.x, 0, g.position.z, g.rotation.y], [
+        { d: 0.8, to: [g.position.x, 0, g.position.z, toLane] },
+        { d: Math.max(0.6, Math.hypot(o.home.x - g.position.x, lane - g.position.z) / 3.5), to: [o.home.x, 0, lane, toLane], ease: 'lin' },
+        { d: 0.9, to: [o.home.x, 0, lane, 0] },
+        { d: Math.max(0.6, Math.abs(o.home.z - lane) / 2.5), to: [o.home.x, 0, o.home.z, 0] },
+      ]) };
+    });
     if (list.length < 2) return;
     const m = list[list.length - 1];
+    if (m.arrive || m.away) return;
     m.patrol = (m.patrol ?? j * 0.5) + (dt * 2.2) / PATROL.len;
     const u = ((m.patrol % 1) + 1) % 1;
     const p = PATROL.getPointAt(u);
@@ -10270,7 +10530,7 @@ function parkVehicles(yaw = 0) {
 }
 // Submarines go on patrol one at a time: out past the pier, dive, cruise under the surface, come up and return
 function startSubPatrol() {
-  const list = BASE.unitMeshes.sub;
+  const list = BASE.unitMeshes.sub.filter((m) => !m.arrive && !m.away);
   if (!list.length) return;
   const m = pick(list);
   const h = m.home;
@@ -10312,7 +10572,7 @@ function updateSubPatrol(dt) {
 // Jets fly sorties one at a time: taxi out, take off, loop round the world and land again
 const SORTIE_AIR = curve([[8, 0, -56.5], [18, 1.5, -56.5], [32, 6, -56.5], [48, 12, -46], [42, 16, -20], [5, 18, -10], [-30, 15, -24], [-50, 9, -48], [-36, 3, -56.5], [-20, 0.5, -56.5], [-11, 0, -56.5]]);
 function startSortie() {
-  const list = BASE.unitMeshes.jet;
+  const list = BASE.unitMeshes.jet.filter((m) => !m.arrive && !m.away);
   if (!list.length) return;
   const m = pick(list);
   const h = m.home;
@@ -10375,7 +10635,7 @@ function updateArmyHeli(dt) {
   if (!BASE.heliFly) {
     if (r) r.rotation.y += dt * 0.6;
     BASE.heliT -= dt;
-    if (BASE.heliT <= 0 && !BASE.ex) {
+    if (BASE.heliT <= 0 && !BASE.ex && !BASE.heliAway) {
       BASE.heliT = rand(35, 55);
       BASE.heliFly = { t: 0, P: makePath([HELIPAD.x, 0, HELIPAD.z, 0], [{ d: 2.5, to: [HELIPAD.x, 5, HELIPAD.z, 0], ease: 'smooth' }, { d: 16, curve: HELI_LOOP }, { d: 2.5, to: [HELIPAD.x, 0, HELIPAD.z, 0], ease: 'smooth' }]) };
     }
@@ -10386,9 +10646,14 @@ function updateArmyHeli(dt) {
   if (r) r.rotation.y += dt * 24;
   pathPose(F.P, F.t, h, dt, { level: true });
   if (F.t >= F.P.total) {
+    BASE.heliFly = null;
+    if (F.away) {
+      h.visible = false;
+      BASE.heliAway = true;
+      return;
+    }
     h.position.set(HELIPAD.x, 0, HELIPAD.z);
     h.rotation.set(0, 0, 0);
-    BASE.heliFly = null;
   }
 }
 function baseLife(dt) {
@@ -10432,7 +10697,38 @@ function baseLife(dt) {
     }
     updateSubPatrol(dt);
   }
-  BASE.unitMeshes.sub.forEach((m, i) => { if (BASE.subRun?.m !== m) m.group.position.y = Math.sin(now * 0.9 + i * 2) * 0.04; });
+  BASE.unitMeshes.sub.forEach((m, i) => { if (BASE.subRun?.m !== m && !m.arrive && !m.away) m.group.position.y = Math.sin(now * 0.9 + i * 2) * 0.04; });
+  updateArrivals(dt);
+  updateStationBars();
+  // New buildings growing out of the ground
+  for (let i = BASE.rising.length - 1; i >= 0; i--) {
+    const R = BASE.rising[i];
+    R.t += dt;
+    const k = Math.min(1, R.t / 1.1);
+    const back = 1 + 2.2 * (k - 1) ** 3 + 1.2 * (k - 1) ** 2; // ease out with a little overshoot
+    R.o.scale.y = Math.max(0.01, R.sy * back);
+    if (k >= 1) {
+      R.o.scale.y = R.sy;
+      BASE.rising.splice(i, 1);
+    }
+  }
+  // Commanders walking to their posts
+  for (const c of BASE.commanders) {
+    if (c.route?.length) {
+      const pos = c.group.position;
+      const to = c.route[0];
+      const d = flatDist(pos, to);
+      const step = Math.min(d, dt * 2.2);
+      if (d > 0.01) {
+        pos.x += ((to.x - pos.x) / d) * step;
+        pos.z += ((to.z - pos.z) / d) * step;
+        c.group.rotation.y = Math.atan2(to.x - pos.x, to.z - pos.z);
+      }
+      if (d < 0.05) c.route.shift();
+      if (!c.route.length) c.group.rotation.y = 0;
+      animatePerson(c, true, dt);
+    } else animatePerson(c, false, dt);
+  }
   if (BASE.sock) BASE.sock.rotation.y = 0.6 + Math.sin(now * 0.5) * 0.3;
 }
 
@@ -10486,7 +10782,7 @@ function exReward(hits = 0) {
   return Math.round(((4000 + militaryPower() * 40) * priceMult() * (1 + bonus)) / 100) * 100;
 }
 function startExercise() {
-  if (BASE.ex || BASE.flight || BASE.defense || !baseHas('barracks')) return;
+  if (BASE.ex || BASE.flight || BASE.defense || BASE.mission?.deploy || !baseHas('barracks')) return;
   const u = B().units;
   const acts = [{ id: 'intro', d: 4 }];
   if (u.inf) acts.push({ id: 'parade', d: 8 });
@@ -10674,7 +10970,7 @@ function updateExercise(dt) {
     BASE.exCheck = (BASE.exCheck || 0) - dt;
     if (BASE.exCheck > 0) return;
     BASE.exCheck = 5;
-    if (running && auto.on && autoBadge.classList.contains('show') && exReady() && baseHas('barracks') && (B().units.inf || 0) > 0 && !BASE.defense && !BASE.flight && !mapView.active && !document.hidden && player.floor === 0 && !lift.riding && !coverOpen()) {
+    if (running && auto.on && autoBadge.classList.contains('show') && exReady() && baseHas('barracks') && (B().units.inf || 0) > 0 && !BASE.mission?.deploy && !BASE.defense && !BASE.flight && !mapView.active && !document.hidden && player.floor === 0 && !lift.riding && !coverOpen()) {
       startExercise();
       toast('🤖 AUTO เปิดการซ้อมรบใหญ่ให้แล้ว (กด ข้าม ได้)', 3000);
     }
@@ -10903,6 +11199,7 @@ function dispatchMission() {
   if (!m || m.deploy) return;
   m.deploy = 20;
   m.chance = missionChance(m);
+  launchConvoy(m.branch);
   toast(`🪖 ส่งกำลังไป${m.name}แล้ว · โอกาสสำเร็จ ${Math.round(m.chance * 100)}%`);
   renderMilitary();
 }
@@ -10936,6 +11233,7 @@ function updateMissions(dt) {
     syncUnits();
     toast(`😓 ภารกิจ${m.name}ไม่สำเร็จ เสียกำลังพลบางส่วน`, 4000);
   }
+  recallConvoy(); // whoever is left comes home
   save();
   if (milEl.style.display === 'flex') renderMilitary();
 }
@@ -11070,7 +11368,7 @@ function renderMilitary() {
   // Watch mode: the grand exercise
   const left = Math.max(0, Math.ceil(((B().exAt || 0) - Date.now()) / 1000));
   const xc = emEl('div', 'branchcard excard', `<b>🎖️ ซ้อมรบใหญ่ (โหมดชม)</b><br><small>ชมสวนสนาม ยานเกราะยิงเป้า เรือรบยิงสลุต และฝูงบินผาดแผลง แตะจอยิงเพิ่มได้โบนัส${left ? ` · รางวัลครั้งถัดไปใน ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : ` · รางวัล ~💵${fmt(exReward())} 🏅`}</small><br>`);
-  xc.append(emButton(left ? '▶ ชมอีกครั้ง (ไม่มีรางวัล)' : '▶ เริ่มซ้อมรบ', !baseHas('barracks') || Boolean(BASE.defense || BASE.ex), startExercise));
+  xc.append(emButton(BASE.mission?.deploy ? 'รอกองกำลังกลับจากภารกิจ…' : left ? '▶ ชมอีกครั้ง (ไม่มีรางวัล)' : '▶ เริ่มซ้อมรบ', !baseHas('barracks') || Boolean(BASE.defense || BASE.ex || BASE.mission?.deploy), startExercise));
   box.append(xc);
   // Generals
   const cost = recruitCost();
