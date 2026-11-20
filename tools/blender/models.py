@@ -1041,6 +1041,39 @@ def terminal_back():
 
 terminal_back()
 
+# ---------------- submarine: origin at the waterline, bow at -Y; about 6.4 long ----------------
+def submarine():
+    begin()
+    hull = mat('hull', [0.05, 0.055, 0.065], rough=0.55, metal=0.3)
+    deck = mat('deck', [0.09, 0.1, 0.11], rough=0.7)
+    red = mat('boot', [0.35, 0.04, 0.03], rough=0.7)
+    steel = mat('steel', [0.3, 0.32, 0.33], rough=0.5, metal=0.6)
+    r = 0.55
+    zc = -0.12  # mostly under the water
+    cyl(r, 4.0, (0, 0, zc), hull, rot=(math.pi / 2, 0, 0), verts=20)
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=r, segments=20, ring_count=10, location=(0, -2.0, zc))
+    b = add(bpy.context.object, hull)
+    b.scale = (1, 1.5, 1)
+    cyl(r, 2.2, (0, 3.1, zc), hull, rot=(math.pi / 2, 0, 0), verts=20, r2=0.12)  # stern taper
+    cyl(r * 1.005, 4.0, (0, 0, zc - 0.32), red, rot=(math.pi / 2, 0, 0), verts=20)  # red below the waterline
+    cube((0.5, 5.2, 0.06), (0, 0.1, zc + r - 0.02), deck, smooth=False)  # flat deck casing
+    # The sail (conning tower) with its planes, a periscope and a mast
+    sail = cube((0.42, 1.3, 0.95), (0, -0.9, zc + r + 0.45), hull, bevel=0.12, seg=3)
+    taper(sail, 0.0, 0.8, 0.75)
+    for sx in (-1, 1):
+        cube((0.55, 0.32, 0.05), (sx * 0.45, -1.05, zc + r + 0.6), hull, smooth=False)
+    cyl(0.035, 0.7, (0, -1.15, zc + r + 1.15), steel, verts=8)
+    cyl(0.025, 0.5, (0, -0.6, zc + r + 1.05), steel, verts=6)
+    # Cruciform tail and a propeller
+    for rot in (0, math.pi / 2):
+        f = cube((1.4, 0.5, 0.05), (0, 3.5, zc), hull, smooth=False)
+        f.rotation_euler.y = rot
+    cyl(0.18, 0.08, (0, 4.25, zc), steel, rot=(math.pi / 2, 0, 0), verts=7)
+    cube((0.07, 0.07, 0.03), (0, -2.3, zc + r - 0.05), steel, smooth=False)  # bow hatch
+    write('submarine')
+
+submarine()
+
 helicopter()
 armored()
 person_parts()
