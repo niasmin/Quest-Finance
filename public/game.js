@@ -10630,7 +10630,7 @@ const HELIPAD = v(41, -33.5);
 const HELI_LOOP = curve([[41, 5, -33.5], [30, 7, -40], [20, 8, -54], [2, 8, -58], [-6, 8, -46], [10, 7, -36], [41, 5, -33.5]]);
 function updateArmyHeli(dt) {
   const h = BASE.heli;
-  if (!h) return;
+  if (!h || BASE.rescue) return;
   const r = h.userData.rotor;
   if (!BASE.heliFly) {
     if (r) r.rotation.y += dt * 0.6;
@@ -10684,7 +10684,7 @@ function baseLife(dt) {
     BASE.surf.position.z = SEA_Z - 0.2 + Math.sin(now * 0.8) * 0.35;
     BASE.surf.material.opacity = 0.45 + Math.sin(now * 0.8 + 1) * 0.25;
   }
-  if (!BASE.ex) {
+  if (!BASE.ex && !BASE.coast) {
     // Destroyers patrol a wide loop offshore, leaving a wake
     for (const F of BASE.fleet) {
       F.a += dt * 0.045;
@@ -10777,12 +10777,18 @@ function updateTeaser(dt) {
 const cineEl = document.getElementById('cine');
 const EX_COOLDOWN_MS = 5 * 60 * 1000;
 const exReady = () => Date.now() >= (B().exAt || 0);
+// Everything the player earns a second, everywhere (hospital, other branches, the empire): rewards in the base are
+// worth a few minutes of it, so they still matter late in the game when power-based sums are pocket change
+function totalRate() {
+  return idleIncome(3600).perHour / 3600 / Math.max(0.01, offlineRate()) + otherBranchesRate() + empireRate();
+}
+const minutesOfIncome = (min) => Math.round((totalRate() * 60 * min) / 100) * 100;
 function exReward(hits = 0) {
   const bonus = Math.min(0.5, hits * 0.02);
-  return Math.round(((4000 + militaryPower() * 40) * priceMult() * (1 + bonus)) / 100) * 100;
+  return Math.round((Math.max((4000 + militaryPower() * 40) * priceMult(), minutesOfIncome(12)) * (1 + bonus)) / 100) * 100;
 }
 function startExercise() {
-  if (BASE.ex || BASE.flight || BASE.defense || BASE.mission?.deploy || !baseHas('barracks')) return;
+  if (modeBusy() || !baseHas('barracks')) return;
   const u = B().units;
   const acts = [{ id: 'intro', d: 4 }];
   if (u.inf) acts.push({ id: 'parade', d: 8 });
@@ -10964,6 +10970,8 @@ function updateMissiles(dt) {
 }
 function updateExercise(dt) {
   updateMissiles(dt);
+  updateCoast(dt);
+  updateRescue(dt);
   const X = BASE.ex;
   if (!X) {
     // With AUTO playing, the exercise runs by itself whenever its reward is ready
@@ -11077,8 +11085,7 @@ function updateExercise(dt) {
   }
 }
 const exCamAt = new THREE.Vector3();
-function exerciseCamera(dt) {
-  const X = BASE.ex;
+function cineCamera(dt, X) {
   // Shots are framed for landscape: on a portrait phone, widen the lens and back off a little
   // rather than moving the camera through the scenery
   exCamAt.copy(X.cam);
@@ -11133,9 +11140,334 @@ function endExercise(skipped = false) {
   save();
 }
 document.getElementById('cineskip').addEventListener('click', () => {
-  // Skipping still pays: jump to the end
-  endExercise(true);
+  // Skipping the exercise still pays; leaving the other modes ends them without a reward
+  if (BASE.ex) endExercise(true);
+  else if (BASE.coast) endCoast('quit');
+  else if (BASE.rescue) endRescue('quit');
 });
+const modeBusy = () => Boolean(BASE.ex || BASE.coast || BASE.rescue || BASE.defense || BASE.flight || BASE.mission?.deploy);
+function openCine(cap, sub, steer = false) {
+  milEl.style.display = 'none';
+  document.body.classList.add('cine');
+  document.body.classList.toggle('steer', steer);
+  cineEl.classList.add('show');
+  document.getElementById('cinecap').textContent = cap;
+  document.getElementById('cinesub').textContent = sub;
+  document.getElementById('cinehits').textContent = '';
+}
+function closeCine(X) {
+  fogZoom = -1; // the next camera update puts the fog back for the current zoom
+  document.body.classList.remove('cine', 'steer');
+  cineEl.classList.remove('show');
+  document.getElementById('cinehits').textContent = '';
+  camera.fov = X.fov;
+  camera.updateProjectionMatrix();
+  updateCamera(0, true);
+}
+
+// ---------- mode: coastal defence ----------
+// Enemy drone boats race in from the open sea towards the beach. The destroyers and submarines fire on their own;
+// the player taps a boat to call a shot on it. Stop every boat before ten reach the shore.
+function boatModel() {
+  const g = new THREE.Group();
+  g.add(at3(box(0.8, 0.35, 2.2, 0x37474f), 0, 0.12, 0), at3(new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.8, 4).rotateX(Math.PI / 2).rotateZ(Math.PI / 4), mat(0x37474f)), 0, 0.12, 1.45));
+  g.add(at3(box(0.5, 0.3, 0.7, 0x263238), 0, 0.45, -0.2), at3(new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), LIT.red), 0, 0.68, -0.2));
+  return g;
+}
+function startCoast() {
+  if (modeBusy() || !baseHas('seaport')) return;
+  const count = 10 + Math.min(14, Math.floor(militaryPower() / 40));
+  BASE.coast = { left: count, total: count, spawn: 1.2, boats: [], killed: 0, hp: 10, t: 0, fire: 1.5, torp: 2.5, cam: v(20, -84).setY(30), look: v(20, -132), fov: camera.fov, snap: true };
+  // See the whole approach: push the fog out while defending
+  scene.fog.near = 90;
+  scene.fog.far = 230;
+  // The destroyers take station off the pier; a submarine surfaces between them
+  BASE.fleet.forEach((F, i) => {
+    F.g.position.set(i ? 40 : 0, 0.05, -110);
+    F.g.rotation.set(0, i ? -Math.PI / 2 : Math.PI / 2, 0);
+  });
+  if (BASE.subRun) {
+    BASE.subRun.t = BASE.subRun.P.total;
+    updateSubPatrol(0);
+  }
+  const sub = BASE.unitMeshes.sub.find((m) => !m.away);
+  if (sub) {
+    sub.group.position.set(12, 0, -112);
+    sub.group.rotation.set(0, Math.PI, 0);
+  }
+  BASE.coast.sub = sub || null;
+  player.group.visible = false;
+  openCine('⚓ ป้องกันชายฝั่ง', '👆 แตะเรือข้าศึกเพื่อสั่งยิง');
+  [330, 262, 330, 262].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'square', 0.04), i * 280));
+}
+function hitBoat(b, dmg) {
+  const C = BASE.coast;
+  if (!C || !C.boats.includes(b)) return;
+  b.hp -= dmg;
+  fxPuff('glow', b.g.position.clone().setY(0.6), 0xffe08a, { s0: 0.5, s1: 1.2, life: 0.15 });
+  if (b.hp > 0) return;
+  fxBoom(b.g.position.clone().setY(0.5), 0.9);
+  fxSplash(b.g.position.clone().setY(0.1));
+  scene.remove(b.g);
+  C.boats.splice(C.boats.indexOf(b), 1);
+  C.killed++;
+}
+function fireAtBoat(b, fast = false) {
+  if (!BASE.fleet.length) return;
+  const F = BASE.fleet.reduce((a, c) => (c.g.position.distanceTo(b.g.position) < a.g.position.distanceTo(b.g.position) ? c : a));
+  const from = F.g.position.clone().setY(1.6);
+  const to = b.g.position.clone().add(v(b.dir.x * (fast ? 2 : 4), b.dir.z * (fast ? 2 : 4))).setY(0.4); // lead the target
+  fxPuff('glow', from, 0xfff0b0, { s0: 0.6, s1: 1.4, life: 0.14 });
+  fxPuff('smoke', from, 0xd8d8d8, { s0: 0.4, s1: 1.4, life: 1.3, vel: v(0, 0).setY(0.6), alpha: 0.7 });
+  sfxBoom(0.5);
+  fxShot(from, to, fast ? 120 : 70, (p) => {
+    const C = BASE.coast;
+    if (!C) return;
+    const near = C.boats.find((x) => flatDist(x.g.position, p) < 2.2);
+    if (near) hitBoat(near, 1);
+    else fxSplash(p.clone().setY(0.1));
+  }, 0xffd166, 0.14);
+}
+const rayer = new THREE.Raycaster();
+const seaPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+function tapPoint(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  rayer.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const p = new THREE.Vector3();
+  return rayer.ray.intersectPlane(seaPlane, p) ? p : null;
+}
+window.addEventListener('pointerdown', (e) => {
+  const C = BASE.coast;
+  if (!C || e.target?.closest?.('button')) return;
+  const p = tapPoint(e);
+  if (!p) return;
+  let best = null;
+  for (const b of C.boats) if (flatDist(b.g.position, p) < 8 && (!best || flatDist(b.g.position, p) < flatDist(best.g.position, p))) best = b;
+  if (best) fireAtBoat(best, true);
+  else fxSplash(p.setY(0.1));
+}, true);
+function updateCoast(dt) {
+  const C = BASE.coast;
+  if (!C) return;
+  C.t += dt;
+  C.spawn -= dt;
+  if (C.left > 0 && C.spawn <= 0) {
+    C.spawn = rand(1.3, 2.6) * Math.max(0.55, 1 - C.t / 120);
+    C.left--;
+    const g = boatModel();
+    g.scale.setScalar(1.5);
+    const x = rand(-28, 68);
+    const tx = Math.max(-25, Math.min(65, x + rand(-14, 14)));
+    g.position.set(x, 0.05, -178);
+    const dir = v(tx - x, -82 - -178).normalize();
+    g.rotation.y = Math.atan2(dir.x, dir.z);
+    scene.add(g);
+    C.boats.push({ g, hp: 2, speed: rand(4.5, 7), dir });
+  }
+  const now = performance.now() / 1000;
+  for (let i = C.boats.length - 1; i >= 0; i--) {
+    const b = C.boats[i];
+    b.g.position.addScaledVector(b.dir, b.speed * dt);
+    b.g.position.y = 0.05 + Math.sin(now * 6 + i) * 0.05;
+    if (Math.random() < dt * 12) fxPuff('smoke', b.g.position.clone().addScaledVector(b.dir, -1.3).setY(0.12), 0xffffff, { s0: 0.25, s1: 0.9, life: 1.1, alpha: 0.6 });
+    if (b.g.position.z > SEA_Z - 4) {
+      // Reached the beach
+      C.hp--;
+      fxBoom(b.g.position.clone().setY(0.4), 0.8);
+      scene.remove(b.g);
+      C.boats.splice(i, 1);
+    }
+  }
+  // The ships and the submarine fire on their own; more firepower, faster
+  C.fire -= dt;
+  if (C.fire <= 0 && C.boats.length) {
+    C.fire = Math.max(0.45, 2.0 - militaryPower() / 150);
+    fireAtBoat(pick(C.boats));
+  }
+  C.torp -= dt;
+  if (C.torp <= 0 && C.sub && C.boats.length) {
+    C.torp = 3.5;
+    const from = C.sub.group.position.clone().setY(0.1);
+    const b = C.boats.reduce((a, c) => (flatDist(c.g.position, from) < flatDist(a.g.position, from) ? c : a));
+    const to = b.g.position.clone().addScaledVector(b.dir, b.speed * 1.2).setY(0.1);
+    fxShot(from, to, 24, (p) => {
+      const near = BASE.coast?.boats.find((x) => flatDist(x.g.position, p) < 2.5);
+      if (near) hitBoat(near, 2);
+      else fxSplash(p.clone().setY(0.1));
+    }, 0xe0f7ff, 0.12);
+  }
+  document.getElementById('cinehits').textContent = `🚤 ${C.killed}/${C.total} · 🏖️ ❤️ ${C.hp}`;
+  // A slow drift of the camera over the water
+  C.cam.set(20 + Math.sin(C.t * 0.2) * 3, 30, -84);
+  if (C.hp <= 0) endCoast('lost');
+  else if (C.left <= 0 && !C.boats.length) endCoast('won');
+}
+function endCoast(how) {
+  const C = BASE.coast;
+  if (!C) return;
+  BASE.coast = null;
+  for (const b of C.boats) scene.remove(b.g);
+  if (C.sub) {
+    C.sub.group.position.set(C.sub.home.x, 0, C.sub.home.z);
+    C.sub.group.rotation.set(0, Math.PI, 0);
+  }
+  player.group.visible = true;
+  closeCine(C);
+  if (how === 'won') {
+    const reward = Math.round(Math.max((5000 + militaryPower() * 40) * priceMult(), minutesOfIncome(10)) / 100) * 100;
+    addMoney(reward);
+    B().medals++;
+    stats().coasts = (stats().coasts || 0) + 1;
+    sfxUnlock();
+    toast(`⚓ <b>ป้องกันชายฝั่งสำเร็จ!</b> จมเรือข้าศึก ${C.killed} ลำ<br>รางวัล +${fmt(reward)} · เหรียญกล้าหาญ 🏅`, 5000);
+  } else if (how === 'lost') {
+    const loss = Math.max(0, Math.min(Math.floor(state.money * 0.05), minutesOfIncome(3)));
+    state.money -= loss;
+    updateMoney();
+    toast(`💥 เรือข้าศึกขึ้นฝั่งได้ เสียงบประมาณ 💵${fmt(loss)}<br><small>เพิ่มเรือดำน้ำและนายพลกองทัพเรือเพื่อยิงได้เร็วขึ้น</small>`, 5000);
+  } else toast('⚓ ถอนกำลังจากชายฝั่ง', 2500);
+  save();
+}
+
+// ---------- mode: helicopter rescue ----------
+// Fly the army helicopter yourself: people are stranded in the river and off the beach. Hover over them to winch
+// them up (four at a time), then fly them to the hospital and hover over the drop zone. Beat the clock.
+const RESCUE_SITES = [[-30, 37], [45, 37], [-8, 38], [-40, -86], [70, -84], [38, -92]];
+const RESCUE_DROP = v(6, 17);
+function rescueSite(x, z) {
+  const g = new THREE.Group();
+  g.add(at3(box(1.8, 0.3, 1.8, pick([0x8d6e63, 0x546e7a, 0xb71c1c])), 0, 0.12, 0));
+  const people = [];
+  const n = 2 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < n; i++) {
+    const p = makePerson({ shirt: pick([0xe5484d, 0x3d8bfd, 0xffd166, 0x2ec4b6]), pants: 0x3b4a6b });
+    p.group.scale.setScalar(0.8);
+    p.group.position.set(-0.45 + i * 0.45, 0.27, 0);
+    g.add(p.group);
+    people.push(p);
+  }
+  // A light pillar so the site can be seen from anywhere
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 22, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xff7043, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+  g.add(at3(beam, 0, 11, 0));
+  g.position.set(x, 0, z);
+  scene.add(g);
+  return { g, people, beam, at: v(x, z) };
+}
+function startRescue() {
+  if (modeBusy() || !BASE.heli || BASE.heliAway) return;
+  BASE.heliFly = null;
+  const spots = [...RESCUE_SITES].sort(() => Math.random() - 0.5).slice(0, 3);
+  const sites = spots.map(([x, z]) => rescueSite(x, z));
+  const total = sites.reduce((a, s) => a + s.people.length, 0);
+  const drop = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.8, 32), new THREE.MeshBasicMaterial({ color: 0x5dd37a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, toneMapped: false }));
+  ring.rotation.x = -Math.PI / 2;
+  drop.add(at3(ring, 0, 0.08, 0));
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 22, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0x5dd37a, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, toneMapped: false }));
+  drop.add(at3(beam, 0, 11, 0));
+  drop.position.copy(RESCUE_DROP);
+  scene.add(drop);
+  const h = BASE.heli;
+  BASE.rescue = { t: 0, time: 110, sites, drop, carried: 0, cap: 4, saved: 0, total, hover: 0, vel: v(0, 0), cam: v(0, 0), look: v(0, 0), fov: camera.fov, snap: true };
+  h.position.set(HELIPAD.x, 0, HELIPAD.z);
+  player.group.visible = false;
+  openCine('🚁 ภารกิจกู้ภัย', 'ลากนิ้วบังคับ · บินไปลอยตัวเหนือแสงสีส้ม แล้วส่งที่วงเขียวหน้าโรงพยาบาล', true);
+  tone(392, 0.3, 'square', 0.04);
+}
+function steerRescue(dt) {
+  const R = BASE.rescue;
+  const h = BASE.heli;
+  // Fly with the joystick or arrow keys: speed builds and fades smoothly
+  R.vel.x += (input.x * 16 - R.vel.x) * Math.min(1, dt * 2.5);
+  R.vel.z += (input.z * 16 - R.vel.z) * Math.min(1, dt * 2.5);
+  h.position.x = Math.max(-75, Math.min(95, h.position.x + R.vel.x * dt));
+  h.position.z = Math.max(-150, Math.min(75, h.position.z + R.vel.z * dt));
+  h.position.y += (6 - h.position.y) * Math.min(1, dt * 1.5);
+  const sp = Math.hypot(R.vel.x, R.vel.z);
+  if (sp > 0.5) h.rotation.y += wrapA(Math.atan2(R.vel.x, R.vel.z) - h.rotation.y) * Math.min(1, dt * 4);
+  h.rotation.x = Math.min(0.3, sp * 0.02);
+  if (h.userData.rotor) h.userData.rotor.rotation.y += dt * 26;
+}
+function updateRescue(dt) {
+  const R = BASE.rescue;
+  if (!R) return;
+  R.t += dt;
+  const h = BASE.heli;
+  const hp = h.position;
+  const now = performance.now() / 1000;
+  // Over a site with room aboard: hover to winch people up one by one
+  let busy = false;
+  for (const S of R.sites) {
+    S.beam.material.opacity = 0.22 + Math.sin(now * 4) * 0.1;
+    S.people.forEach((p, i) => { p.arms?.forEach((a) => { a.rotation.x = -2.6 + Math.sin(now * 8 + i) * 0.4; }); });
+    if (!S.people.length || flatDist(hp, S.at) > 3 || R.carried >= R.cap) continue;
+    busy = true;
+    R.hover += dt;
+    if (R.hover >= 1.1) {
+      R.hover = 0;
+      const p = S.people.pop();
+      S.g.remove(p.group);
+      R.carried++;
+      sfxCoin();
+      floatText(hp.clone().setY(1), `🧍 ${R.carried}/${R.cap}`, '#ffd166');
+      if (!S.people.length) {
+        scene.remove(S.g);
+        R.sites.splice(R.sites.indexOf(S), 1);
+      }
+    }
+    break;
+  }
+  // Over the drop zone with people aboard: they go to the hospital
+  if (!busy && R.carried && flatDist(hp, RESCUE_DROP) < 3) {
+    busy = true;
+    R.hover += dt;
+    if (R.hover >= 1.2) {
+      R.hover = 0;
+      R.saved += R.carried;
+      const pay = minutesOfIncome(1.2) * R.carried || 1000 * R.carried;
+      addMoney(pay);
+      floatText(RESCUE_DROP.clone().setY(1), `🏥 +${R.carried} · +${fmt(pay)}`, '#5dd37a');
+      sfxUnlock();
+      R.carried = 0;
+    }
+  }
+  if (!busy) R.hover = 0;
+  // The rope while winching
+  if (busy && Math.random() < dt * 20) fxPuff('glow', hp.clone().setY(hp.y - rand(0.5, 5)), 0xffffff, { s0: 0.08, s1: 0.08, life: 0.1 });
+  // Where to go next: the nearest site with people, or the hospital when full or nothing is left
+  const target = R.carried >= R.cap || (!R.sites.length && R.carried) ? RESCUE_DROP : R.sites.reduce((a, s) => (!a || flatDist(hp, s.at) < flatDist(hp, a) ? s.at : a), null);
+  const left = Math.max(0, Math.ceil(R.time - R.t));
+  const arrow = target ? ['⬆️', '↗️', '➡️', '↘️', '⬇️', '↙️', '⬅️', '↖️'][Math.round(((Math.atan2(target.x - hp.x, -(target.z - hp.z)) + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8] : '';
+  document.getElementById('cinehits').textContent = `${arrow} 🧍 ${R.carried}/${R.cap} · ✅ ${R.saved}/${R.total} · ⏱ ${left}`;
+  // The camera follows the helicopter from the usual angle
+  const k = (camera.aspect < 1 ? 1.85 : 1.1) * 1.5;
+  R.look.set(hp.x, 0.5, hp.z - 0.5);
+  R.cam.set(hp.x, 0, hp.z).addScaledVector(camOffset, k);
+  if (R.saved >= R.total) endRescue('won');
+  else if (R.t >= R.time) endRescue('time');
+}
+function endRescue(how) {
+  const R = BASE.rescue;
+  if (!R) return;
+  BASE.rescue = null;
+  for (const S of R.sites) scene.remove(S.g);
+  scene.remove(R.drop);
+  const h = BASE.heli;
+  // The helicopter flies itself home
+  BASE.heliFly = { t: 0, P: makePath([h.position.x, h.position.y, h.position.z, h.rotation.y], [{ d: Math.max(3, flatDist(h.position, HELIPAD) / 14), to: [HELIPAD.x, 6, HELIPAD.z, 0], ease: 'smooth' }, { d: 2.5, to: [HELIPAD.x, 0, HELIPAD.z, 0], ease: 'smooth' }]) };
+  player.group.visible = true;
+  closeCine(R);
+  if (how === 'won') {
+    const bonus = Math.round(Math.max(20000 * priceMult(), minutesOfIncome(5)) / 100) * 100;
+    addMoney(bonus);
+    B().medals++;
+    stats().rescues = (stats().rescues || 0) + 1;
+    sfxUnlock();
+    toast(`🚁 <b>กู้ภัยครบทุกคน!</b> ช่วยได้ ${R.saved} คน<br>โบนัส +${fmt(bonus)} · เหรียญกล้าหาญ 🏅`, 5000);
+  } else if (how === 'time') toast(`⏱ หมดเวลา · ช่วยได้ ${R.saved}/${R.total} คน`, 3500);
+  else toast('🚁 ยกเลิกภารกิจกู้ภัย', 2500);
+  save();
+}
 
 // --- private jet: a sightseeing flight over the whole map ---
 function startFlight() {
@@ -11189,7 +11521,7 @@ const missionChance = (m) => Math.min(0.95, militaryPower() * branchBonus(m.bran
 function newMission() {
   const pool = MISSIONS_MIL.filter((m) => m.need <= Math.max(60, militaryPower() * 2.2));
   const m = { ...pick(pool), deploy: 0 };
-  m.reward = Math.round((m.need * 120 * priceMult()) / 100) * 100;
+  m.reward = Math.round(Math.max(m.need * 120 * priceMult(), minutesOfIncome(4 + m.need / 40)) / 100) * 100;
   BASE.mission = m;
   toast(`🚨 <b>เหตุฉุกเฉิน: ${m.icon} ${m.name}</b><br>ไปที่กองบัญชาการ (วงเหลือง) เพื่อส่งกำลัง`, 4500);
   tone(523, 0.15, 'square', 0.04);
@@ -11241,7 +11573,7 @@ function updateMissions(dt) {
 // --- special mode: defend the base from a drone raid ---
 const DEFEND_HQ = v(31, -33.5);
 function startDefense() {
-  if (BASE.defense || BASE.ex || !baseHas('barracks')) return;
+  if (BASE.defense || BASE.ex || BASE.coast || BASE.rescue || !baseHas('barracks')) return;
   const count = 12 + Math.min(18, Math.floor(militaryPower() / 20));
   BASE.defense = { left: count, spawn: 0, killed: 0, hp: 10, t: 0 };
   toast(`🛡️ <b>โหมดพิเศษ: ป้องกันฐาน!</b><br>โดรน ${count} ลำกำลังบุก ยืนใกล้ ๆ เพื่อยิง กองทัพช่วยยิงอัตโนมัติ`, 5000);
@@ -11322,7 +11654,7 @@ function endDefense(win) {
   for (const d of BASE.drones) scene.remove(d.m);
   BASE.drones = [];
   if (win) {
-    const reward = Math.round(((3000 + militaryPower() * 30) * priceMult()) / 100) * 100;
+    const reward = Math.round(Math.max((3000 + militaryPower() * 30) * priceMult(), minutesOfIncome(8)) / 100) * 100;
     addMoney(reward);
     B().medals++;
     stats().defenses = (stats().defenses || 0) + 1;
@@ -11368,8 +11700,14 @@ function renderMilitary() {
   // Watch mode: the grand exercise
   const left = Math.max(0, Math.ceil(((B().exAt || 0) - Date.now()) / 1000));
   const xc = emEl('div', 'branchcard excard', `<b>🎖️ ซ้อมรบใหญ่ (โหมดชม)</b><br><small>ชมสวนสนาม ยานเกราะยิงเป้า เรือรบยิงสลุต และฝูงบินผาดแผลง แตะจอยิงเพิ่มได้โบนัส${left ? ` · รางวัลครั้งถัดไปใน ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : ` · รางวัล ~💵${fmt(exReward())} 🏅`}</small><br>`);
-  xc.append(emButton(BASE.mission?.deploy ? 'รอกองกำลังกลับจากภารกิจ…' : left ? '▶ ชมอีกครั้ง (ไม่มีรางวัล)' : '▶ เริ่มซ้อมรบ', !baseHas('barracks') || Boolean(BASE.defense || BASE.ex || BASE.mission?.deploy), startExercise));
+  xc.append(emButton(BASE.mission?.deploy ? 'รอกองกำลังกลับจากภารกิจ…' : left ? '▶ ชมอีกครั้ง (ไม่มีรางวัล)' : '▶ เริ่มซ้อมรบ', !baseHas('barracks') || modeBusy(), startExercise));
   box.append(xc);
+  const rc = emEl('div', 'branchcard', `<b>🚁 ภารกิจกู้ภัย (บังคับเอง)</b><br><small>บังคับเฮลิคอปเตอร์ไปรับผู้ประสบภัยกลางแม่น้ำและทะเล แล้วส่งโรงพยาบาลให้ทันเวลา · ได้เงินทุกคนที่ช่วย</small><br>`);
+  rc.append(emButton('▶ บินเลย', !BASE.heli || modeBusy(), startRescue));
+  box.append(rc);
+  const cc = emEl('div', 'branchcard', `<b>⚓ ป้องกันชายฝั่ง</b><br><small>${baseHas('seaport') ? 'เรือโดรนข้าศึกบุกจากทะเล แตะเรือเพื่อสั่งยิง เรือพิฆาตและเรือดำน้ำช่วยยิง ห้ามให้ขึ้นฝั่ง' : 'สร้างฐานทัพเรือน้ำลึกก่อน'}</small><br>`);
+  cc.append(emButton('▶ ป้องกันเลย', !baseHas('seaport') || modeBusy(), startCoast));
+  box.append(cc);
   // Generals
   const cost = recruitCost();
   const gc = emEl('div', 'branchcard', `<b>🎖️ แต่งตั้งนายพล</b><br><small>นายพลแต่ละคนเพิ่มพลังและความเร็วฝึกของเหล่าทัพ +5% ต่อดาว</small><br>`);
@@ -14179,7 +14517,13 @@ function collide(pos, r = 0.35) {
 }
 
 function updatePlayer(dt) {
-  if (BASE.ex) {
+  if (BASE.rescue) {
+    readInput();
+    steerRescue(dt);
+    animatePerson(player, false, dt);
+    return;
+  }
+  if (BASE.ex || BASE.coast) {
     animatePerson(player, false, dt);
     return;
   }
@@ -15526,7 +15870,7 @@ function frameRest(dt, now) {
   updateWeather(dt);
   updateFloats(dt);
   if (!running && startEl.style.display !== 'none') titleCamera(now);
-  else if (BASE.ex) exerciseCamera(dt);
+  else if (BASE.ex || BASE.coast || BASE.rescue) cineCamera(dt, BASE.ex || BASE.coast || BASE.rescue);
   else updateCamera(dt);
   updateBag();
   updateUpgradeDot();
@@ -16203,4 +16547,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { THREE, teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { THREE, startCoast, startRescue, endCoast, endRescue, totalRate, minutesOfIncome, teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
