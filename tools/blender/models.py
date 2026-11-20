@@ -335,31 +335,63 @@ def airliner():
 
 # ---------------- fighter jet (front at -Y) ----------------
 def jet():
+    # An original stealth fighter: faceted chined fuselage, diamond wings and tailplanes, twin canted fins,
+    # caret intakes and flat nozzles. Nose at -Y, about 4.8 long and 3.5 across.
     begin()
-    paint = mat('paint', [0.25, 0.28, 0.32], rough=0.4, metal=0.5)
-    dark = mat('trim', [0.03, 0.03, 0.035], rough=0.7)
-    glass = mat('canopy', [0.2, 0.45, 0.6], rough=0.05, metal=0.6)
-    white = mat('missile', [0.85, 0.86, 0.88], rough=0.4)
-    red = mat('tip', [0.8, 0.05, 0.05], rough=0.4)
-    z = 0.75
-    cyl(0.32, 3.0, (0, 0.3, z), paint, rot=(math.pi / 2, 0, 0), verts=14, r2=0.36)
-    cyl(0.32, 1.3, (0, -1.85, z), paint, rot=(math.pi / 2, 0, 0), verts=14, r2=0.02)  # nose cone, tip forward
-    cyl(0.3, 0.25, (0, 1.9, z), dark, rot=(math.pi / 2, 0, 0), verts=14, r2=0.24)  # nozzle
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.26, segments=14, ring_count=8, location=(0, -0.9, z + 0.25))
+    paint = mat('paint', [0.42, 0.45, 0.48], rough=0.45, metal=0.35)
+    dark = mat('trim', [0.05, 0.055, 0.06], rough=0.7)
+    glass = mat('canopy', [0.55, 0.42, 0.12], rough=0.05, metal=0.8)  # gold-tinted canopy
+    z = 0.78
+    # Fuselage: hexagonal sections with sharp side chines, lofted nose to tail and shaded flat
+    st = [(-2.4, 0.02, 0.02, 0.02), (-1.85, 0.24, 0.15, 0.11), (-1.15, 0.38, 0.27, 0.17), (-0.45, 0.66, 0.29, 0.23),
+          (0.55, 0.72, 0.26, 0.23), (1.55, 0.62, 0.21, 0.19), (2.2, 0.5, 0.15, 0.13)]
+    verts, faces = [], []
+    for y, w, top, bot in st:
+        for x, zz in ((0, top), (w * 0.55, top * 0.8), (w, 0), (w * 0.6, -bot), (0, -bot * 1.05), (-w * 0.6, -bot), (-w, 0), (-w * 0.55, top * 0.8)):
+            verts.append((x, y, z + zz))
+    k = 8
+    for i in range(len(st) - 1):
+        for j in range(k):
+            a, b = i * k + j, i * k + (j + 1) % k
+            faces.append([a, b, b + k, a + k])
+    faces.append(list(range(k))[::-1])
+    last = (len(st) - 1) * k
+    faces.append(list(range(last, last + k)))
+    me = bpy.data.meshes.new('fus')
+    me.from_pydata(verts, [], faces)
+    me.update()
+    o = bpy.data.objects.new('fus', me)
+    bpy.context.scene.collection.objects.link(o)
+    add(o, paint, smooth=False)
+    # Bubble canopy
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.24, segments=16, ring_count=8, location=(0, -1.2, z + 0.27))
     c = add(bpy.context.object, glass)
-    c.scale = (0.9, 2.1, 0.75)
+    c.scale = (0.85, 2.7, 0.75)
     for sx in (-1, 1):
-        slab([(0, -1.0), (sx * 1.85, 0.9), (sx * 1.85, 1.2), (0, 1.3)], 0.07, z - 0.08, paint)  # delta wing
-        slab([(sx * 0.2, 1.2), (sx * 0.95, 1.85), (sx * 0.95, 2.05), (sx * 0.2, 1.95)], 0.05, z, paint)
-        cube((0.28, 0.9, 0.3), (sx * 0.4, -0.2, z - 0.05), paint, bevel=0.06)  # intakes
-        cube((0.22, 0.04, 0.24), (sx * 0.4, -0.66, z - 0.05), dark)
-        cyl(0.05, 1.0, (sx * 1.25, 0.4, z - 0.18), white, rot=(math.pi / 2, 0, 0), verts=8)
-        cyl(0.05, 0.18, (sx * 1.25, -0.19, z - 0.18), red, rot=(math.pi / 2, 0, 0), verts=8, r2=0.0)
-        fin = cube((0.05, 0.75, 0.75), (sx * 0.22, 1.5, z + 0.5), paint)
-        fin.rotation_euler.y = sx * 0.3
-        taper(fin, 0.0, 1, 0.55)
-    for x, y in ((-0.35, 0.4), (0.35, 0.4), (0, -1.4)):
-        cyl(0.03, 0.45, (x, y, 0.32), dark, verts=6)
+        # Diamond wing: swept-back leading edge, swept-forward trailing edge
+        slab([(sx * 0.5, -0.75), (sx * 1.75, 0.75), (sx * 1.75, 1.05), (sx * 0.6, 1.5)], 0.06, z - 0.06, paint)
+        # Diamond tailplane
+        slab([(sx * 0.45, 1.55), (sx * 1.3, 2.1), (sx * 1.25, 2.45), (sx * 0.45, 2.4)], 0.05, z - 0.04, paint)
+        # Caret intake on each side, dark inside
+        cube((0.26, 0.85, 0.36), (sx * 0.66, -0.15, z - 0.03), paint, smooth=False)
+        cube((0.2, 0.04, 0.3), (sx * 0.66, -0.6, z - 0.03), dark, smooth=False)
+        # Twin fins, swept and canted outward
+        me = bpy.data.meshes.new('fin')
+        pts = [(1.1, 0.0), (1.9, 0.0), (2.2, 0.7), (1.78, 0.7)]
+        fv = [(-0.025, y, zz) for y, zz in pts] + [(0.025, y, zz) for y, zz in pts]
+        ff = [[0, 1, 2, 3], [7, 6, 5, 4], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
+        me.from_pydata(fv, [], ff)
+        me.update()
+        fin = bpy.data.objects.new('fin', me)
+        bpy.context.scene.collection.objects.link(fin)
+        add(fin, paint, smooth=False)
+        fin.location = (sx * 0.42, 0, z + 0.14)
+        fin.rotation_euler.y = sx * 0.45
+        # Flat two-dimensional nozzles
+        cube((0.32, 0.3, 0.2), (sx * 0.22, 2.25, z - 0.02), dark, smooth=False)
+    # Landing gear
+    for x, y in ((-0.4, 0.5), (0.4, 0.5), (0, -1.45)):
+        cyl(0.03, 0.45, (x, y, 0.33), dark, verts=6)
         cyl(0.11, 0.08, (x, y, 0.11), dark, rot=(0, math.pi / 2, 0), verts=10)
     write('jet')
 
