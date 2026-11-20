@@ -769,7 +769,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags', 'terminal_back'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags', 'terminal_back', 'submarine'];
 const MODELS = {};
 async function loadModels() {
   const one = async (n) => {
@@ -1526,6 +1526,7 @@ function faceMat(skin) {
 }
 function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HAIR), coat = null, cap = null, apron = null }) {
   const group = new THREE.Group();
+  group.userData.person = true; // people keep their shadows when small props lose theirs
   const body = new THREE.Group();
   group.add(body);
   const legs = [];
@@ -9142,6 +9143,7 @@ const BASE_UNLOCKS = [
   { id: 'navy', icon: '⚓', name: 'ท่าเรือกองทัพเรือ', price: 300000, at: v(17.4, -44) },
   { id: 'airforce', icon: '✈️', name: 'ฐานบินกองทัพอากาศ', price: 450000, at: v(17.4, -53) },
   { id: 'privatejet', icon: '🛩️', name: 'เครื่องบินรบส่วนตัว', price: 600000, at: v(17.4, -61) },
+  { id: 'seaport', icon: '🌊', name: 'ฐานทัพเรือน้ำลึก + เรือดำน้ำ', price: 900000, at: v(17.4, -69) },
 ];
 // Units each training building turns out
 const UNIT_TYPES = {
@@ -9150,10 +9152,11 @@ const UNIT_TYPES = {
   tank: { icon: '🛡️', name: 'รถถัง', from: 'tanks', time: 12, power: 10, branch: 'army', cap: 6 },
   ship: { icon: '🚢', name: 'เรือรบ + ทหารเรือ', from: 'navy', time: 18, power: 20, branch: 'navy', cap: 4 },
   jet: { icon: '✈️', name: 'เครื่องบินรบ + ทหารอากาศ', from: 'airforce', time: 15, power: 15, branch: 'air', cap: 6 },
+  sub: { icon: '🌊', name: 'เรือดำน้ำ', from: 'seaport', time: 25, power: 30, branch: 'navy', cap: 4 },
 };
 const infCap = () => (baseHas('housing') ? 24 : 8);
 const unitCap = (k) => (k === 'inf' ? infCap() : UNIT_TYPES[k].cap);
-const defaultBase = () => ({ step: 0, paid: 0, units: { inf: 0, arm: 0, tank: 0, ship: 0, jet: 0 }, hired: [], generals: [], recruits: 0, medals: 0, hp: 10 });
+const defaultBase = () => ({ step: 0, paid: 0, units: { inf: 0, arm: 0, tank: 0, ship: 0, jet: 0, sub: 0 }, hired: [], generals: [], recruits: 0, medals: 0, hp: 10 });
 const B = () => state.base;
 const baseHas = (id) => BASE_UNLOCKS.findIndex((u) => u.id === id) < (B()?.step || 0);
 const GEN_FIRST = ['สายฟ้า', 'เหล็กกล้า', 'พยัคฆ์', 'อินทรี', 'มังกร', 'คลื่นทอง', 'เหยี่ยวเพชร', 'สิงห์ทอง', 'ภูผา', 'พายุ', 'ดาวเหนือ', 'เกราะเพชร'];
@@ -9169,7 +9172,7 @@ function militaryPower() {
 }
 const recruitCost = () => Math.round((20000 * 1.5 ** Math.min(B().recruits, 30)) / 100) * 100;
 
-const BASE = { built: false, tile: null, stations: {}, unitMeshes: { inf: [], arm: [], tank: [], ship: [], jet: [] }, generals: [], pile: null, budgetT: 0, stand: 0, opened: false, flight: null, drones: [], defense: null, mission: null, missionTimer: 60, raidTimer: rand(360, 540), shots: [], buoys: [], guards: [], boat: null, heli: null, sortie: null, sortieT: 12, heliT: 20, heliFly: null, ex: null };
+const BASE = { built: false, tile: null, stations: {}, unitMeshes: { inf: [], arm: [], tank: [], ship: [], jet: [], sub: [] }, generals: [], pile: null, budgetT: 0, stand: 0, opened: false, flight: null, drones: [], defense: null, mission: null, missionTimer: 60, raidTimer: rand(360, 540), shots: [], fleet: [], barges: [], subRun: null, subT: 25, buoys: [], guards: [], boat: null, heli: null, sortie: null, sortieT: 12, heliT: 20, heliFly: null, ex: null };
 
 // --- models ---
 const OLIVE = 0x556b2f;
@@ -9388,6 +9391,7 @@ function baseGround() {
   link.position.set(20, 0.021, -27.5);
   scene.add(link);
   baseProps();
+  buildSea();
 }
 function buildingBox(x, z, w, h, d, wall, roof) {
   const g = new THREE.Group();
@@ -9639,6 +9643,9 @@ const BASE_BUILD = {
     scene.add(sock);
     BASE.sock = sock;
   },
+  seaport() {
+    buildSeaport();
+  },
   privatejet() {
     hangar(9, -62, 6, 5, 0xffd166);
     BASE.myJet = jetModel(0xffd166);
@@ -9646,6 +9653,115 @@ const BASE_BUILD = {
     scene.add(BASE.myJet);
   },
 };
+// --- the sea north of the base: a beach, open water to the horizon, and the deep-water naval port ---
+const SEA_Z = -78.6; // the shoreline
+function buildSea() {
+  const g = new THREE.Group();
+  const W = 420;
+  const D = 280;
+  const zc = SEA_Z - D / 2;
+  const deep = new THREE.Mesh(new THREE.PlaneGeometry(W, D), surface({ color: 0x1a5f9e, roughness: 0.1, metalness: 0.4 }));
+  deep.rotation.x = -Math.PI / 2;
+  deep.receiveShadow = true;
+  g.add(at3(deep, 20, 0.03, zc));
+  const shallow = new THREE.Mesh(new THREE.PlaneGeometry(W, 5), new THREE.MeshBasicMaterial({ color: 0x6fd0e0, transparent: true, opacity: 0.5, depthWrite: false }));
+  shallow.rotation.x = -Math.PI / 2;
+  g.add(at3(shallow, 20, 0.036, SEA_Z - 2.5));
+  if (!LITE) {
+    for (const [c, o, r, y] of [[0xffffff, 0.4, 1, 0.04], [0xd6f1ff, 0.28, 1.7, 0.045]]) {
+      const tex = rippleTex(r + 2);
+      tex.repeat.set((W / 10) * r, (D / 10) * r);
+      const layer = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ color: c, map: tex, transparent: true, opacity: o, roughness: 0.1, metalness: 0.4, depthWrite: false }));
+      layer.rotation.x = -Math.PI / 2;
+      g.add(at3(layer, 20, y, zc));
+      LOOK.water.push(tex);
+    }
+  }
+  // Sand along the shore, and a line of surf that washes in and out
+  g.add(flatPlane(W, 5, 0xe3d3a3, 20, 0.02, SEA_Z + 2.2));
+  const surf = new THREE.Mesh(new THREE.PlaneGeometry(W, 0.6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, depthWrite: false }));
+  surf.rotation.x = -Math.PI / 2;
+  g.add(at3(surf, 20, 0.05, SEA_Z - 0.2));
+  BASE.surf = surf;
+  // Palms along the beach, clear of the port
+  for (let x = -60; x <= 100; x += 9) if (Math.abs(x - 20) > 12) g.add(at3(TREES.palm(), x + rand(-2, 2), 0, SEA_Z + 3.4 + rand(-0.6, 0.6)));
+  scene.add(g);
+  // The water is out of bounds, except the pier once it is built
+  addCollider(-50, SEA_Z - 60, 136, 118);
+  addCollider(90, SEA_Z - 60, 136, 118);
+  addCollider(20, SEA_Z - 60, 4, 118);
+  BASE.seaGap = colliders[colliders.length - 1]; // where the pier will go
+}
+function subModel() {
+  const made = modelGroup('submarine');
+  if (made) return made;
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 5, 6, 14).rotateX(Math.PI / 2), mat(0x15181c));
+  hull.position.y = -0.12;
+  g.add(hull, at3(box(0.42, 0.9, 1.2, 0x15181c), 0, 0.85, -0.9));
+  return g;
+}
+const SEAPORT = { x: 20, z0: SEA_Z + 0.5, z1: -104 };
+function buildSeaport() {
+  const g = new THREE.Group();
+  const { x, z0, z1 } = SEAPORT;
+  const len = z0 - z1;
+  // Open the pier to walk on; the water past its end stays out of bounds
+  if (BASE.seaGap) colliders.splice(colliders.indexOf(BASE.seaGap), 1);
+  addCollider(x, (z1 - 2 + SEA_Z - 119) / 2, 4, z1 - 2 - (SEA_Z - 119));
+  // The camp road runs on to the port
+  g.add(flatPlane(3.2, 12.5, 0x55606e, x, 0.022, -70.8));
+  // A long concrete pier on piles, with a yellow edge, bollards and lamps, and a T-head at the end
+  g.add(at3(box(4.2, 0.5, len, 0xb8b5ac), x, 0.25, (z0 + z1) / 2), at3(box(9, 0.5, 3.2, 0xb8b5ac), x, 0.25, z1 + 1.6));
+  for (const sx of [-1, 1]) {
+    g.add(at3(box(0.12, 0.02, len, 0xffd166, { shadow: false }), x + sx * 2.0, 0.51, (z0 + z1) / 2));
+    for (let z = z0 - 2; z > z1 + 3; z -= 4) {
+      g.add(at3(cylM(0.12, 0.12, 0.3, 0x2b2d42, 8), x + sx * 1.8, 0.65, z));
+      g.add(at3(cylM(0.18, 0.18, 1.4, 0x8d8a80, 8), x + sx * 1.9, -0.5, z));
+    }
+    for (let z = z0 - 6; z > z1 + 3; z -= 10) g.add(at3(lampModel().rotateY(sx > 0 ? Math.PI : 0), x + sx * 1.85, 0.5, z));
+  }
+  // A dockside crane, a fuel tank and a stack of containers by the shore
+  const crane = new THREE.Group();
+  crane.add(at3(box(0.5, 6, 0.5, 0xffb300), 0, 3, 0), at3(box(6, 0.4, 0.4, 0xffb300), -2, 6, 0), at3(cylM(0.02, 0.02, 2.4, 0x37474f, 4), -4.6, 4.8, 0));
+  g.add(at3(crane, x + 3.5, 0.5, z1 + 8));
+  g.add(at3(cylM(1.6, 1.6, 2.4, 0xeceff1, 18), x - 9, 1.2, -74.5), at3(cylM(1.62, 1.62, 0.3, 0x1d3a8a, 18), x - 9, 2.0, -74.5));
+  for (let k = 0; k < 4; k++) g.add(at3(box(2.6, 1.1, 1.1, [0xe5484d, 0x1e88e5, 0x43a047, 0xffb300][k], { shadow: true }), x + 8 + (k % 2) * 2.8, 0.55 + Math.floor(k / 2) * 1.1, -74.5));
+  // A lighthouse on the point west of the port
+  const lh = new THREE.Group();
+  lh.add(at3(cylM(0.8, 1.1, 7, 0xffffff, 16), 0, 3.5, 0));
+  for (const y of [1.5, 4.0]) lh.add(at3(cylM(0.95, 1.0, 1.0, 0xe5484d, 16), 0, y, 0));
+  lh.add(at3(cylM(0.6, 0.6, 0.8, 0x9fd8ff, 12), 0, 7.4, 0), at3(cylM(0.85, 0.6, 0.4, 0x37474f, 12), 0, 8.0, 0));
+  const beam = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), LIT.amber);
+  lh.add(at3(beam, 0, 7.4, 0));
+  g.add(at3(lh, x - 18, 0, SEA_Z + 1.5));
+  scene.add(g);
+  addCollider(x - 18, SEA_Z + 1.5, 2.2, 2.2);
+  // Two destroyers patrol offshore, and three target barges ride at anchor for exercises
+  for (let k = 0; k < 2; k++) {
+    const d = shipModel();
+    d.scale.setScalar(1.7);
+    scene.add(d);
+    BASE.fleet.push({ g: d, a: k * Math.PI });
+  }
+  const flagTex = signTexture((c) => {
+    c.fillStyle = '#e5484d';
+    c.fillRect(0, 0, 128, 128);
+    c.fillStyle = '#ffffff';
+    c.fillRect(0, 48, 128, 32);
+  });
+  BASE.barges = [];
+  for (const bx of [4, 20, 36]) {
+    const b = new THREE.Group();
+    b.add(at3(box(3.4, 0.5, 2.2, 0x6d4c41), 0, 0.1, 0), at3(cylM(0.05, 0.05, 2.4, 0x37474f, 5), 0, 1.4, 0));
+    const fl = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.8), new THREE.MeshBasicMaterial({ map: flagTex, side: THREE.DoubleSide }));
+    b.add(at3(fl, 0.6, 2.2, 0));
+    b.position.set(bx, 0, -142);
+    scene.add(b);
+    BASE.barges.push(b);
+  }
+}
+
 // A small grey patrol boat with a cabin, a gun and a white wake behind it
 function patrolBoat() {
   const g = new THREE.Group();
@@ -9691,6 +9807,7 @@ function unitSpot(k, i) {
     case 'tank': return v(37.5 + (i % 3) * 3, -57.5 - Math.floor(i / 3) * 3.4);
     case 'ship': return v(-0.5 + (i % 4) * 3, -43.4);
     case 'jet': return v(-11 + i * 3, i % 2 ? -61.4 : -59.9);
+    case 'sub': return v(i % 2 ? 23.4 : 16.6, -85 - Math.floor(i / 2) * 8); // alongside the deep-water pier
     default: return v(0, 0);
   }
 }
@@ -9704,6 +9821,7 @@ function syncUnits(animate = false) {
       if (k === 'inf') m = soldierModel('army');
       else if (k === 'arm') m = { group: armoredModel() };
       else if (k === 'tank') m = { group: tankModel() };
+      else if (k === 'sub') m = { group: subModel() };
       else if (k === 'ship') {
         m = { group: shipModel() };
         // a sailor on the pier for each ship
@@ -9719,7 +9837,7 @@ function syncUnits(animate = false) {
       }
       const at = unitSpot(k, i);
       m.group.position.set(at.x, k === 'ship' ? 0.05 : 0, at.z);
-      if (k === 'ship') m.group.rotation.y = Math.PI;
+      if (k === 'ship' || k === 'sub') m.group.rotation.y = Math.PI;
       if (k === 'jet') m.group.rotation.order = 'YXZ';
       m.home = { x: at.x, z: at.z, yaw: m.group.rotation.y };
       scene.add(m.group);
@@ -9731,6 +9849,7 @@ function syncUnits(animate = false) {
       scene.remove(m.group);
       if (m.crew) scene.remove(m.crew.group);
       if (BASE.sortie?.m === m) BASE.sortie = null;
+      if (BASE.subRun?.m === m) BASE.subRun = null;
     }
   }
 }
@@ -10149,6 +10268,47 @@ function parkVehicles(yaw = 0) {
     m.patrol = undefined;
   }
 }
+// Submarines go on patrol one at a time: out past the pier, dive, cruise under the surface, come up and return
+function startSubPatrol() {
+  const list = BASE.unitMeshes.sub;
+  if (!list.length) return;
+  const m = pick(list);
+  const h = m.home;
+  const x = h.x;
+  const C = curve([[x, 0, -106], [x + 6, -0.2, -118], [x + 22, -1.9, -134], [x + 12, -2, -160], [x - 22, -1.9, -152], [x - 26, -0.6, -126], [x - 8, 0, -110], [x, 0, -104]]);
+  const P = makePath([h.x, 0, h.z, Math.PI], [
+    { d: 4.5, to: [x, 0, -106, Math.PI], ease: 'in' },
+    { d: 30, curve: C },
+    { d: 4.5, to: [x, 0, h.z, 0], ease: 'out' },
+    { d: 3, to: [x, 0, h.z, Math.PI] },
+  ]);
+  BASE.subRun = { m, P, t: 0, y: 0 };
+}
+function updateSubPatrol(dt) {
+  const R = BASE.subRun;
+  if (!R) {
+    BASE.subT -= dt;
+    if (BASE.subT <= 0) {
+      BASE.subT = rand(35, 60);
+      startSubPatrol();
+    }
+    return;
+  }
+  R.t += dt;
+  const g = R.m.group;
+  pathPose(R.P, R.t, g, dt);
+  g.rotation.z = 0;
+  const y = g.position.y;
+  // A spout of spray as she breaks the surface; a feather of wake from the periscope while submerged
+  if (R.y < -0.6 && y >= -0.6) fxSplash(g.position.clone().setY(0.1));
+  if (y < -0.8 && Math.random() < dt * 8) fxPuff('smoke', g.position.clone().add(v(-Math.sin(g.rotation.y) * 1.1, -Math.cos(g.rotation.y) * 1.1)).setY(0.08), 0xffffff, { s0: 0.2, s1: 0.8, life: 1.4, alpha: 0.6 });
+  R.y = y;
+  if (R.t >= R.P.total) {
+    g.position.set(R.m.home.x, 0, R.m.home.z);
+    g.rotation.set(0, Math.PI, 0);
+    BASE.subRun = null;
+  }
+}
 // Jets fly sorties one at a time: taxi out, take off, loop round the world and land again
 const SORTIE_AIR = curve([[8, 0, -56.5], [18, 1.5, -56.5], [32, 6, -56.5], [48, 12, -46], [42, 16, -20], [5, 18, -10], [-30, 15, -24], [-50, 9, -48], [-36, 3, -56.5], [-20, 0.5, -56.5], [-11, 0, -56.5]]);
 function startSortie() {
@@ -10255,6 +10415,24 @@ function baseLife(dt) {
   }
   BASE.buoys.forEach((b, i) => { b.position.y = Math.sin(now * 1.6 + i) * 0.06; b.rotation.z = Math.sin(now * 1.2 + i) * 0.08; });
   if (BASE.dish) BASE.dish.rotation.y += dt * 1.2;
+  if (BASE.surf) {
+    BASE.surf.position.z = SEA_Z - 0.2 + Math.sin(now * 0.8) * 0.35;
+    BASE.surf.material.opacity = 0.45 + Math.sin(now * 0.8 + 1) * 0.25;
+  }
+  if (!BASE.ex) {
+    // Destroyers patrol a wide loop offshore, leaving a wake
+    for (const F of BASE.fleet) {
+      F.a += dt * 0.045;
+      const px = 20 + Math.cos(F.a) * 48;
+      const pz = -128 + Math.sin(F.a) * 16;
+      F.g.position.set(px, 0.05, pz);
+      F.g.rotation.y = Math.atan2(-Math.sin(F.a) * 48, Math.cos(F.a) * 16);
+      F.g.rotation.z = Math.sin(now * 0.7 + F.a) * 0.02;
+      if (Math.random() < dt * 5) fxPuff('smoke', F.g.position.clone().add(v(-Math.sin(F.g.rotation.y) * 4.5, -Math.cos(F.g.rotation.y) * 4.5)).setY(0.15), 0xf4fbff, { s0: 0.5, s1: 1.6, life: 2.2, alpha: 0.55 });
+    }
+    updateSubPatrol(dt);
+  }
+  BASE.unitMeshes.sub.forEach((m, i) => { if (BASE.subRun?.m !== m) m.group.position.y = Math.sin(now * 0.9 + i * 2) * 0.04; });
   if (BASE.sock) BASE.sock.rotation.y = 0.6 + Math.sin(now * 0.5) * 0.3;
 }
 
@@ -10314,6 +10492,7 @@ function startExercise() {
   if (u.inf) acts.push({ id: 'parade', d: 8 });
   if (u.tank || u.arm) acts.push({ id: 'armor', d: 9 });
   if (u.ship) acts.push({ id: 'navy', d: 8 });
+  if (baseHas('seaport')) acts.push({ id: 'sea', d: 9 });
   if (u.jet || BASE.myJet) acts.push({ id: 'air', d: 10 });
   acts.push({ id: 'finale', d: 5 });
   let t = 0;
@@ -10341,6 +10520,7 @@ const EX_CAPS = {
   parade: ['🪖 สวนสนามกองทัพบก', 'แถวทหารเดินผ่านแท่นรับความเคารพ'],
   armor: ['🛡️ ยานเกราะยิงเป้า', '👆 แตะจอเพื่อสั่งยิงเพิ่ม'],
   navy: ['⚓ กองทัพเรือยิงสลุต', '👆 แตะจอเพื่อยิงเพิ่ม'],
+  sea: ['🌊 กองเรือทะเลลึก', '👆 แตะจอเพื่อยิงเพิ่ม'],
   air: ['✈️ ฝูงบินผาดแผลง', '👆 แตะจอเพื่อปล่อยพลุ'],
   finale: ['🎆 จบการซ้อมรบ', ''],
 };
@@ -10351,6 +10531,24 @@ function enterAct(A) {
   const [cap, sub] = EX_CAPS[A.id];
   document.getElementById('cinecap').textContent = cap;
   document.getElementById('cinesub').textContent = A.id === 'finale' ? (X.paid ? `รางวัล 💵${fmt(exReward(X.hits))} · 🏅 +1` : 'ชมฟรี · รางวัลครั้งถัดไปอีกไม่นาน') : sub;
+  if (A.id === 'sea') {
+    // The destroyers take station broadside to the barges; a submarine waits under the surface
+    BASE.fleet.forEach((F, i) => {
+      F.g.position.set(i ? 40 : 0, 0.05, -134);
+      F.g.rotation.set(0, Math.PI / 2, 0);
+    });
+    if (BASE.subRun) {
+      BASE.subRun.t = BASE.subRun.P.total;
+      updateSubPatrol(0);
+    }
+    const m = BASE.unitMeshes.sub[0];
+    if (m) {
+      m.group.position.set(20, -2, -118);
+      m.group.rotation.set(0, Math.PI, 0);
+    }
+    X.sub = m || null;
+    X.missile = false;
+  }
   if (A.id === 'armor') {
     parkVehicles(Math.PI); // turn to face the range
     for (const t of BASE.targets || []) t.rotation.x = 0;
@@ -10377,7 +10575,7 @@ function exTap(e) {
   const X = BASE.ex;
   if (!X || e.target?.closest?.('button')) return;
   const A = X.acts[X.act];
-  if (!A || !['armor', 'navy', 'air'].includes(A.id)) return;
+  if (!A || !['armor', 'navy', 'sea', 'air'].includes(A.id)) return;
   X.hits++;
   X.tapShot = true;
   document.getElementById('cinehits').textContent = `🎯 ${X.hits}`;
@@ -10426,7 +10624,50 @@ function navyFire() {
 // Panels and sheets that cover the game: AUTO never starts a show over one of them
 const COVERS = ['military', 'storypanel', 'cityhub', 'ending', 'quiz', 'share', 'mapview', 'board', 'branches', 'missions', 'upgrades', 'style', 'away', 'menu'];
 const coverOpen = () => COVERS.some((id) => { const el = document.getElementById(id); return el && getComputedStyle(el).display !== 'none'; }) || [...document.querySelectorAll('.promptsheet')].some((el) => getComputedStyle(el).display !== 'none');
+// Destroyers fire on the barges: a flash and smoke at the gun, a shell, a spout of water at the target
+function seaFire() {
+  if (!BASE.fleet.length || !BASE.barges.length) return;
+  const F = pick(BASE.fleet);
+  const from = F.g.position.clone().add(v(F.g.position.x < 20 ? 1.5 : -1.5, 0)).setY(1.6);
+  const tgt = pick(BASE.barges).position.clone().add(v(rand(-2, 2), rand(-2, 2))).setY(0.3);
+  fxPuff('glow', from, 0xfff0b0, { s0: 0.7, s1: 1.6, life: 0.15 });
+  for (let k = 0; k < 4; k++) fxPuff('smoke', from, 0xd8d8d8, { s0: 0.4, s1: 1.5, life: rand(1.2, 1.6), vel: v(rand(-0.5, 0.5), rand(-0.5, 0.5)).setY(rand(0.4, 1)), drag: 1.5, alpha: 0.7 });
+  sfxBoom(0.8);
+  fxShot(from, tgt, 55, (p) => {
+    fxSplash(p.clone().setY(0.1));
+    fxBoom(p.clone().setY(0.6), 0.6, false);
+  }, 0xffd166, 0.14);
+}
+// A missile climbs straight up out of the water in a column of smoke, turns over and dives onto its target
+function launchMissile(from, to) {
+  const top = from.clone().setY(16);
+  const mid = from.clone().lerp(to, 0.5).setY(18);
+  const C = new THREE.QuadraticBezierCurve3(top, mid, to);
+  const M = { t: 0, from, C, done: false };
+  fxSplash(from.clone().setY(0.1));
+  sfxJet(2.2, 0.7);
+  BASE.missiles = BASE.missiles || [];
+  BASE.missiles.push(M);
+}
+function updateMissiles(dt) {
+  if (!BASE.missiles?.length) return;
+  for (let i = BASE.missiles.length - 1; i >= 0; i--) {
+    const M = BASE.missiles[i];
+    M.t += dt;
+    let p;
+    if (M.t < 0.9) p = M.from.clone().lerp(M.C.v0, M.t / 0.9);
+    else p = M.C.getPoint(Math.min(1, (M.t - 0.9) / 1.6));
+    fxPuff('glow', p, 0xffe08a, { s0: 0.35, s1: 0.2, life: 0.12 });
+    fxPuff('smoke', p, 0xe0e0e0, { s0: 0.4, s1: 1.4, life: 2.2, alpha: 0.8 });
+    if (M.t >= 2.5) {
+      fxBoom(p, 1.6);
+      fxSplash(p.clone().setY(0.1));
+      BASE.missiles.splice(i, 1);
+    }
+  }
+}
 function updateExercise(dt) {
+  updateMissiles(dt);
   const X = BASE.ex;
   if (!X) {
     // With AUTO playing, the exercise runs by itself whenever its reward is ready
@@ -10488,6 +10729,26 @@ function updateExercise(dt) {
       X.cam.copy(lerp3([-2, 6.2, -56.5], [10, 6.6, -56.5], e));
       X.look.set(4, 3, -42);
       break;
+    case 'sea': {
+      if (X.fire <= 0 || tapped) {
+        if (X.fire <= 0) X.fire = 0.7;
+        seaFire();
+      }
+      // The submarine surfaces, then fires a missile from its deck at the middle barge
+      const sub = X.sub;
+      if (sub) {
+        const yPrev = sub.group.position.y;
+        sub.group.position.y = Math.min(0, -2 + Math.max(0, k - 0.1) * 6);
+        if (yPrev < -0.6 && sub.group.position.y >= -0.6) fxSplash(sub.group.position.clone().setY(0.1));
+        if (k > 0.55 && !X.missile && BASE.barges.length) {
+          X.missile = true;
+          launchMissile(sub.group.position.clone().setY(1.2), BASE.barges[1].position.clone().setY(0.8));
+        }
+      }
+      X.cam.copy(lerp3([16, 4.5, -98], [24, 5.5, -99], e));
+      X.look.set(20, 2.5, -126);
+      break;
+    }
     case 'air': {
       const u = Math.min(1, k * 1.02);
       const burstK = Math.max(0, u - 0.7) * 10; // the formation splits as it climbs
@@ -10550,6 +10811,10 @@ function endExercise(skipped = false) {
   (X.hidden || []).forEach((g) => { g.visible = true; });
   for (const t of BASE.targets || []) t.rotation.x = 0;
   parkVehicles();
+  for (const m of BASE.unitMeshes.sub) {
+    m.group.position.set(m.home.x, 0, m.home.z);
+    m.group.rotation.set(0, Math.PI, 0);
+  }
   BASE.generals.forEach((g, i) => {
     g.group.position.set(26 + i * 1.1, 0, -30.6);
     g.group.rotation.y = 0;
@@ -10924,7 +11189,7 @@ const STORY = [
     ] },
   { icon: '🗺️', name: 'หมอแห่งชาติ', story: 'ทั้งประเทศรู้จัก Dr. Quest แล้ว! สร้างโรงพยาบาลให้ครบทุกชั้น และกองทัพที่มีทั้งฐานบินและเครื่องบินรบส่วนตัว', reward: 15000000,
     goals: [
-      { text: 'ค่ายทหารครบทุกอาคาร ✈️🛩️', ok: () => baseStep() >= BASE_UNLOCKS.length, at: () => (baseOpen() && baseStep() >= 6 && baseStep() < BASE_UNLOCKS.length ? BASE_UNLOCKS[baseStep()].at : null) },
+      { text: 'ค่ายทหารครบทุกอาคาร ✈️🛩️', ok: () => baseStep() >= 8, at: () => (baseOpen() && baseStep() >= 6 && baseStep() < 8 ? BASE_UNLOCKS[baseStep()].at : null) }, // the seaport came later: not needed here
       { text: 'โรงพยาบาลครบทุกชั้นทุกแผนก 🏢', ok: () => topStep() >= UNLOCKS.length },
       { text: 'ยกระดับเป็นประเทศ 🗺️', ok: () => emp().tier >= 3, btn: 'branchbtn' },
     ] },
@@ -14768,7 +15033,45 @@ const fpsWatch = { start: 0, frames: 0, done: LITE };
 // the frame rate: below 27 fps it steps the pixel ratio down (to 0.75 at the lowest), then redraws the
 // shadows less often, then turns off high-quality mode; above 57 fps it slowly steps back up.
 let shadowN = 0;
-const quality = { maxPR: Math.min(window.devicePixelRatio || 1, LITE ? 1 : 2), pr: 0, shadowEvery: 2, t0: 0, n: 0, lastUp: 0 };
+const quality = { maxPR: Math.min(window.devicePixelRatio || 1, LITE ? 1 : 2), pr: 0, shadowEvery: 2, t0: 0, n: 0, lastUp: 0, shadowsOff: false, minPR: 0.75 };
+// Small props (bottles, reeds, sign posts, bolts) barely show a shadow but each costs a draw call in the shadow
+// pass, which was about half of every frame. Every few seconds, newly built ones stop casting; people keep theirs.
+const shSphere = new THREE.Sphere();
+function trimShadows() {
+  scene.traverse((o) => {
+    if (!o.isMesh || o.userData.shChk) return;
+    o.userData.shChk = true;
+    if (!o.castShadow) return;
+    for (let q = o.parent, k = 0; q && k < 5; q = q.parent, k++) if (q.userData.person) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    shSphere.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld);
+    if (shSphere.radius < 0.32) o.castShadow = false;
+  });
+}
+function setShadows(on) {
+  quality.shadowsOff = !on;
+  sun.castShadow = on;
+}
+// A browser drawing WebGL in software (no graphics card in use) can't keep up whatever we do: start it at the
+// lightest settings and say how to turn hardware acceleration on. Skipped on localhost, where tests run that way.
+function checkSoftwareGpu() {
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    if (!/swiftshader|llvmpipe|softpipe|software|basic render/i.test(name) || location.hostname === 'localhost') return;
+    quality.minPR = 0.5;
+    quality.pr = 0.5;
+    renderer.setPixelRatio(0.5);
+    quality.shadowEvery = 4;
+    setShadows(false);
+    hqOn = false;
+    logProgress('gpu_sw');
+    setTimeout(() => toast(tx('🐢 เบราว์เซอร์นี้ไม่ได้ใช้การ์ดจอ เกมจึงช้า<br><small>เปิด "ใช้การเร่งฮาร์ดแวร์" ในการตั้งค่าเบราว์เซอร์ แล้วเปิดเกมใหม่</small>', '🐢 This browser is not using the graphics card<br><small>Turn on hardware acceleration in its settings, then reopen the game</small>'), 8000), 4000);
+  } catch {
+    // No renderer info: carry on with the normal adaptive steps
+  }
+}
 quality.pr = quality.maxPR;
 function adaptQuality(now) {
   if (!running || mapView.active || document.hidden) {
@@ -14785,7 +15088,21 @@ function adaptQuality(now) {
   const fps = (quality.n * 1000) / (now - quality.t0);
   quality.t0 = now;
   quality.n = 0;
-  if (fps < 27) {
+  trimShadows();
+  if (fps < 15 && !quality.shadowsOff) {
+    // Far too slow to step down gently: go straight to the lightest settings
+    quality.shadowEvery = 4;
+    quality.minPR = 0.5;
+    quality.pr = 0.5;
+    renderer.setPixelRatio(0.5);
+    setShadows(false);
+    if (hqOn) {
+      hqOn = false;
+      hqLabel();
+    }
+    toast(tx('⚡ ปรับภาพให้เบาลงอัตโนมัติ เพื่อให้เล่นลื่นขึ้น', '⚡ Graphics lightened automatically so the game runs smoother'), 3500);
+  } else if (fps < 27) {
+    // Cheapest loss first: resolution, then how often shadows redraw, the HQ pass, no shadows, and finally half resolution
     if (quality.pr > 0.75) {
       quality.pr = Math.max(0.75, quality.pr - 0.25);
       renderer.setPixelRatio(quality.pr);
@@ -14795,10 +15112,20 @@ function adaptQuality(now) {
       hqOn = false;
       hqLabel();
       toast(tx('✨ ปิดภาพคุณภาพสูงให้ เพราะเครื่องนี้เล่นไม่ลื่น', '✨ High-quality graphics turned off: this device was struggling'), 3500);
+    } else if (!quality.shadowsOff && fps < 24) {
+      setShadows(false);
+    } else if (quality.pr > 0.5 && fps < 22) {
+      quality.minPR = 0.5;
+      quality.pr = 0.5;
+      renderer.setPixelRatio(0.5);
     }
   } else if (fps > 57 && now - quality.lastUp > 10000) {
     quality.lastUp = now;
-    if (quality.shadowEvery > 2) quality.shadowEvery--;
+    if (quality.pr < 0.75) {
+      quality.pr = 0.75;
+      renderer.setPixelRatio(0.75);
+    } else if (quality.shadowsOff && !LITE && quality.minPR > 0.5) setShadows(true);
+    else if (quality.shadowEvery > 2) quality.shadowEvery--;
     else if (quality.pr < quality.maxPR) {
       quality.pr = Math.min(quality.maxPR, quality.pr + 0.25);
       renderer.setPixelRatio(quality.pr);
@@ -14925,7 +15252,7 @@ function frameRest(dt, now) {
   else {
     // The shadow pass is most of the frame on phones: redraw it every other frame (or less, see adaptQuality)
     shadowN = (shadowN + 1) % quality.shadowEvery;
-    renderer.shadowMap.needsUpdate = shadowN === 0;
+    renderer.shadowMap.needsUpdate = shadowN === 0 && !quality.shadowsOff;
     renderFrame();
   }
   requestAnimationFrame(frame);
@@ -15101,6 +15428,7 @@ for (const [id, closeId] of Object.entries(SHEETS)) {
 
 function start() {
   logProgress('start');
+  checkSoftwareGpu();
   const nameIn = document.getElementById('startname');
   const name = nameIn.value.trim().slice(0, 20);
   if (name && name !== cloud.nickname) {
@@ -15577,4 +15905,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { THREE, teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
