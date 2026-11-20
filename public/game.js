@@ -1246,7 +1246,7 @@ function buildTrash() {
   bin.add(post, board);
   bin.position.set(TRASH.x, 0, TRASH.z);
   scene.add(bin);
-  zoneRing(TRASH, 0xe5484d);
+  ringLabel(zoneRing(TRASH, 0xe5484d), '🗑️', 'ทิ้ง');
   trashLid = lid;
 }
 let trashLid = null;
@@ -1369,6 +1369,43 @@ function zoneRing(pos, color = 0xffffff) {
   ring.position.set(pos.x, 0.14, pos.z);
   scene.add(ring);
   return ring;
+}
+
+// A label painted on the floor inside a ring: what you bring there and what happens, so the colours don't
+// have to be learned. With `want`, it pulses while the player is carrying what the ring takes.
+const RING_LABELS = [];
+const ringTexCache = new Map();
+function ringLabel(ring, emoji, text, want = null) {
+  const key = emoji + '|' + text;
+  if (!ringTexCache.has(key)) {
+    ringTexCache.set(key, canvasTexture(256, 256, (g) => {
+      g.clearRect(0, 0, 256, 256);
+      g.fillStyle = 'rgba(16,24,40,0.55)';
+      g.beginPath();
+      g.arc(128, 128, 120, 0, Math.PI * 2);
+      g.fill();
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.font = '104px sans-serif';
+      g.fillText(emoji, 128, 108);
+      g.font = '700 40px Mitr, sans-serif';
+      g.fillStyle = '#ffffff';
+      g.fillText(text, 128, 196);
+    }));
+  }
+  const size = (ZONE_R - 0.16) * 2;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: ringTexCache.get(key), transparent: true, depthWrite: false, toneMapped: false }));
+  m.position.z = 0.012; // the ring is laid flat, so its local z is up
+  m.renderOrder = 2;
+  ring.add(m);
+  if (want) RING_LABELS.push({ m, want });
+  return ring;
+}
+function updateRingLabels(now) {
+  for (const L of RING_LABELS) {
+    const on = L.want();
+    L.m.scale.setScalar(on ? 1 + Math.sin(now * 0.008) * 0.12 : 1);
+  }
 }
 
 // ---------- items & stacks ----------
@@ -1931,7 +1968,12 @@ function buildLine(line, animate) {
     return new THREE.Vector3(((r % 2) - 0.5) * 0.46, 1.17 + Math.floor(i / 4) * ITEM_H, ((Math.floor(r / 2)) - 0.5) * 0.4 - 0.35);
   });
   line.cash = new MoneyPile(line.money);
-  line.rings = [zoneRing(line.pickup, 0xffffff), zoneRing(line.drop, 0xffd166), zoneRing(line.cashier, 0x3fbf5f)];
+  const P = PRODUCTS[line.product];
+  line.rings = [
+    ringLabel(zoneRing(line.pickup, 0xffffff), P.icon, 'เก็บ', () => player.stack.total === 0),
+    ringLabel(zoneRing(line.drop, 0xffd166), P.icon, 'วางที่นี่', () => player.stack.countOf(line.product) > 0 && line.shelf.total < SHELF_MAX),
+    ringLabel(zoneRing(line.cashier, 0x3fbf5f), '💵', 'จ่ายยา', () => line.shelf.total > 0 && !line.cashierNurse),
+  ];
   line.conveyor = [];
   line.active = true;
   if (animate) [root, counter].forEach(popIn);
@@ -3081,13 +3123,13 @@ function buildFloor2(animate) {
   rail(FLOOR.x1 + 0.15, cz, 0.2, fd);
   rail(0, FLOOR.z0 - 0.15, fw, 0.2);
   rail(0, FLOOR.z1 + 0.15, fw, 0.2);
-  const pad = zoneRing(ELEVATOR, 0x7b61ff);
+  const pad = ringLabel(zoneRing(ELEVATOR, 0x7b61ff), '🛗', 'ลิฟต์');
   g.add(pad);
   // A second bin up here
   const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.34, 0.85, 16), mat(0xe5484d));
   bin.position.set(TRASH2.x, 0.43, TRASH2.z);
   g.add(bin);
-  g.add(zoneRing(TRASH2, 0xe5484d));
+  g.add(ringLabel(zoneRing(TRASH2, 0xe5484d), '🗑️', 'ทิ้ง'));
   F2.built = true;
   if (animate) popIn(deck);
 }
@@ -3115,7 +3157,7 @@ function buildElevator(animate) {
   lift.cab = box(1.7, 0.12, 1.7, 0xb8a9ff);
   lift.cab.position.set(ELEVATOR.x, 0.1, ELEVATOR.z);
   scene.add(lift.cab);
-  scene.add(zoneRing(ELEVATOR, 0x7b61ff));
+  scene.add(ringLabel(zoneRing(ELEVATOR, 0x7b61ff), '🛗', 'ลิฟต์'));
   lift.built = true;
   if (animate) popIn(shaft);
 }
@@ -3224,7 +3266,7 @@ function newCustomer(c) {
 function buildKitchen(animate) {
   const roots = [f2Machine(K.rawMachine, 0xc8a26b, '🌾 คลังวัตถุดิบ')];
   F2.raw = f2Pile(K.rawPickup);
-  F2.group.add(zoneRing(K.rawPickup, 0xffffff));
+  F2.group.add(ringLabel(zoneRing(K.rawPickup, 0xffffff), '🥬', 'เก็บ', () => player.stack.total === 0 && player.floor === 1));
   // Giant pot on a stove
   const pot = new THREE.Group();
   const stove = box(1.7, 0.5, 1.7, 0x4b5a70);
@@ -3245,9 +3287,9 @@ function buildKitchen(animate) {
   F2.group.add(pot);
   roots.push(pot);
   addCollider(K.pot.x, K.pot.z, 1.7, 1.7, 1);
-  F2.group.add(zoneRing(K.potInput, 0xffd166));
+  F2.group.add(ringLabel(zoneRing(K.potInput, 0xffd166), '🥬', 'ใส่หม้อ', () => player.stack.countOf('raw') > 0));
   F2.bowls = f2Pile(K.bowlPickup);
-  F2.group.add(zoneRing(K.bowlPickup, 0xffffff));
+  F2.group.add(ringLabel(zoneRing(K.bowlPickup, 0xffffff), '🍲', 'เก็บ'));
   // Serving counter facing the stands
   const counter = new THREE.Group();
   const desk = box(1.0, 1.0, 5.0, 0xffffff);
@@ -3260,8 +3302,8 @@ function buildKitchen(animate) {
   roots.push(counter);
   addCollider(K.counter.x, K.counter.z, 1.1, 5.1, 1);
   F2.shelf = new Stack(counter, (i) => new THREE.Vector3(((i % 2) - 0.5) * 0.46, 1.17 + Math.floor(i / 8) * ITEM_H, (Math.floor((i % 8) / 2) - 1.5) * 0.5 - 1.2));
-  F2.group.add(zoneRing(K.drop, 0xffd166));
-  F2.group.add(zoneRing(K.serve, 0x3fbf5f));
+  F2.group.add(ringLabel(zoneRing(K.drop, 0xffd166), '🍲', 'วางที่นี่', () => player.stack.countOf('bowl') > 0));
+  F2.group.add(ringLabel(zoneRing(K.serve, 0x3fbf5f), '💵', 'เสิร์ฟ'));
   // Stands: five tiers; the front row are real customers, the rest an instanced crowd
   const tiers = 5;
   for (let k = 0; k < tiers; k++) {
@@ -3394,7 +3436,7 @@ function updateKitchen(dt) {
 function buildWard(animate) {
   const roots = [f2Machine(W.ivMachine, 0x7fc8f8, '💧 คลังน้ำเกลือ')];
   F2.ivPile = f2Pile(W.ivPickup);
-  F2.group.add(zoneRing(W.ivPickup, 0xffffff));
+  F2.group.add(ringLabel(zoneRing(W.ivPickup, 0xffffff), '💧', 'เก็บน้ำเกลือ'));
   F2.ward = true;
   addBeds(2, false);
   if (animate) roots.forEach(popIn);
@@ -3419,7 +3461,7 @@ function addBeds(n, animate) {
     root.position.set(at.x, 0, at.z);
     F2.group.add(root); // no collider: beds are low, and rows of them shouldn't wall off the ward
     const bed = { at, root, bag, iv: 0.6, patient: null, stay: 0, empty: 1 + i * 2, earn: 0, drawn: '' };
-    bed.ring = zoneRing(bedZone(bed), 0x9fd8ff);
+    bed.ring = ringLabel(zoneRing(bedZone(bed), 0x9fd8ff), '💧', 'ให้น้ำเกลือ', () => player.stack.countOf('iv') > 0 && bed.iv < 0.7);
     F2.group.add(bed.ring);
     bed.bubble = makeBubble();
     bed.bubble.position.set(at.x, 1.9, at.z);
@@ -4908,7 +4950,7 @@ function buildRoof(animate) {
   rail(FLOOR.x1 + 0.15, cz, 0.2, fd);
   rail(0, FLOOR.z0 - 0.15, fw, 0.2);
   rail(0, FLOOR.z1 + 0.15, fw, 0.2);
-  g.add(zoneRing(ELEVATOR, 0x7b61ff));
+  g.add(ringLabel(zoneRing(ELEVATOR, 0x7b61ff), '🛗', 'ลิฟต์'));
   // Helipad: yellow ring and a big H
   const pad = new THREE.Mesh(new THREE.CircleGeometry(2.6, 32), mat(0x3d4552));
   pad.rotation.x = -Math.PI / 2;
@@ -6920,7 +6962,7 @@ function buildUpperFloor(f, animate) {
   rail(FLOOR.x1 + 0.15, cz, 0.2, fd);
   rail(0, FLOOR.z0 - 0.15, fw, 0.2);
   rail(0, FLOOR.z1 + 0.15, fw, 0.2);
-  g.add(zoneRing(ELEVATOR, 0x7b61ff));
+  g.add(ringLabel(zoneRing(ELEVATOR, 0x7b61ff), '🛗', 'ลิฟต์'));
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 0.8), new THREE.MeshBasicMaterial({ toneMapped: false,  map: signTex(U.name, f === 3 ? '#7b3fbe' : '#d6336c'), side: THREE.DoubleSide }));
   sign.position.set(3.2, 2.6, -10.6);
   g.add(sign);
@@ -15864,6 +15906,7 @@ function frameRest(dt, now) {
   updateFlyers(dt);
   updatePops(dt);
   updateConfetti(dt);
+  updateRingLabels(now);
   updateFX(dt);
   updateTeaser(dt);
   updateDecor();
