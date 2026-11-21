@@ -771,8 +771,8 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
 const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags', 'terminal_back', 'submarine'];
 const MODELS = {};
-async function loadModels() {
-  const one = async (n) => {
+async function loadModel(n) {
+  {
     try {
       const r = await fetch(`models/${n}.json`);
       if (!r.ok) return;
@@ -788,9 +788,11 @@ async function loadModels() {
     } catch {
       // missing or broken: the code-built model is used instead
     }
-  };
+  }
+}
+async function loadModels(names = MODEL_NAMES, wait = 4000) {
   // Never hold the game up for long: start with whatever has arrived after 4 s
-  await Promise.race([Promise.all(MODEL_NAMES.map(one)), new Promise((r) => setTimeout(r, 4000))]);
+  await Promise.race([Promise.all(names.filter((n) => !MODELS[n]).map(loadModel)), new Promise((r) => setTimeout(r, wait))]);
 }
 const modelMats = new Map();
 function modelMesh(part, paint) {
@@ -11245,16 +11247,16 @@ function closeCine(X) {
 const FAR_TOWN = v(20, -27); // where the bus drops you back: the top of the campus avenue, by the base gate
 const FAR_DEFS = {
   nuke: {
-    icon: '☢️', name: 'ศูนย์นิวเคลียร์', en: 'Nuclear site', X0: 700, X1: 800, stop: v(750, 10), plaza: 0xd5d2c8, accent: '#2e7d32',
+    icon: '☢️', name: 'ศูนย์นิวเคลียร์', en: 'Nuclear site', X0: 700, X1: 800, stop: v(750, 4.5), plaza: 0xd5d2c8, accent: '#2e7d32',
     open: () => baseOpen() && baseStep() >= 6,
     unlocks: [
-      { id: 'reactor', icon: '☢️', name: 'เตาปฏิกรณ์นิวเคลียร์', en: 'Nuclear reactor', price: 1500000, at: v(724, 0) },
-      { id: 'cooling', icon: '🌫️', name: 'หอหล่อเย็นคู่', en: 'Twin cooling towers', price: 2000000, at: v(710, 0) },
-      { id: 'fuel', icon: '🟩', name: 'โรงผลิตแท่งเชื้อเพลิง', en: 'Fuel rod plant', price: 2600000, at: v(738, 0) },
-      { id: 'control', icon: '🎛️', name: 'ห้องควบคุมเตา', en: 'Reactor control room', price: 3200000, at: v(752, 0) },
-      { id: 'grid', icon: '⚡', name: 'สถานีไฟฟ้า + สายส่ง', en: 'Substation + power lines', price: 4200000, at: v(766, 0) },
-      { id: 'silo', icon: '🚀', name: 'ไซโลขีปนาวุธยุทธศาสตร์', en: 'Strategic missile silos', price: 6000000, at: v(780, 0) },
-      { id: 'command', icon: '⭐', name: 'ศูนย์บัญชาการยุทธศาสตร์', en: 'Strategic command', price: 8500000, at: v(794, 0) },
+      { id: 'reactor', icon: '☢️', name: 'เตาปฏิกรณ์นิวเคลียร์', en: 'Nuclear reactor', price: 1500000, at: v(724, -2.5) },
+      { id: 'cooling', icon: '🌫️', name: 'หอหล่อเย็นคู่', en: 'Twin cooling towers', price: 2000000, at: v(710, -2.5) },
+      { id: 'fuel', icon: '🟩', name: 'โรงผลิตแท่งเชื้อเพลิง', en: 'Fuel rod plant', price: 2600000, at: v(738, -2.5) },
+      { id: 'control', icon: '🎛️', name: 'ห้องควบคุมเตา', en: 'Reactor control room', price: 3200000, at: v(752, -2.5) },
+      { id: 'grid', icon: '⚡', name: 'สถานีไฟฟ้า + สายส่ง', en: 'Substation + power lines', price: 4200000, at: v(766, -2.5) },
+      { id: 'silo', icon: '🚀', name: 'ไซโลขีปนาวุธยุทธศาสตร์', en: 'Strategic missile silos', price: 6000000, at: v(780, -2.5) },
+      { id: 'command', icon: '⭐', name: 'ศูนย์บัญชาการยุทธศาสตร์', en: 'Strategic command', price: 8500000, at: v(794, -2.5) },
     ],
     units: {
       rod: { icon: '🟩', name: 'แท่งเชื้อเพลิง', from: 'fuel', time: 6, cap: 12, worth: 60, staff: 'คนงาน' },
@@ -11265,17 +11267,17 @@ const FAR_DEFS = {
     mult: () => (farHas('nuke', 'cooling') ? 1.5 : 1) * (farHas('nuke', 'grid') ? 1.6 : 1),
   },
   space: {
-    icon: '🚀', name: 'ศูนย์อวกาศ', en: 'Space centre', X0: 1000, X1: 1100, stop: v(1050, 10), plaza: 0xcfd6de, accent: '#1565c0',
+    icon: '🚀', name: 'ศูนย์อวกาศ', en: 'Space centre', X0: 1000, X1: 1100, stop: v(1050, 4.5), plaza: 0xcfd6de, accent: '#1565c0',
     open: () => baseOpen() && baseStep() >= 8,
     unlocks: [
-      { id: 'mission', icon: '🛰️', name: 'ศูนย์ควบคุมภารกิจ', en: 'Mission control', price: 2000000, at: v(1006, 0) },
-      { id: 'lab', icon: '🔬', name: 'ห้องแล็บวิทยาศาสตร์', en: 'Science lab', price: 2600000, at: v(1019, 0) },
-      { id: 'astro', icon: '👨‍🚀', name: 'ศูนย์ฝึกนักบินอวกาศ', en: 'Astronaut training', price: 3400000, at: v(1032, 0) },
-      { id: 'observatory', icon: '🔭', name: 'หอดูดาว', en: 'Observatory', price: 4200000, at: v(1045, 0) },
-      { id: 'vab', icon: '🏗️', name: 'อาคารประกอบจรวด', en: 'Rocket assembly building', price: 5500000, at: v(1058, 0) },
-      { id: 'pad', icon: '🚀', name: 'ฐานปล่อยจรวด', en: 'Launch pad', price: 7000000, at: v(1071, 0) },
-      { id: 'dish', icon: '📡', name: 'จานรับสัญญาณห้วงอวกาศ', en: 'Deep-space dish', price: 9000000, at: v(1084, 0) },
-      { id: 'heavy', icon: '🌕', name: 'จรวดหนักสู่ดวงจันทร์', en: 'Heavy moon rocket', price: 12000000, at: v(1097, 0) },
+      { id: 'mission', icon: '🛰️', name: 'ศูนย์ควบคุมภารกิจ', en: 'Mission control', price: 2000000, at: v(1006, -2.5) },
+      { id: 'lab', icon: '🔬', name: 'ห้องแล็บวิทยาศาสตร์', en: 'Science lab', price: 2600000, at: v(1019, -2.5) },
+      { id: 'astro', icon: '👨‍🚀', name: 'ศูนย์ฝึกนักบินอวกาศ', en: 'Astronaut training', price: 3400000, at: v(1032, -2.5) },
+      { id: 'observatory', icon: '🔭', name: 'หอดูดาว', en: 'Observatory', price: 4200000, at: v(1045, -2.5) },
+      { id: 'vab', icon: '🏗️', name: 'อาคารประกอบจรวด', en: 'Rocket assembly building', price: 5500000, at: v(1058, -2.5) },
+      { id: 'pad', icon: '🚀', name: 'ฐานปล่อยจรวด', en: 'Launch pad', price: 7000000, at: v(1071, -2.5) },
+      { id: 'dish', icon: '📡', name: 'จานรับสัญญาณห้วงอวกาศ', en: 'Deep-space dish', price: 9000000, at: v(1084, -2.5) },
+      { id: 'heavy', icon: '🌕', name: 'จรวดหนักสู่ดวงจันทร์', en: 'Heavy moon rocket', price: 12000000, at: v(1097, -2.5) },
     ],
     units: {
       sci: { icon: '🧑‍🔬', name: 'นักวิทยาศาสตร์', from: 'lab', time: 6, cap: 10, worth: 80, staff: 'หัวหน้าแล็บ' },
@@ -11310,6 +11312,15 @@ const farReward = (k, min) => Math.round(Math.max(minutesOfIncome(min), farRate(
 const FAR_CD_MS = 5 * 60 * 1000;
 
 // --- small builders ---
+// A Blender model placed in the zone (origin on the ground, front facing the plaza), or null to build it from boxes
+function farModel(g, name, x, z, y = 0) {
+  const made = modelGroup(name);
+  if (!made) return null;
+  made.position.set(x, y, z);
+  made.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+  g.add(made);
+  return made;
+}
 function farMesh(g, geo, color, x, y, z, { shadow = true, side = null } = {}) {
   const m = new THREE.Mesh(geo, side ? new THREE.MeshStandardMaterial({ color, roughness: 0.7, side }) : mat(color));
   m.castShadow = shadow;
@@ -11363,6 +11374,8 @@ function coolingTower(H = 13, R = 4.2) {
   return g;
 }
 function missileModel() {
+  const made = modelGroup('missile');
+  if (made) return made;
   const g = new THREE.Group();
   g.add(at3(cylM(0.42, 0.42, 6.4, 0xf1f1ee, 16), 0, 3.2, 0));
   g.add(at3(new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.7, 16), mat(0xf1f1ee)), 0, 7.25, 0));
@@ -11378,6 +11391,23 @@ function missileModel() {
 // A rocket in two parts: the booster (which flies back) and the upper stage with the capsule
 function rocketModel(heavy = false) {
   const g = new THREE.Group();
+  const m1 = modelGroup('rocket_s1');
+  const m2 = modelGroup('rocket_s2');
+  if (m1 && m2) {
+    const s1 = new THREE.Group();
+    const s2 = new THREE.Group();
+    s1.add(m1, at3(farFlagStripe(), 0, 6.5, 0));
+    if (heavy) for (const sx of [-1.55, 1.55]) {
+      const side = modelGroup('rocket_side');
+      if (side) s1.add(at3(side, sx, 0, 0));
+    }
+    s2.add(m2);
+    g.add(s1, s2);
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    g.userData.s1 = s1;
+    g.userData.s2 = s2;
+    return g;
+  }
   const s1 = new THREE.Group();
   s1.add(at3(cylM(0.9, 0.9, 9, 0xf7f7f4, 24), 0, 4.8, 0));
   s1.add(at3(cylM(0.92, 0.92, 0.6, 0x212121, 24), 0, 9.1, 0));
@@ -11474,14 +11504,14 @@ function farGround(k) {
   const plaza = new THREE.Mesh(new THREE.PlaneGeometry(D.X1 - D.X0 + 12, 18), mat(D.plaza));
   plaza.rotation.x = -Math.PI / 2;
   plaza.receiveShadow = true;
-  g.add(at3(plaza, cx, 0.03, 3));
-  for (let x = D.X0 - 4; x < D.X1 + 4; x += 4) g.add(at3(box(2, 0.01, 0.16, 0xffffff, { shadow: false }), x, 0.05, 7));
+  g.add(at3(plaza, cx, 0.03, -0.5));
+  for (let x = D.X0 - 4; x < D.X1 + 4; x += 4) g.add(at3(box(2, 0.01, 0.16, 0xffffff, { shadow: false }), x, 0.05, 1.6));
   // Yard behind the buildings
   const yard = new THREE.Mesh(new THREE.PlaneGeometry(D.X1 - D.X0 + 12, 46), mat(k === 'space' ? 0xb8c0c8 : 0xb9b4a6));
   yard.rotation.x = -Math.PI / 2;
   yard.receiveShadow = true;
   g.add(at3(yard, cx, 0.02, -26));
-  for (let x = D.X0 - 6; x <= D.X1 + 6; x += 8) g.add(at3(treeModel(x % 16 ? 'round' : 'cone'), x, 0, 16));
+  for (let x = D.X0 - 6; x <= D.X1 + 6; x += 8) g.add(at3(treeModel(x % 16 ? 'round' : 'cone'), x, 0, 10.5));
   // A perimeter fence along the back
   for (let x = D.X0 - 6; x < D.X1 + 6; x += 3) g.add(at3(box(0.08, 1.6, 0.08, 0x90a4ae), x, 0.8, -50));
   g.add(at3(box(D.X1 - D.X0 + 12, 0.06, 0.06, 0x90a4ae), cx, 1.5, -50), at3(box(D.X1 - D.X0 + 12, 0.06, 0.06, 0x90a4ae), cx, 0.8, -50));
@@ -11496,20 +11526,24 @@ function farGround(k) {
   // A welcome board with the zone's name, beside the bus stop
   for (const sx of [-3.6, 3.6]) g.add(at3(box(0.3, 2.2, 0.3, 0x546e7a), D.stop.x + 12 + sx, 1.1, D.stop.z + 2));
   farSign(g, `${D.icon} ${D.name}`, D.accent, D.stop.x + 12, 2.3, D.stop.z + 2.2, 8, 1.1);
-  R.pile = new MoneyPile(v(D.stop.x, D.stop.z - 6).setY(1));
+  R.pile = new MoneyPile(v(D.stop.x, D.stop.z - 2).setY(1));
 }
 
 // --- the nuclear site ---
 const NUKE_BUILD = {
   reactor(g, R) {
-    farCyl(g, 5, 5, 7, 0xe8e4dc, 724, 3.5, -14, 36);
-    farMesh(g, new THREE.SphereGeometry(5, 36, 14, 0, Math.PI * 2, 0, Math.PI / 2), 0xe8e4dc, 724, 7, -14);
-    farCyl(g, 5.05, 5.05, 0.5, 0xe5484d, 724, 6.6, -14, 36);
-    farBox(g, 13, 5, 6, 0xb0bec5, 724, 2.5, -25);
-    farBox(g, 13.2, 0.3, 6.2, 0x78909c, 724, 5.15, -25);
-    farCyl(g, 0.6, 0.85, 15, 0xcfd8dc, 732, 7.5, -24, 12);
-    farCyl(g, 0.62, 0.62, 0.6, 0xe5484d, 732, 14.2, -24, 12);
-    farSign(g, '☢️ เตาปฏิกรณ์ 1', '#2e7d32', 724, 2.4, -8.9, 3.6, 0.6);
+    if (!farModel(g, 'nuke_reactor', 724, -14)) {
+      farCyl(g, 5, 5, 7, 0xe8e4dc, 724, 3.5, -14, 36);
+      farMesh(g, new THREE.SphereGeometry(5, 36, 14, 0, Math.PI * 2, 0, Math.PI / 2), 0xe8e4dc, 724, 7, -14);
+      farCyl(g, 5.05, 5.05, 0.5, 0xe5484d, 724, 6.6, -14, 36);
+    }
+    if (!farModel(g, 'nuke_turbine', 724, -25)) {
+      farBox(g, 13, 5, 6, 0xb0bec5, 724, 2.5, -25);
+      farBox(g, 13.2, 0.3, 6.2, 0x78909c, 724, 5.15, -25);
+      farCyl(g, 0.6, 0.85, 15, 0xcfd8dc, 732, 7.5, -24, 12);
+      farCyl(g, 0.62, 0.62, 0.6, 0xe5484d, 732, 14.2, -24, 12);
+    }
+    farSign(g, '☢️ เตาปฏิกรณ์ 1', '#2e7d32', 721, 2.4, -7.6, 3.6, 0.6);
     farLight(g, 724, 12.15, -14);
     addCollider(724, -14, 10.4, 10.4);
     addCollider(724, -25, 13, 6);
@@ -11517,14 +11551,15 @@ const NUKE_BUILD = {
   },
   cooling(g, R) {
     for (const [x, z] of [[707, -15], [713, -28]]) {
-      g.add(at3(coolingTower(), x, 0, z));
+      if (!farModel(g, 'cooling_tower', x, z)) g.add(at3(coolingTower(), x, 0, z));
       addCollider(x, z, 8, 8);
     }
     R.parts.towers = [v(707, -15).setY(13), v(713, -28).setY(13)];
   },
   fuel(g, R) {
-    farHouse(g, 738, -10, 9, 5, 6, 0xd7e3d0, 0xc8e6c9, 2);
-    farSign(g, '🟩 โรงผลิตแท่งเชื้อเพลิง', '#2e7d32', 738, 4.2, -6.85, 4.6, 0.6);
+    if (farModel(g, 'fuel_plant', 738, -10)) addCollider(738, -10, 11, 6);
+    else farHouse(g, 738, -10, 9, 5, 6, 0xd7e3d0, 0xc8e6c9, 2);
+    farSign(g, '🟩 โรงผลิตแท่งเชื้อเพลิง', '#2e7d32', 738, 4.2, -6.75, 4.6, 0.6);
     // A rack out front shows the rods made so far (one glowing bar per rod)
     farBox(g, 4.2, 0.2, 1.2, 0x546e7a, 738, 0.1, -4.6);
     R.parts.rods = [];
@@ -11537,10 +11572,11 @@ const NUKE_BUILD = {
     for (let i = 0; i < 4; i++) farCyl(g, 0.35, 0.35, 0.9, 0xffd166, 743 + (i % 2) * 0.8, 0.45, -5.6 + Math.floor(i / 2) * 0.8, 12);
   },
   control(g, R) {
-    farHouse(g, 752, -9, 8, 4.4, 6, 0xeceff1, 0x64b5f6, 2);
+    if (farModel(g, 'nuke_control', 752, -9)) addCollider(752, -9, 8, 6);
+    else farHouse(g, 752, -9, 8, 4.4, 6, 0xeceff1, 0x64b5f6, 2);
     farCyl(g, 0.07, 0.07, 4, 0x90a4ae, 754.5, 6.6, -10, 6);
     farLight(g, 754.5, 8.7, -10);
-    farSign(g, '🎛️ ห้องควบคุมเตา', '#37474f', 752, 3.9, -5.85, 3.6, 0.6);
+    farSign(g, '🎛️ ห้องควบคุมเตา', '#37474f', 752, 4.85, -5.8, 3.6, 0.6);
     R.parts.controlRing = true;
   },
   grid(g, R) {
@@ -11555,6 +11591,10 @@ const NUKE_BUILD = {
     const tops = [];
     const pylons = [[766, -20], [770, -40], [774, -60], [778, -80]];
     for (const [x, z] of pylons) {
+      if (farModel(g, 'pylon', x, z)) {
+        tops.push([v(x - 2.3, z).setY(9.45), v(x + 2.3, z).setY(9.45), v(x - 1.7, z).setY(7.85), v(x + 1.7, z).setY(7.85)]);
+        continue;
+      }
       farMesh(g, new THREE.CylinderGeometry(0.12, 0.45, 11, 4), 0x9ea7ad, x, 5.5, z);
       farBox(g, 4.6, 0.16, 0.16, 0x9ea7ad, x, 10, z);
       farBox(g, 3.4, 0.16, 0.16, 0x9ea7ad, x, 8.4, z);
@@ -11568,12 +11608,12 @@ const NUKE_BUILD = {
   silo(g, R) {
     R.parts.silos = [];
     for (const [x, z] of [[775, -12], [785, -12], [780, -21]]) {
-      farCyl(g, 2.3, 2.5, 0.4, 0x9e9e9e, x, 0.2, z, 28);
+      if (!farModel(g, 'silo_pad', x, z)) farCyl(g, 2.3, 2.5, 0.4, 0x9e9e9e, x, 0.2, z, 28);
       farCyl(g, 1.25, 1.25, 0.42, 0x263238, x, 0.22, z, 24);
       const lids = [-1, 1].map((s) => farBox(g, 1.3, 0.2, 2.8, 0x8d8f86, x + s * 0.66, 0.5, z));
       const lamp = farLight(g, x + 2, 0.6, z, 0x66ff88);
       const m = missileModel();
-      m.position.set(x, -7.6, z);
+      m.position.set(x, -8.3, z);
       g.add(m);
       R.parts.silos.push({ x, z, lids, lamp, m });
       addCollider(x, z, 4.6, 4.6);
@@ -11582,13 +11622,16 @@ const NUKE_BUILD = {
     for (const s of [-1, 1]) farBox(g, 0.1, 2.0, 0.1, 0x6d4c41, 780 + s * 2.2, 1, -8);
   },
   command(g, R) {
-    farBox(g, 9, 2.6, 7, 0x8d8f86, 794, 1.3, -11);
-    farBox(g, 9.6, 0.4, 7.6, 0x6b7a58, 794, 2.8, -11);
-    farMesh(g, new THREE.SphereGeometry(1.4, 20, 12), 0xf5f5f5, 791.5, 3.6, -11);
-    farCyl(g, 0.06, 0.06, 4, 0x90a4ae, 796.5, 5, -12, 6);
-    farLight(g, 796.5, 7.1, -12);
-    farBox(g, 1.6, 2.1, 0.1, 0x37474f, 794, 1.05, -7.45);
-    farSign(g, '⭐ ศูนย์บัญชาการยุทธศาสตร์', '#4e342e', 794, 3.5, -7.2, 4.8, 0.6);
+    if (farModel(g, 'command_bunker', 794, -11)) farLight(g, 796.5, 7.1, -11.6);
+    else {
+      farBox(g, 9, 2.6, 7, 0x8d8f86, 794, 1.3, -11);
+      farBox(g, 9.6, 0.4, 7.6, 0x6b7a58, 794, 2.8, -11);
+      farMesh(g, new THREE.SphereGeometry(1.4, 20, 12), 0xf5f5f5, 791.5, 3.6, -11);
+      farCyl(g, 0.06, 0.06, 4, 0x90a4ae, 796.5, 5, -12, 6);
+      farLight(g, 796.5, 7.1, -12);
+      farBox(g, 1.6, 2.1, 0.1, 0x37474f, 794, 1.05, -7.45);
+    }
+    farSign(g, '⭐ ศูนย์บัญชาการยุทธศาสตร์', '#4e342e', 794, 4.0, -6.9, 4.8, 0.6);
     for (const s of [-1, 1]) {
       farCyl(g, 0.05, 0.05, 5, 0xdddddd, 794 + s * 3.5, 2.5, -6.5, 6);
       farBox(g, 1.2, 0.7, 0.03, s < 0 ? 0xe5484d : 0x1565c0, 794 + s * 3.5 + 0.6, 4.6, -6.5, { shadow: false });
@@ -11599,22 +11642,27 @@ const NUKE_BUILD = {
 // --- the space centre ---
 const SPACE_BUILD = {
   mission(g, R) {
-    farHouse(g, 1006, -10, 9, 5, 7, 0xf5f5f5, 0x64b5f6, 2);
-    farSign(g, '🛰️ ศูนย์ควบคุมภารกิจ', '#1565c0', 1006, 4.5, -6.35, 4.2, 0.6);
+    if (farModel(g, 'mission_control', 1006, -10)) addCollider(1006, -10, 9, 8.4);
+    else farHouse(g, 1006, -10, 9, 5, 7, 0xf5f5f5, 0x64b5f6, 2);
+    farSign(g, '🛰️ ศูนย์ควบคุมภารกิจ', '#1565c0', 1006, 5.6, -5.4, 4.2, 0.6);
     R.parts.minidish = farMesh(g, new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, 1.0), 0xffffff, 1008.5, 6.4, -11, { side: THREE.DoubleSide });
     R.parts.minidish.rotation.x = -0.6;
     farLight(g, 1003, 5.6, -11);
   },
   lab(g, R) {
-    farHouse(g, 1019, -9, 9, 4.4, 6, 0xe3f2fd, 0x90caf9, 2);
-    farMesh(g, new THREE.SphereGeometry(1.6, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0xbfdbfe, 1021, 4.7, -10);
-    farSign(g, '🔬 ห้องแล็บวิทยาศาสตร์', '#0277bd', 1019, 3.9, -5.85, 4.2, 0.6);
+    if (farModel(g, 'space_lab', 1019, -9)) addCollider(1019, -9, 9, 6);
+    else {
+      farHouse(g, 1019, -9, 9, 4.4, 6, 0xe3f2fd, 0x90caf9, 2);
+      farMesh(g, new THREE.SphereGeometry(1.6, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0xbfdbfe, 1021, 4.7, -10);
+    }
+    farSign(g, '🔬 ห้องแล็บวิทยาศาสตร์', '#0277bd', 1019, 4.85, -5.8, 4.2, 0.6);
   },
   astro(g, R) {
-    farHouse(g, 1032, -8, 8, 4, 5, 0xfafafa, 0x9fd8ff, 2);
-    farSign(g, '👨‍🚀 ศูนย์ฝึกนักบินอวกาศ', '#283593', 1032, 3.6, -5.35, 4.4, 0.6);
+    if (farModel(g, 'astro_center', 1032, -8)) addCollider(1032, -8, 8, 5);
+    else farHouse(g, 1032, -8, 8, 4, 5, 0xfafafa, 0x9fd8ff, 2);
+    farSign(g, '👨‍🚀 ศูนย์ฝึกนักบินอวกาศ', '#283593', 1031, 4.55, -5.3, 4.4, 0.6);
     // The centrifuge: a long arm spinning round a hub, with a capsule at each end
-    farCyl(g, 1, 1.2, 1.6, 0x90a4ae, 1032, 0.8, -19, 20);
+    if (!farModel(g, 'centrifuge_base', 1032, -19)) farCyl(g, 1, 1.2, 1.6, 0x90a4ae, 1032, 0.8, -19, 20);
     const arm = new THREE.Group();
     arm.add(at3(box(10, 0.35, 0.5, 0x546e7a), 0, 0, 0));
     for (const s of [-1, 1]) arm.add(at3(new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 12), mat(0xffffff)), s * 5, 0, 0));
@@ -11624,28 +11672,33 @@ const SPACE_BUILD = {
     addCollider(1032, -19, 11, 11);
   },
   observatory(g, R) {
-    farCyl(g, 3, 3, 3.6, 0xeeeeee, 1045, 1.8, -13, 28);
-    const dome = new THREE.Group();
-    dome.add(new THREE.Mesh(new THREE.SphereGeometry(3.1, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xcfd8dc)));
-    dome.add(at3(box(1.0, 2.6, 2.9, 0x263238), 0, 1.6, 1.6));
-    const scope = cylM(0.35, 0.45, 3.4, 0x37474f, 14);
-    scope.rotation.x = 0.8;
-    dome.add(at3(scope, 0, 1.8, 1.8));
+    if (!farModel(g, 'obs_base', 1045, -13)) farCyl(g, 3, 3, 3.6, 0xeeeeee, 1045, 1.8, -13, 28);
+    let dome = modelGroup('obs_dome');
+    if (!dome) {
+      dome = new THREE.Group();
+      dome.add(new THREE.Mesh(new THREE.SphereGeometry(3.1, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xcfd8dc)));
+      dome.add(at3(box(1.0, 2.6, 2.9, 0x263238), 0, 1.6, 1.6));
+      const scope = cylM(0.35, 0.45, 3.4, 0x37474f, 14);
+      scope.rotation.x = 0.8;
+      dome.add(at3(scope, 0, 1.8, 1.8));
+    }
     dome.position.set(1045, 3.6, -13);
     g.add(dome);
     R.parts.dome = dome;
-    farSign(g, '🔭 หอดูดาว', '#4527a0', 1045, 2.6, -9.8, 2.6, 0.55);
+    farSign(g, '🔭 หอดูดาว', '#4527a0', 1045, 2.6, -9.6, 2.6, 0.55);
     addCollider(1045, -13, 6.2, 6.2);
   },
   vab(g, R) {
-    farBox(g, 12, 20, 11, 0xf2f2f0, 1058, 10, -18);
-    farBox(g, 6, 17, 0.1, 0x90a4ae, 1058, 8.5, -12.45);
-    for (let y = 1; y < 17; y += 1.4) farBox(g, 6, 0.06, 0.12, 0x78909c, 1058, y, -12.4, { shadow: false });
-    farBox(g, 0.4, 20, 11.05, 0x1565c0, 1052.2, 10, -18);
+    if (!farModel(g, 'vab', 1058, -18)) {
+      farBox(g, 12, 20, 11, 0xf2f2f0, 1058, 10, -18);
+      farBox(g, 6, 17, 0.1, 0x90a4ae, 1058, 8.5, -12.45);
+      for (let y = 1; y < 17; y += 1.4) farBox(g, 6, 0.06, 0.12, 0x78909c, 1058, y, -12.4, { shadow: false });
+      farBox(g, 0.4, 20, 11.05, 0x1565c0, 1052.2, 10, -18);
+    }
     const logo = signBoard('★ QUEST SPACE', '#1565c0', 5, 1.2);
-    logo.position.set(1058, 18.6, -12.42);
+    logo.position.set(1058, 18.85, -12.44);
     g.add(logo);
-    farSign(g, '🏗️ อาคารประกอบจรวด', '#1565c0', 1058, 2.6, -12.3, 4, 0.6);
+    farSign(g, '🏗️ อาคารประกอบจรวด', '#1565c0', 1058, 2.6, -11.6, 4, 0.6);
     farLight(g, 1063.5, 20.3, -13);
     addCollider(1058, -18, 12, 11);
   },
@@ -11654,12 +11707,16 @@ const SPACE_BUILD = {
     const road = new THREE.Mesh(new THREE.PlaneGeometry(4, 22), mat(0xa1a59a));
     road.rotation.x = -Math.PI / 2;
     g.add(at3(road, 1066, 0.04, -30));
-    farBox(g, 13, 0.6, 13, 0x9e9e9e, 1077, 0.3, -38);
-    farBox(g, 3, 0.62, 8, 0x37474f, 1077, 0.31, -38);
+    if (!farModel(g, 'launch_pad', 1077, -38)) {
+      farBox(g, 13, 0.6, 13, 0x9e9e9e, 1077, 0.3, -38);
+      farBox(g, 3, 0.62, 8, 0x37474f, 1077, 0.31, -38);
+    }
     // Service tower with arms reaching across to the rocket
-    farBox(g, 1.6, 19, 1.6, 0xc62828, 1081.2, 9.5, -38);
-    for (let y = 2; y < 19; y += 2) farBox(g, 1.7, 0.12, 1.7, 0x8e1b1b, 1081.2, y, -38, { shadow: false });
-    farBox(g, 2.4, 0.3, 0.6, 0x8e1b1b, 1079.6, 13.4, -38);
+    if (!farModel(g, 'launch_tower', 1081.2, -38)) {
+      farBox(g, 1.6, 19, 1.6, 0xc62828, 1081.2, 9.5, -38);
+      for (let y = 2; y < 19; y += 2) farBox(g, 1.7, 0.12, 1.7, 0x8e1b1b, 1081.2, y, -38, { shadow: false });
+      farBox(g, 2.4, 0.3, 0.6, 0x8e1b1b, 1079.6, 13.4, -38);
+    }
     farLight(g, 1081.2, 19.3, -38);
     const r = rocketModel(farHas('space', 'heavy'));
     r.position.set(1077, 0.6, -38);
@@ -11668,7 +11725,7 @@ const SPACE_BUILD = {
     R.parts.padAt = v(1077, -38);
     // A landing pad for the booster, a big circle with an H
     farCyl(g, 4, 4, 0.12, 0x6d7479, 1090, 0.06, -30, 32);
-    farSign(g, '🚀 ฐานปล่อยจรวด', '#e65100', 1071, 2.4, -4.6, 3.4, 0.6).rotation.x = -0.25;
+    farSign(g, '🚀 ฐานปล่อยจรวด', '#e65100', 1071, 2.4, -6.2, 3.4, 0.6).rotation.x = -0.25;
     const h = signBoard('H', '#ffd166', 2.4, 2.4);
     h.rotation.x = -Math.PI / 2;
     h.position.set(1090, 0.14, -30);
@@ -11676,16 +11733,24 @@ const SPACE_BUILD = {
     addCollider(1077, -38, 13, 13);
   },
   dish(g, R) {
-    farCyl(g, 0.8, 1.3, 3.4, 0xeeeeee, 1086, 1.7, -14, 16);
+    const madeBase = farModel(g, 'dish_base', 1086, -14);
+    if (!madeBase) farCyl(g, 0.8, 1.3, 3.4, 0xeeeeee, 1086, 1.7, -14, 16);
     const head = new THREE.Group();
-    const dish = new THREE.Mesh(new THREE.SphereGeometry(4.4, 28, 8, 0, Math.PI * 2, 0, 0.75), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, side: THREE.DoubleSide }));
-    dish.rotation.x = Math.PI;
-    dish.position.y = 4.2;
     const tilt = new THREE.Group();
-    tilt.add(dish, at3(cylM(0.08, 0.08, 3, 0x90a4ae, 6), 0, 1.4, 0), at3(box(0.4, 0.4, 0.4, 0x546e7a), 0, 3, 0));
-    tilt.rotation.x = -0.7;
+    const dm = modelGroup('dish_head');
+    if (dm) {
+      dm.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      dm.position.y = 0.4;
+      tilt.add(dm);
+    } else {
+      const dish = new THREE.Mesh(new THREE.SphereGeometry(4.4, 28, 8, 0, Math.PI * 2, 0, 0.75), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, side: THREE.DoubleSide }));
+      dish.rotation.x = Math.PI;
+      dish.position.y = 4.2;
+      tilt.add(dish, at3(cylM(0.08, 0.08, 3, 0x90a4ae, 6), 0, 1.4, 0), at3(box(0.4, 0.4, 0.4, 0x546e7a), 0, 3, 0));
+    }
+    tilt.rotation.x = dm ? 0.7 : -0.7;
     head.add(tilt);
-    head.position.set(1086, 3.4, -14);
+    head.position.set(1086, madeBase ? 3.8 : 3.4, -14);
     g.add(head);
     R.parts.dish = head;
     farSign(g, '📡 จานรับสัญญาณห้วงอวกาศ', '#00695c', 1086, 2.4, -9.6, 4.6, 0.6);
@@ -11699,7 +11764,7 @@ const SPACE_BUILD = {
     r.position.set(1077, 0.6, -38);
     g.add(r);
     R.parts.rocket = r;
-    farSign(g, '🌕 ภารกิจดวงจันทร์', '#5d4037', 1097, 2.4, -4.6, 3.4, 0.6).rotation.x = -0.25;
+    farSign(g, '🌕 ภารกิจดวงจันทร์', '#5d4037', 1097, 2.4, -6.2, 3.4, 0.6).rotation.x = -0.25;
   },
 };
 const FAR_BUILD = { nuke: NUKE_BUILD, space: SPACE_BUILD };
@@ -11739,7 +11804,7 @@ function applyFarUnlock(k, id, animate) {
     scene.remove(ring);
     R.group.add(ring);
     ringLabel(ring, t.icon, 'ผลิต');
-    const S = { k, uk, id, at: u.at, progress: 0, staffed: FS(k).hired.includes(id), hireAt: v(u.at.x + 3.6, 4.4) };
+    const S = { k, uk, id, at: u.at, progress: 0, staffed: FS(k).hired.includes(id), hireAt: v(u.at.x + 3.6, 1.2) };
     R.stations[id] = S;
     if (S.staffed) postFarStaff(k, S);
     else {
@@ -11836,7 +11901,7 @@ function updateFarZone(k, dt) {
     const amt = Math.round(farRate(k) * R.budgetT);
     R.budgetT = 0;
     if (amt > 0) {
-      if (!R.pile) R.pile = new MoneyPile(v(D.stop.x, D.stop.z - 6).setY(1));
+      if (!R.pile) R.pile = new MoneyPile(v(D.stop.x, D.stop.z - 2).setY(1));
       R.pile.add(amt);
     }
   }
@@ -11973,12 +12038,25 @@ function updateFarExit(k, dt) {
   if (!autoGo && R.still < 0.5) return;
   farLeave();
 }
-function farGo(k) {
-  if (!farOpen(k) || player.floor !== 0 || lift.riding || BASE.flight || modeBusy()) return;
+// The two zones' models only load the first time someone goes there (they're big and most players never do)
+const FAR_MODELS = {
+  nuke: ['nuke_reactor', 'nuke_turbine', 'cooling_tower', 'fuel_plant', 'nuke_control', 'pylon', 'silo_pad', 'missile', 'command_bunker'],
+  space: ['mission_control', 'space_lab', 'astro_center', 'centrifuge_base', 'obs_base', 'obs_dome', 'vab', 'launch_tower', 'launch_pad', 'rocket_s1', 'rocket_s2', 'rocket_side', 'dish_head', 'dish_base'],
+};
+async function farGo(k) {
+  if (!farOpen(k) || player.floor !== 0 || lift.riding || BASE.flight || modeBusy() || FAR.going) return;
+  if (!FAR[k].built) {
+    FAR.going = true;
+    farBtns[k].textContent = '⏳ ...';
+    await loadModels(FAR_MODELS[k], 6000);
+    FAR.going = false;
+    farBtns[k].textContent = k === 'nuke' ? tx('☢️ นิวเคลียร์', '☢️ Nuclear') : tx('🚀 อวกาศ', '🚀 Space');
+    if (!farOpen(k) || player.floor !== 0 || lift.riding || BASE.flight || modeBusy()) return;
+  }
   if (inside) inside = null;
   buildFar(k);
   const D = FAR_DEFS[k];
-  player.group.position.copy(D.stop).add(v(0, -4.4));
+  player.group.position.copy(D.stop).add(v(0, -3.6)); // just in front of the row of build tiles, buildings in view
   FAR[k].armed = false;
   auto.task = null;
   if (!FS(k).visited) {
@@ -12096,7 +12174,7 @@ function startFarMode(k, kind) {
     X.total = 19;
     X.silo = R.parts.silos[0];
     X.m = X.silo.m;
-    X.m.position.set(X.silo.x, -7.6, X.silo.z);
+    X.m.position.set(X.silo.x, -8.3, X.silo.z);
     X.m.rotation.set(0, 0, 0);
     openCine('🚀 ทดสอบยิงขีปนาวุธยุทธศาสตร์', 'หัวรบจำลอง ไม่มีวัตถุระเบิด · เป้าหมายกลางทะเล');
   } else if (kind === 'launch') {
@@ -12413,7 +12491,7 @@ function endFarMode(how) {
     s.lids.forEach((l, i) => { l.position.x = s.x + (i ? 1 : -1) * 0.66; });
     X.m.visible = true;
     X.m.quaternion.identity();
-    X.m.position.set(s.x, -7.6, s.z);
+    X.m.position.set(s.x, -8.3, s.z);
   }
   if (X.kind === 'launch') {
     if (X.orbit) scene.remove(X.orbit);

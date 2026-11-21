@@ -1088,3 +1088,449 @@ bench()
 tree('round', 7, 'round')
 tree('tall', 11, 'tall')
 tree('wide', 19, 'wide')
+
+# ---------------- the nuclear site and the space centre (front at -Y = the plaza side in the game) ----------------
+def beam(a, b, r, m, verts=6):
+    a, b = Vector(a), Vector(b)
+    d = b - a
+    bpy.ops.mesh.primitive_cylinder_add(radius=r, depth=d.length, vertices=verts, location=(a + b) / 2)
+    o = bpy.context.object
+    o.rotation_mode = 'QUATERNION'
+    o.rotation_quaternion = Vector((0, 0, 1)).rotation_difference(d.normalized())
+    return add(o, m, smooth=False)
+
+def lathe(pts, m, seg=32, name='lathe', smooth=True):
+    # pts: (radius, z) from bottom to top; a surface of revolution without caps
+    verts, faces = [], []
+    for r, z in pts:
+        for i in range(seg):
+            a = 2 * math.pi * i / seg
+            verts.append((r * math.cos(a), r * math.sin(a), z))
+    for j in range(len(pts) - 1):
+        for i in range(seg):
+            a, b = j * seg + i, j * seg + (i + 1) % seg
+            faces.append([a, b, b + seg, a + seg])
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    return add(o, m, smooth)
+
+def sphere(r, loc, m, seg=24, rings=12, half=False):
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=seg, ring_count=rings, radius=r, location=loc)
+    o = bpy.context.object
+    if half:
+        bm = bmesh.new(); bm.from_mesh(o.data)
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -1e-4], context='VERTS')
+        bm.to_mesh(o.data); bm.free()
+    return add(o, m, True)
+
+def site_mats():
+    return dict(
+        concrete=mat('concrete', [0.78, 0.76, 0.72], rough=0.9),
+        concrete2=mat('concrete2', [0.6, 0.59, 0.56], rough=0.9),
+        white=mat('sitewhite', [0.92, 0.92, 0.9], rough=0.6),
+        red=mat('sitered', [0.78, 0.12, 0.1], rough=0.6),
+        steel=mat('steel', [0.3, 0.32, 0.33], rough=0.5, metal=0.7),
+        steel2=mat('steellight', [0.62, 0.64, 0.66], rough=0.45, metal=0.6),
+        glass=mat('siteglass', [0.12, 0.25, 0.35], rough=0.08, metal=0.5),
+        dark=mat('sitedark', [0.08, 0.09, 0.1], rough=0.7),
+        yellow=mat('siteyellow', [0.95, 0.72, 0.1], rough=0.6),
+        green=mat('sitegreen', [0.2, 0.55, 0.25], rough=0.6),
+        blue=mat('siteblue', [0.08, 0.3, 0.7], rough=0.5),
+        grass=mat('berm', [0.32, 0.55, 0.22], rough=1.0),
+        door=mat('sitedoor', [0.35, 0.38, 0.4], rough=0.6, metal=0.3),
+        lamp=mat('sitelamp', [1.0, 0.85, 0.5], rough=0.4, emit=True),
+    )
+
+def glass_band(m, w, y, z0, z1, n, x=0):
+    # A ribbon of windows on the front face (y) with mullions
+    cube((w, 0.06, z1 - z0), (x, y, (z0 + z1) / 2), m['glass'], smooth=False)
+    for i in range(n + 1):
+        cube((0.08, 0.1, z1 - z0), (x - w / 2 + i * w / n, y - 0.02, (z0 + z1) / 2), m['steel2'], smooth=False)
+
+def nuke_reactor():
+    begin(); m = site_mats()
+    cube((11.4, 11.4, 0.5), (0, 0, 0.25), m['concrete2'], bevel=0.05, seg=1)
+    lathe([(5, 0.5), (5, 7)], m['concrete'], 40)
+    sphere(5, (0, 0, 7), m['concrete'], seg=40, rings=16, half=True)
+    for z in (2.5, 4.6):  # stiffener rings
+        lathe([(5.04, z), (5.08, z + 0.12), (5.04, z + 0.24)], m['concrete2'], 40)
+    lathe([(5.06, 6.4), (5.06, 6.9)], m['red'], 40)
+    for i in range(8):  # buttresses
+        a = 2 * math.pi * i / 8 + math.pi / 8
+        cube((0.5, 0.5, 6.4), (math.cos(a) * 5.05, math.sin(a) * 5.05, 3.7), m['concrete2']).rotation_euler.z = a
+    # Equipment hatch and airlock on the front, a small annex, a crane rail ring and a vent on top
+    cyl(1.3, 0.6, (0, -5.1, 3.2), m['steel2'], rot=(math.pi / 2, 0, 0), verts=24)
+    cyl(0.9, 0.7, (0, -5.2, 3.2), m['steel'], rot=(math.pi / 2, 0, 0), verts=24)
+    cube((3.2, 2.2, 2.6), (2.6, -5.4, 1.3 + 0.5), m['white'], bevel=0.04, seg=1)
+    cube((1.0, 0.08, 1.9), (2.6, -6.52, 1.45), m['door'])
+    cube((3.4, 2.4, 0.2), (2.6, -5.4, 3.2), m['concrete2'])
+    cyl(0.6, 0.9, (0, 0, 11.9), m['steel2'], verts=16)
+    cube((2.2, 1.0, 1.6), (-3.8, -4.2, 1.3), m['steel2'], bevel=0.04, seg=1)
+    write('nuke_reactor')
+
+def nuke_turbine():
+    begin(); m = site_mats()
+    w, d, h = 13, 6, 5
+    cube((w, d, h), (0, 0, h / 2), m['white'], bevel=0.04, seg=1)
+    cube((w + 0.2, d + 0.2, 0.6), (0, 0, 0.3), m['concrete2'])
+    glass_band(m, w - 1, -d / 2 - 0.02, 3.2, 4.4, 10)
+    for i in range(5):  # sawtooth roof lights
+        x = -w / 2 + 1.3 + i * 2.6
+        cube((2.4, d, 0.12), (x, 0, h + 0.4), m['steel2']).rotation_euler.y = 0.32
+        cube((0.1, d, 0.8), (x + 1.15, 0, h + 0.4), m['glass'], smooth=False)
+    cube((3.6, 0.1, 3.4), (-3.5, -d / 2 - 0.03, 1.7), m['door'])
+    for k in range(8):
+        cube((3.4, 0.06, 0.06), (-3.5, -d / 2 - 0.08, 0.2 + k * 0.42), m['steel'], smooth=False)
+    # Main transformer and the vent stack beside the hall
+    cube((2.0, 1.6, 2.2), (5.0, -d / 2 - 1.3, 1.1), m['steel'], bevel=0.05, seg=1)
+    for x in (4.4, 5.0, 5.6):
+        cyl(0.09, 1.0, (x, -d / 2 - 1.3, 2.7), m['white'], verts=8)
+    lathe([(0.85, 0), (0.62, 15)], m['concrete'], 20).location = (8, -1, 0)
+    lathe([(0.63, 14.2), (0.63, 14.8)], m['red'], 20).location = (8, -1, 0)
+    write('nuke_turbine')
+
+def cooling_tower():
+    begin(); m = site_mats()
+    H, R = 13, 4.2
+    pts_o, pts_i = [], []
+    for i in range(17):
+        k = i / 16
+        r = 2.5 + (R - 2.5) * ((0.7 - k) / 0.7) ** 2 if k < 0.7 else 2.5 + 0.9 * ((k - 0.7) / 0.3) ** 2
+        z = 1.2 + k * (H - 1.2)
+        pts_o.append((r, z)); pts_i.append((r - 0.18, z))
+    lathe(pts_o, m['concrete'], 40)
+    inner = lathe(pts_i, m['concrete2'], 40)
+    for p in inner.data.polygons:
+        p.flip()
+    lathe([(pts_i[-1][0], H), (pts_o[-1][0] + 0.05, H)], m['concrete2'], 40)
+    lathe([(3.43, H * 0.88), (3.45, H * 0.94)], m['red'], 40)
+    # Diagonal support legs round the base, a basin and its water
+    n = 24
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        for s in (-1, 1):
+            b = a + s * 0.13
+            beam((math.cos(b) * (R + 0.15), math.sin(b) * (R + 0.15), 0), (math.cos(a) * R, math.sin(a) * R, 1.25), 0.1, m['concrete2'], verts=4)
+    lathe([(R + 0.6, 0), (R + 0.6, 0.45)], m['concrete2'], 40)
+    cyl(R + 0.5, 0.06, (0, 0, 0.35), mat('water', [0.1, 0.3, 0.38], rough=0.1, metal=0.3), verts=40)
+    write('cooling_tower')
+
+def fuel_plant():
+    begin(); m = site_mats()
+    w, d, h = 9, 6, 4.6
+    cube((w, d, h), (0, 0, h / 2), mat('fuelwall', [0.8, 0.86, 0.78], rough=0.8), bevel=0.04, seg=1)
+    # Curved roof
+    me = bpy.data.meshes.new('roof'); vs = []; fs = []
+    for i in range(13):
+        t = i / 12; x = -w / 2 - 0.2 + t * (w + 0.4); z = h + math.sin(t * math.pi) * 0.9
+        vs += [(x, -d / 2 - 0.2, z), (x, d / 2 + 0.2, z)]
+    for i in range(12):
+        fs.append([2 * i, 2 * i + 2, 2 * i + 3, 2 * i + 1])
+    me.from_pydata(vs, [], fs); o = bpy.data.objects.new('roof', me); bpy.context.scene.collection.objects.link(o)
+    s = o.modifiers.new('s', 'SOLIDIFY'); s.thickness = 0.15
+    add(o, m['steel2'], smooth=True)
+    cube((w + 0.05, d + 0.05, 0.35), (0, 0, 0.9), m['yellow'])  # hazard band
+    glass_band(m, w - 3.6, -d / 2 - 0.02, 2.6, 3.6, 6)
+    for x in (-3.2, 3.2):  # loading bays
+        cube((2.0, 0.1, 2.2), (x, -d / 2 - 0.03, 1.1), m['door'])
+        for k in range(6):
+            cube((1.9, 0.06, 0.05), (x, -d / 2 - 0.08, 0.2 + k * 0.36), m['steel'], smooth=False)
+        cube((2.4, 1.0, 0.12), (x, -d / 2 - 0.5, 2.5), m['steel2'])
+    for x in (-2.5, 0, 2.5):
+        cyl(0.22, 1.4, (x, 1.5, h + 1.2), m['steel2'], verts=12)
+    for i in range(3):  # process tanks at the side
+        cyl(0.55, 2.6, (w / 2 + 0.9, -1.8 + i * 1.4, 1.3), m['white'], verts=16)
+        sphere(0.55, (w / 2 + 0.9, -1.8 + i * 1.4, 2.6), m['white'], seg=16, rings=8, half=True)
+    write('fuel_plant')
+
+def nuke_control():
+    begin(); m = site_mats()
+    w, d, h = 8, 6, 4.4
+    cube((w, d, h), (0, 0, h / 2), mat('ctrlwall', [0.88, 0.9, 0.92], rough=0.7), bevel=0.04, seg=1)
+    glass_band(m, w - 0.6, -d / 2 - 0.02, 0.9, 2.0, 8)
+    glass_band(m, w - 0.6, -d / 2 - 0.02, 2.6, 3.7, 8)
+    cube((w + 0.6, d + 0.6, 0.3), (0, 0, h + 0.15), m['steel2'])
+    cube((3.0, 1.6, 0.15), (0, -d / 2 - 0.8, 2.3), m['steel2'])  # entrance canopy
+    for x in (-1.4, 1.4):
+        cyl(0.07, 2.3, (x, -d / 2 - 1.5, 1.15), m['steel'], verts=8)
+    cube((1.6, 0.08, 2.0), (0, -d / 2 - 0.03, 1.0), m['glass'])
+    cube((2.2, 1.6, 1.0), (-1.8, 0.8, h + 0.8), m['steel'], bevel=0.05, seg=1)
+    for i in range(3):
+        cyl(0.35, 0.3, (-2.4 + i * 0.6, 0.8, h + 1.45), m['dark'], verts=12)
+    write('nuke_control')
+
+def pylon():
+    begin(); m = site_mats(); s = m['steel2']
+    H = 11
+    legs = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
+    def at(z):  # half-width at height z
+        return 1.3 * (1 - z / H) + 0.22
+    for lx, ly in legs:
+        beam((lx * at(0), ly * at(0), 0), (lx * at(H), ly * at(H), H), 0.07, s)
+    zs = [0.2, 2.2, 4.2, 6.0, 7.6, 9.0, 10.4]
+    for a, b in zip(zs, zs[1:]):
+        for i in range(4):
+            p, q = legs[i], legs[(i + 1) % 4]
+            beam((p[0] * at(a), p[1] * at(a), a), (q[0] * at(b), q[1] * at(b), b), 0.035, s, verts=4)
+            beam((q[0] * at(a), q[1] * at(a), a), (p[0] * at(b), p[1] * at(b), b), 0.035, s, verts=4)
+    for z, w in ((10, 2.3), (8.4, 1.7)):
+        beam((-w, 0, z), (w, 0, z), 0.08, s)
+        for x in (-w, w):
+            beam((x, 0, z), (0, 0, z + 0.8), 0.04, s)
+            cyl(0.07, 0.5, (x, 0, z - 0.3), m['white'], verts=8)
+    write('pylon')
+
+def silo_pad():
+    begin(); m = site_mats()
+    lathe([(2.5, 0), (2.3, 0.4)], m['concrete2'], 32)
+    cyl(2.3, 0.02, (0, 0, 0.4), m['concrete'], verts=32)
+    lathe([(1.5, 0.4), (1.5, 0.55), (1.25, 0.55)], m['concrete'], 32)
+    for y in (-1.5, 1.5):  # rails the lids slide on
+        cube((5.2, 0.12, 0.08), (0, y, 0.45), m['steel'], smooth=False)
+    cube((0.8, 0.6, 0.7), (-2.1, 1.7, 0.75), m['steel2'], bevel=0.03, seg=1)
+    for i in range(8):
+        a = 2 * math.pi * i / 8
+        cyl(0.05, 0.6, (math.cos(a) * 2.45, math.sin(a) * 2.45, 0.6), m['yellow'], verts=6)
+    write('silo_pad')
+
+def missile():
+    begin(); m = site_mats()
+    lathe([(0.0, 0), (0.42, 0.05), (0.42, 6.4), (0.4, 6.8), (0.33, 7.3), (0.2, 7.8), (0.06, 8.1), (0.0, 8.15)], m['white'], 20)
+    for z, h in ((1.6, 0.25), (5.2, 0.35)):
+        lathe([(0.425, z), (0.425, z + h)], m['dark'], 20)
+    lathe([(0.3, -0.25), (0.4, 0.05)], m['steel'], 16)
+    for i in range(4):
+        a = i * math.pi / 2
+        me = bpy.data.meshes.new('fin')
+        vs = [(0.4, 0, 0.1), (1.0, 0, 0.1), (1.0, 0, 0.5), (0.4, 0, 1.4)]
+        me.from_pydata(vs, [], [[0, 1, 2, 3]])
+        o = bpy.data.objects.new('fin', me); bpy.context.scene.collection.objects.link(o)
+        sm = o.modifiers.new('s', 'SOLIDIFY'); sm.thickness = 0.06
+        o.rotation_euler.z = a
+        add(o, m['dark'], smooth=False)
+    write('missile')
+
+def command_bunker():
+    begin(); m = site_mats()
+    w, d, h = 9, 7, 2.6
+    cube((w, d, h), (0, 0, h / 2), m['concrete2'], bevel=0.05, seg=1)
+    # Earth berms over the sides and back, the concrete face left open at the front
+    me = bpy.data.meshes.new('berm')
+    vs = [(-w / 2 - 1.6, -d / 2 + 0.4, 0), (w / 2 + 1.6, -d / 2 + 0.4, 0), (w / 2 + 1.6, d / 2 + 1.6, 0), (-w / 2 - 1.6, d / 2 + 1.6, 0),
+          (-w / 2 + 0.2, -d / 2 + 0.6, h + 0.5), (w / 2 - 0.2, -d / 2 + 0.6, h + 0.5), (w / 2 - 0.2, d / 2 - 0.2, h + 0.5), (-w / 2 + 0.2, d / 2 - 0.2, h + 0.5)]
+    me.from_pydata(vs, [], [[0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7], [4, 5, 6, 7]])
+    o = bpy.data.objects.new('berm', me); bpy.context.scene.collection.objects.link(o); add(o, m['grass'], smooth=False)
+    cube((w - 0.4, 0.6, h + 0.6), (0, -d / 2 + 0.3, (h + 0.6) / 2), m['concrete'], bevel=0.05, seg=1)
+    cube((2.4, 0.2, 2.1), (0, -d / 2 - 0.05, 1.05), m['door'], bevel=0.04, seg=1)
+    for k in (-0.6, 0, 0.6):
+        cube((2.2, 0.1, 0.06), (0, -d / 2 - 0.16, 1.05 + k), m['steel'], smooth=False)
+    cube((0.4, 0.06, 0.4), (0, -d / 2 - 0.18, 1.05), m['yellow'], smooth=False)
+    cube((w - 0.2, 0.9, 0.2), (0, -d / 2 - 0.2, h + 0.7), m['concrete'])
+    sphere(1.4, (-2.5, 0.5, h + 0.6), m['white'], seg=24, rings=12)
+    for x in (2.0, 3.0):
+        cyl(0.05, 4.0, (x, 0.6, h + 2.4), m['steel2'], verts=6)
+    cyl(0.9, 0.08, (2.5, 2.0, h + 1.2), m['white'], rot=(1.0, 0, 0), verts=20)
+    write('command_bunker')
+
+def mission_control():
+    begin(); m = site_mats()
+    w, d, h = 9, 7, 5
+    cube((w, d, h), (0, 0, h / 2), m['white'], bevel=0.05, seg=1)
+    # A curved glass front with horizontal sun fins
+    me = bpy.data.meshes.new('front'); vs = []; fs = []
+    for i in range(17):
+        t = i / 16; a = (t - 0.5) * 1.6
+        x = math.sin(a) * 4.6; y = -d / 2 - math.cos(a) * 1.4 + 0.4
+        vs += [(x, y, 0.4), (x, y, h - 0.4)]
+    for i in range(16):
+        fs.append([2 * i, 2 * i + 2, 2 * i + 3, 2 * i + 1])
+    me.from_pydata(vs, [], fs); o = bpy.data.objects.new('front', me); bpy.context.scene.collection.objects.link(o)
+    add(o, m['glass'], smooth=True)
+    for z in (1.6, 2.8, 4.0):
+        me = bpy.data.meshes.new('fin'); vs2 = []; fs2 = []
+        for i in range(17):
+            t = i / 16; a = (t - 0.5) * 1.6
+            vs2 += [(math.sin(a) * 4.6, -d / 2 - math.cos(a) * 1.4 + 0.4, z), (math.sin(a) * 5.0, -d / 2 - math.cos(a) * 1.8 + 0.4, z)]
+        for i in range(16):
+            fs2.append([2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2])
+        me.from_pydata(vs2, [], fs2); f = bpy.data.objects.new('fin', me); bpy.context.scene.collection.objects.link(f)
+        sm = f.modifiers.new('s', 'SOLIDIFY'); sm.thickness = 0.08
+        add(f, m['steel2'], smooth=True)
+    cube((w + 0.4, d + 0.4, 0.3), (0, 0.2, h + 0.15), m['steel2'])
+    cube((1.8, 0.08, 2.2), (0, -d / 2 - 1.05, 1.1), m['dark'])
+    cyl(0.4, 1.2, (3, 1.5, h + 0.9), m['steel2'], verts=12)
+    write('mission_control')
+
+def space_lab():
+    begin(); m = site_mats()
+    w, d, h = 9, 6, 4.4
+    cube((w, d, h), (0, 0, h / 2), mat('labwall', [0.86, 0.92, 0.97], rough=0.7), bevel=0.05, seg=1)
+    glass_band(m, w - 0.8, -d / 2 - 0.02, 0.8, 1.9, 9)
+    glass_band(m, w - 0.8, -d / 2 - 0.02, 2.5, 3.6, 9)
+    cube((w + 0.3, d + 0.3, 0.25), (0, 0, h + 0.12), m['steel2'])
+    sphere(1.6, (2, 1, h + 0.25), mat('domeglass', [0.55, 0.72, 0.85], rough=0.1, metal=0.3), seg=24, rings=12, half=True)
+    solar = mat('solar', [0.06, 0.12, 0.3], rough=0.25, metal=0.4)
+    for i in range(3):
+        p = cube((1.6, 1.0, 0.06), (-3 + i * 1.8, 0.8, h + 0.7), solar, smooth=False)
+        p.rotation_euler.x = 0.5
+        cyl(0.04, 0.5, (-3 + i * 1.8, 0.8, h + 0.4), m['steel'], verts=6)
+    cube((1.6, 0.08, 2.0), (-2.6, -d / 2 - 0.03, 1.0), m['glass'])
+    write('space_lab')
+
+def astro_center():
+    begin(); m = site_mats()
+    w, d, h = 8, 5, 4
+    cube((w, d, h), (0, 0, h / 2), m['white'], bevel=0.05, seg=1)
+    cube((w + 0.05, d + 0.05, 0.5), (0, 0, h - 0.6), m['blue'])
+    glass_band(m, w - 1, -d / 2 - 0.02, 0.9, 2.6, 7)
+    cube((w + 0.3, d + 0.3, 0.2), (0, 0, h + 0.1), m['steel2'])
+    cube((1.6, 0.08, 2.0), (0, -d / 2 - 0.03, 1.0), m['dark'])
+    # A mock capsule on a plinth by the door
+    cube((1.4, 1.4, 0.5), (3.3, -d / 2 - 1.2, 0.25), m['concrete'])
+    lathe([(0.75, 0.5), (0.75, 0.6), (0.3, 1.6), (0.25, 1.75)], m['white'], 20).location = (3.3, -d / 2 - 1.2, 0)
+    write('astro_center')
+
+def centrifuge_base():
+    begin(); m = site_mats()
+    lathe([(5.8, 0), (5.8, 0.25), (5.5, 0.3)], m['concrete2'], 40)
+    cyl(5.5, 0.02, (0, 0, 0.3), m['concrete'], verts=40)
+    lathe([(1.2, 0.3), (1.0, 1.6), (0.6, 2.0)], m['steel2'], 24)
+    for i in range(12):
+        a = 2 * math.pi * i / 12
+        cyl(0.04, 1.1, (math.cos(a) * 5.7, math.sin(a) * 5.7, 0.8), m['yellow'], verts=6)
+    write('centrifuge_base')
+
+def obs_base():
+    begin(); m = site_mats()
+    lathe([(3, 0), (3, 3.6)], m['white'], 32)
+    cyl(3.0, 0.02, (0, 0, 3.6), m['concrete'], verts=32)
+    lathe([(3.4, 2.4), (3.4, 2.55)], m['steel2'], 32)  # catwalk
+    for i in range(16):
+        a = 2 * math.pi * i / 16
+        cyl(0.03, 0.8, (math.cos(a) * 3.4, math.sin(a) * 3.4, 2.95), m['steel'], verts=4)
+    cube((1.2, 0.3, 2.1), (0, -3.0, 1.05), m['door'])
+    write('obs_base')
+
+def obs_dome():
+    begin(); m = site_mats()
+    sphere(3.1, (0, 0, 0), mat('domesilver', [0.82, 0.84, 0.86], rough=0.35, metal=0.5), seg=32, rings=16, half=True)
+    for i in range(8):  # panel ribs
+        a = math.pi * i / 8
+        bpy.ops.mesh.primitive_torus_add(major_radius=3.12, minor_radius=0.03, major_segments=24, minor_segments=3, location=(0, 0, 0), rotation=(math.pi / 2, 0, a))
+        add(bpy.context.object, m['steel2'], smooth=False)
+    cube((1.0, 3.3, 3.2), (0, -1.7, 1.4), m['dark'], smooth=False)  # the slit (opens to -Y)
+    tube = cyl(0.36, 3.4, (0, -1.6, 1.7), m['steel'], rot=(0.8, 0, 0), verts=14)
+    write('obs_dome')
+
+def vab():
+    begin(); m = site_mats()
+    w, d, h = 12, 11, 20
+    cube((w, d, h), (0, 0, h / 2), m['white'], bevel=0.06, seg=1)
+    for k in range(1, 10):  # panel lines
+        cube((w + 0.04, d + 0.04, 0.05), (0, 0, k * 2), m['steel2'], smooth=False)
+    # The tall door: stacked panels in a frame
+    cube((6.6, 0.3, 17.6), (0, -d / 2 - 0.1, 8.8), m['steel2'])
+    for k in range(7):
+        cube((6.0, 0.12, 2.3), (0, -d / 2 - 0.3, 1.3 + k * 2.4), m['door'], bevel=0.03, seg=1)
+    cube((0.5, d + 0.1, h + 0.05), (-w / 2 + 0.25, 0, h / 2), m['blue'], smooth=False)
+    # Low annex and roof plant
+    cube((4, 6, 5), (w / 2 + 2, 1.5, 2.5), m['white'], bevel=0.04, seg=1)
+    glass_band(m, 3.4, -1.5 - 0.02, 1.2, 2.4, 3, x=w / 2 + 2)
+    for x in (-3, 0, 3):
+        cube((1.6, 1.6, 0.9), (x, 2, h + 0.45), m['steel2'], bevel=0.04, seg=1)
+    write('vab')
+
+def launch_tower():
+    begin(); m = site_mats(); r = m['red']; s = m['steel']
+    H, a = 19, 0.8
+    corners = [(-a, -a), (a, -a), (a, a), (-a, a)]
+    for x, y in corners:
+        beam((x, y, 0), (x, y, H), 0.09, r)
+    for k in range(10):
+        z0, z1 = k * 1.9, (k + 1) * 1.9
+        for i in range(4):
+            p, q = corners[i], corners[(i + 1) % 4]
+            beam((p[0], p[1], z1), (q[0], q[1], z1), 0.05, r, verts=4)
+            beam((p[0], p[1], z0), (q[0], q[1], z1), 0.035, r, verts=4)
+    for z, L in ((13.4, 2.6), (9.0, 2.2), (4.0, 2.2)):  # swing arms towards the rocket (-X)
+        cube((L, 0.5, 0.35), (-a - L / 2, 0, z), s, smooth=False)
+        cube((0.4, 0.9, 0.9), (-a - L, 0, z), m['white'], smooth=False)
+    cyl(0.05, 5, (0, 0, H + 2.5), s, verts=6)
+    cube((2.0, 2.0, 0.2), (0, 0, H), s)
+    write('launch_tower')
+
+def launch_pad():
+    begin(); m = site_mats()
+    cube((13, 13, 0.6), (0, 0, 0.3), m['concrete2'], bevel=0.08, seg=1)
+    cube((3, 9, 0.62), (0, 0, 0.31), m['dark'])  # flame trench
+    for x in (-1.6, 1.6):
+        cube((0.2, 9, 0.9), (x, 0, 0.45), m['concrete'])
+    for i in range(4):  # water towers / lightning masts at the corners
+        x, y = (-5.8, -5.8, 5.8, 5.8)[i], (-5.8, 5.8, -5.8, 5.8)[i]
+        cyl(0.12, 6, (x, y, 3.6), m['steel2'], verts=8)
+    cyl(1.0, 2.5, (-5.2, 4.8, 1.85), m['white'], verts=16)
+    write('launch_pad')
+
+def rocket_s1():
+    begin(); m = site_mats()
+    lathe([(0.9, 0.3), (0.9, 9.1)], m['white'], 28)
+    lathe([(0.92, 8.8), (0.92, 9.4)], m['dark'], 28)
+    lathe([(0.92, 0.3), (0.92, 0.8)], m['dark'], 28)
+    cyl(0.9, 0.05, (0, 0, 0.3), m['dark'], verts=28)
+    for i in range(9):  # engine cluster
+        if i == 0:
+            x = y = 0
+        else:
+            a = 2 * math.pi * (i - 1) / 8; x, y = math.cos(a) * 0.55, math.sin(a) * 0.55
+        lathe([(0.2, -0.25), (0.12, 0.3)], m['steel'], 12).location = (x, y, 0)
+    for i in range(4):  # landing legs folded against the body, and grid fins at the top
+        a = math.pi / 4 + i * math.pi / 2
+        beam((math.cos(a) * 0.95, math.sin(a) * 0.95, 0.1), (math.cos(a) * 0.93, math.sin(a) * 0.93, 2.6), 0.12, m['dark'])
+        beam((math.cos(a) * 1.4, math.sin(a) * 1.4, -0.2), (math.cos(a) * 0.95, math.sin(a) * 0.95, 1.4), 0.07, m['dark'])
+        cube((0.5, 0.06, 0.5), (math.cos(a) * 1.1, math.sin(a) * 1.1, 8.5), m['steel'], smooth=False).rotation_euler.z = a + math.pi / 2
+    write('rocket_s1')
+
+def rocket_s2():
+    begin(); m = site_mats()
+    lathe([(0.9, 9.4), (0.9, 12.6)], m['white'], 28)
+    lathe([(0.93, 12.4), (0.93, 12.7)], m['blue'], 28)
+    lathe([(0.92, 12.7), (0.92, 13.6), (0.85, 14.2), (0.7, 14.8), (0.45, 15.3), (0.18, 15.6), (0.0, 15.7)], m['white'], 28)
+    cube((0.5, 0.05, 0.5), (0, -0.9, 13.6), m['dark'], smooth=False)
+    write('rocket_s2')
+
+def rocket_side():
+    begin(); m = site_mats()
+    lathe([(0.0, 0.3), (0.6, 0.3), (0.6, 7.6), (0.5, 8.3), (0.3, 8.8), (0.0, 9.0)], m['white'], 20)
+    lathe([(0.62, 7.0), (0.62, 7.3)], m['dark'], 20)
+    lathe([(0.32, -0.1), (0.22, 0.35)], m['steel'], 12)
+    write('rocket_side')
+
+def deep_dish():
+    begin(); m = site_mats()
+    pts = []
+    for i in range(10):
+        t = i / 9; r = 4.4 * t
+        pts.append((max(r, 0.01), 0.45 * (r / 4.4) ** 2 * 4.4))
+    dish = lathe(pts, m['white'], 36)
+    sm = dish.modifiers.new('s', 'SOLIDIFY'); sm.thickness = 0.08
+    for i in range(12):  # ribs on the back
+        a = 2 * math.pi * i / 12
+        beam((math.cos(a) * 0.5, math.sin(a) * 0.5, -0.05), (math.cos(a) * 4.3, math.sin(a) * 4.3, 1.9), 0.05, m['steel2'])
+    for i in range(3):  # feed tripod
+        a = 2 * math.pi * i / 3
+        beam((math.cos(a) * 3.6, math.sin(a) * 3.6, 1.4), (0, 0, 3.4), 0.05, m['steel2'])
+    cyl(0.25, 0.6, (0, 0, 3.5), m['steel'], verts=12)
+    write('dish_head')
+
+def dish_base():
+    begin(); m = site_mats()
+    lathe([(1.3, 0), (0.8, 3.0)], m['white'], 24)
+    cyl(1.8, 0.3, (0, 0, 0.15), m['concrete2'], verts=24)
+    cube((1.8, 1.2, 1.0), (0, 0, 3.3), m['steel2'], bevel=0.05, seg=1)
+    write('dish_base')
+
+nuke_reactor(); nuke_turbine(); cooling_tower(); fuel_plant(); nuke_control(); pylon(); silo_pad(); missile(); command_bunker()
+mission_control(); space_lab(); astro_center(); centrifuge_base(); obs_base(); obs_dome(); vab(); launch_tower(); launch_pad()
+rocket_s1(); rocket_s2(); rocket_side(); deep_dish(); dish_base()
