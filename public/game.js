@@ -6576,11 +6576,32 @@ homeBtn.addEventListener('click', () => {
 });
 const airBtn = document.getElementById('airbtn');
 const farBtns = { nuke: document.getElementById('nukebtn'), space: document.getElementById('spacebtn') };
-farBtns.nuke.addEventListener('click', () => farGo('nuke'));
-farBtns.space.addEventListener('click', () => farGo('space'));
+farBtns.nuke.addEventListener('click', () => (farOpen('nuke') ? farGo('nuke') : lockedZone('nuke')));
+farBtns.space.addEventListener('click', () => (farOpen('space') ? farGo('space') : lockedZone('space')));
+// A locked zone button explains what opens it and, when that's in the military base, takes you to the base gate
+function lockedZone(kind) {
+  const need = { air: 1, nuke: 6, space: 8 }[kind];
+  const name = { air: tx('✈️ สนามบิน', '✈️ Airport'), nuke: tx('☢️ ศูนย์นิวเคลียร์', '☢️ Nuclear site'), space: tx('🚀 ศูนย์อวกาศ', '🚀 Space centre') }[kind];
+  const u = BASE_UNLOCKS[need - 1];
+  if (!baseOpen()) {
+    const hint = state.step < CAMPUS_OPEN_STEP ? tx(`ขยายโรงพยาบาลสาขานี้ให้ถึงขั้นที่ ${CAMPUS_OPEN_STEP} (ลิฟต์)`, `grow this branch to stage ${CAMPUS_OPEN_STEP} (the elevator)`) : tx(`ขยายโรงพยาบาลให้ถึงขั้นที่ ${BASE_OPEN_STEP}`, `grow a hospital to stage ${BASE_OPEN_STEP}`);
+    toast(tx(`🔒 <b>${name}</b> ยังไม่เปิด<br><small>${hint} ค่ายทหารจะเปิด แล้วสร้าง ${u.icon} ${u.name} ในค่ายทหาร</small>`, `🔒 <b>${name}</b> is locked<br><small>${hint} to open the military base, then build ${u.icon} in the base</small>`), 5000);
+    return;
+  }
+  toast(tx(`🔒 <b>${name}</b> ยังไม่เปิด<br><small>สร้าง ${u.icon} ${u.name} ในค่ายทหารก่อน (ค่ายทหารตอนนี้ ${baseStep()}/${need} อาคาร)<br>พาไปหน้าค่ายทหารแล้ว ยืนบนป้ายเขียวเพื่อสร้าง 👉</small>`, `🔒 <b>${name}</b> is locked<br><small>Build ${u.icon} in the military base first (${baseStep()}/${need} buildings). Taking you to the base gate</small>`), 5500);
+  if (player.floor !== 0 || lift.riding || modeBusy()) return;
+  if (inside) inside = null;
+  player.group.position.copy(FAR_TOWN);
+  auto.task = null;
+  updateCamera(0, true);
+}
 const schedBtn = document.getElementById('schedbtn');
 schedBtn.addEventListener('click', openSchedule);
 airBtn.addEventListener('click', () => {
+  if (!airportOpen()) {
+    lockedZone('air');
+    return;
+  }
   if (player.floor !== 0 || lift.riding || BASE.flight) return;
   if (inside) inside = null;
   player.group.position.copy(AIR_STOP_IN).add(v(0, -1.4));
@@ -6605,23 +6626,27 @@ function updateHomeBtn() {
   hudState.t -= 1;
   if (hudState.t <= 0) {
     hudState.t = 30;
-    const open = running && airportOpen() && !there && player.floor === 0 && !BASE.flight && !lift.riding;
+    // The three far zones always have a button once the campus is open: a locked one says what it needs
+    const free = running && !there && player.floor === 0 && !BASE.flight && !lift.riding && !modeBusy();
+    const listed = free && topStep() >= CAMPUS_OPEN_STEP;
+    const open = free && airportOpen();
     const cash = open ? airportPiles().reduce((a, p) => a + p.amount, 0) : 0;
-    const txt = !open ? '' : `✈️ ${tx('สนามบิน', 'Airport')}${cash >= 100 ? ` 💵${fmt(cash)}` : ''}`;
+    const txt = !listed ? '' : open ? `✈️ ${tx('สนามบิน', 'Airport')}${cash >= 100 ? ` 💵${fmt(cash)}` : ''}` : `🔒 ✈️ ${tx('สนามบิน', 'Airport')}`;
     for (const k of FAR_KEYS) {
-      const ok = running && farOpen(k) && !far && player.floor === 0 && !BASE.flight && !lift.riding && !modeBusy();
       const fb = farBtns[k];
-      if ((fb.style.display === 'block') !== ok) {
-        fb.style.display = ok ? 'block' : 'none';
-        fb.textContent = k === 'nuke' ? tx('☢️ นิวเคลียร์', '☢️ Nuclear') : tx('🚀 อวกาศ', '🚀 Space');
-      }
+      const ok = listed && !FAR.going;
+      const label = (farOpen(k) ? '' : '🔒 ') + (k === 'nuke' ? tx('☢️ นิวเคลียร์', '☢️ Nuclear') : tx('🚀 อวกาศ', '🚀 Space'));
+      if ((fb.style.display === 'block') !== ok) fb.style.display = ok ? 'block' : 'none';
+      if (ok && fb.textContent !== label) fb.textContent = label;
+      fb.classList.toggle('locked', !farOpen(k));
       if (farOpen(k)) tip(`${k}Open`);
     }
     if (hudState.air !== txt) {
       hudState.air = txt;
-      airBtn.style.display = open ? 'block' : 'none';
+      airBtn.style.display = listed ? 'block' : 'none';
       airBtn.textContent = txt;
       airBtn.classList.toggle('ready', cash >= 2000 * priceMult());
+      airBtn.classList.toggle('locked', !open);
     }
   }
   if (hudState.atAirport !== there) {
