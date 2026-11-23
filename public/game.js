@@ -1530,7 +1530,18 @@ const PG = {
   torso: new THREE.CapsuleGeometry(0.25, 0.3, 4, 12), head: new THREE.SphereGeometry(0.25, 14, 10),
   hair: new THREE.SphereGeometry(0.265, 12, 8, 0, Math.PI * 2, 0, Math.PI / 1.9), eye: new THREE.SphereGeometry(0.03, 6, 5),
   bun: new THREE.SphereGeometry(0.12, 8, 6), bob: new THREE.SphereGeometry(0.27, 14, 10, 0, Math.PI * 2, Math.PI / 2.4, Math.PI / 2.6),
+  lock: new THREE.SphereGeometry(0.1, 8, 6).scale(1, 0.55, 0.7), spike: new THREE.ConeGeometry(0.075, 0.2, 6), tail: new THREE.CapsuleGeometry(0.07, 0.2, 3, 8),
 };
+// A dark rim drawn round the head and body (the back faces of a slightly bigger copy): reads like a cartoon outline
+const OUTLINE = new THREE.MeshBasicMaterial({ color: 0x2a1c14, side: THREE.BackSide });
+function outlined(m, k = 1.06) {
+  if (LITE) return m;
+  const o = new THREE.Mesh(m.geometry, OUTLINE);
+  o.scale.setScalar(k);
+  o.userData.outline = true;
+  m.add(o);
+  return m;
+}
 const part = (geo, color, x, y, z, shadow = true) => {
   const m = new THREE.Mesh(geo, mat(color));
   m.castShadow = shadow;
@@ -1540,8 +1551,9 @@ const part = (geo, color, x, y, z, shadow = true) => {
 // A face painted on the head: eyes with a highlight, brows, a small smile and a touch of blush.
 // One texture per skin tone, so it costs less than the two eye meshes it replaces.
 const faceCache = new Map();
-function faceMat(skin) {
-  if (faceCache.has(skin)) return faceCache.get(skin);
+function faceMat(skin, shut = false) {
+  const key = shut ? `${skin}|shut` : skin;
+  if (faceCache.has(key)) return faceCache.get(key);
   const base = new THREE.Color(skin);
   if (REAL) {
     const h = {};
@@ -1552,31 +1564,39 @@ function faceMat(skin) {
     g.fillStyle = `#${base.getHexString()}`;
     g.fillRect(0, 0, 256, 128);
     const cx = 64; // u = 0.25 is the front of a three.js sphere
-    const cy = 60;
+    const cy = 63;
+    g.lineCap = 'round';
     for (const sx of [-1, 1]) {
-      const ex = cx + sx * 14;
-      g.fillStyle = 'rgba(255,120,120,0.28)';
-      g.beginPath(); g.ellipse(cx + sx * 21, cy + 9, 7, 4.5, 0, 0, Math.PI * 2); g.fill();
-      g.fillStyle = '#ffffff';
-      g.beginPath(); g.ellipse(ex, cy, 5.2, 5.6, 0, 0, Math.PI * 2); g.fill();
-      g.fillStyle = '#2a1c14';
-      g.beginPath(); g.ellipse(ex + sx * 0.4, cy + 0.6, 3.4, 4.2, 0, 0, Math.PI * 2); g.fill();
-      g.fillStyle = '#ffffff';
-      g.beginPath(); g.arc(ex - 1.2, cy - 1.4, 1.2, 0, Math.PI * 2); g.fill();
+      // Big round cartoon eyes: white, a dark iris and two highlights (or a closed curve for a blink)
+      const ex = cx + sx * 14.5;
+      g.fillStyle = 'rgba(255,110,110,0.32)';
+      g.beginPath(); g.ellipse(cx + sx * 23, cy + 10, 7.5, 4.5, 0, 0, Math.PI * 2); g.fill();
+      if (shut) {
+        g.strokeStyle = '#2a1c14';
+        g.lineWidth = 2.6;
+        g.beginPath(); g.moveTo(ex - 6, cy + 1); g.quadraticCurveTo(ex, cy + 5, ex + 6, cy + 1); g.stroke();
+      } else {
+        g.fillStyle = '#ffffff';
+        g.beginPath(); g.ellipse(ex, cy, 6.6, 7.6, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#2a1c14';
+        g.beginPath(); g.ellipse(ex + sx * 0.5, cy + 1, 4.8, 6, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#ffffff';
+        g.beginPath(); g.arc(ex - 1.6, cy - 2.2, 1.8, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(ex + 1.6, cy + 3, 0.9, 0, Math.PI * 2); g.fill();
+      }
       g.strokeStyle = 'rgba(50,30,20,0.85)';
-      g.lineWidth = 2;
-      g.lineCap = 'round';
-      g.beginPath(); g.moveTo(ex - 5, cy - 9); g.quadraticCurveTo(ex, cy - 11.5, ex + 5, cy - 9); g.stroke();
+      g.lineWidth = 2.2;
+      g.beginPath(); g.moveTo(ex - 5.5, cy - 12); g.quadraticCurveTo(ex, cy - 14.5, ex + 5.5, cy - 12); g.stroke();
     }
     g.strokeStyle = 'rgba(120,40,40,0.9)';
-    g.lineWidth = 2.2;
-    g.beginPath(); g.moveTo(cx - 6, cy + 13); g.quadraticCurveTo(cx, cy + 18, cx + 6, cy + 13); g.stroke();
+    g.lineWidth = 2.4;
+    g.beginPath(); g.moveTo(cx - 6, cy + 14); g.quadraticCurveTo(cx, cy + 19.5, cx + 6, cy + 14); g.stroke();
     g.fillStyle = 'rgba(0,0,0,0.10)';
     g.beginPath(); g.ellipse(cx, cy + 6, 2, 1.4, 0, 0, Math.PI * 2); g.fill(); // nose shadow
   });
   const m = REAL ? new THREE.MeshStandardMaterial({ map: tex, roughness: 0.86, metalness: 0.02, envMapIntensity: 0.38 }) : new THREE.MeshLambertMaterial({ map: tex });
   if (REAL) realMats.push(m);
-  faceCache.set(skin, m);
+  faceCache.set(key, m);
   return m;
 }
 function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HAIR), coat = null, cap = null, apron = null }) {
@@ -1603,6 +1623,7 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
   }
   const torso = part(PG.torso, coat ?? shirt, 0, 0.95, 0);
   torso.scale.set(1, 1, 0.82);
+  outlined(torso, 1.05);
   body.add(torso);
   let front = null;
   if (coat) {
@@ -1620,19 +1641,36 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
   // a smaller head on the same body reads less like a toy
   const headG = new THREE.Group();
   headG.position.y = 1.3;
-  headG.scale.setScalar(0.85);
+  headG.scale.setScalar(0.96); // a slightly bigger head than before: friendlier, and the face reads from the game camera
   const hd = new THREE.Group();
   hd.position.y = -1.3;
   headG.add(hd);
   body.add(headG);
   const head = part(PG.head, skin, 0, 1.52, 0);
   head.material = faceMat(skin);
-  head.scale.set(0.96, 1.04, 0.98);
-  hd.add(head, part(PG.hair, hair, 0, 1.545, -0.025, false));
-  // A few hairstyles: short, a bob that covers the neck, or a bun
+  head.scale.set(1.0, 1.0, 0.98);
+  outlined(head, 1.07);
+  const cap0 = outlined(part(PG.hair, hair, 0, 1.545, -0.025, false), 1.05);
+  hd.add(head, cap0);
+  // Hairstyles: short with a side fringe, a bob over the neck, a bun, spikes or a ponytail
   const style = Math.random();
-  if (style < 0.3) hd.add(part(PG.bob, hair, 0, 1.52, -0.04, false));
-  else if (style < 0.45) hd.add(part(PG.bun, hair, 0, 1.76, -0.14, false));
+  if (style < 0.25) hd.add(part(PG.bob, hair, 0, 1.52, -0.04, false));
+  else if (style < 0.38) hd.add(part(PG.bun, hair, 0, 1.76, -0.14, false));
+  else if (style < 0.52) {
+    for (const [x, z, rx, rz] of [[0, 0.02, -0.5, 0], [0.11, -0.02, -0.4, -0.55], [-0.11, -0.02, -0.4, 0.55], [0.05, -0.13, 0.35, -0.3], [-0.06, -0.12, 0.35, 0.35]]) {
+      const sp = part(PG.spike, hair, x, 1.79, z, false);
+      sp.rotation.set(rx, 0, rz);
+      hd.add(sp);
+    }
+  } else if (style < 0.64) {
+    const t = part(PG.tail, hair, 0, 1.5, -0.27, false);
+    t.rotation.x = 0.35;
+    hd.add(t);
+  }
+  // A fringe sweeping over the forehead, so the hair isn't a plain cap
+  const fringe = part(PG.lock, hair, style < 0.5 ? 0.07 : -0.07, 1.715, 0.155, false);
+  fringe.rotation.set(-0.45, 0, style < 0.5 ? -0.35 : 0.35);
+  hd.add(fringe);
   if (cap) {
     const c = box(0.34, 0.12, 0.2, 0xffffff);
     c.position.set(0, 1.8, 0.04);
@@ -1640,7 +1678,7 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
     cross.position.set(0, 1.8, 0.15);
     hd.add(c, cross);
   }
-  return { group, body, legs, arms, head: hd, phase: Math.random() * 6, parts: { torso, front } };
+  return { group, body, legs, arms, head: hd, headG, face: head, skin, phase: Math.random() * 6, blink: rand(1, 4), lean: 0, turn: 0, yaw: null, parts: { torso, front } };
 }
 
 function animatePerson(p, moving, dt, carrying = false) {
@@ -1652,6 +1690,29 @@ function animatePerson(p, moving, dt, carrying = false) {
   p.arms[0].rotation.x = armBase - s * 0.7;
   p.arms[1].rotation.x = armBase + s * 0.7;
   p.body.position.y = moving ? Math.abs(Math.sin(p.phase)) * 0.06 : Math.sin(p.phase) * 0.01;
+  if (!p.headG) return;
+  const k = Math.min(1, dt * 8);
+  // Lean into the walk and rock a little from foot to foot; stand tall again when stopping
+  p.lean += ((moving ? (carrying ? 0.05 : 0.11) : 0) - p.lean) * k;
+  p.body.rotation.x = p.lean;
+  p.body.rotation.z = moving ? Math.sin(p.phase) * 0.045 : 0;
+  // Breathing while standing: the chest swells a touch
+  const breathe = moving ? 1 : 1 + Math.sin(p.phase * 1.3) * 0.018;
+  p.parts.torso.scale.y = breathe;
+  // The head leads a turn and bobs with each step
+  const yaw = p.group.rotation.y;
+  if (p.yaw === null) p.yaw = yaw;
+  const dYaw = Math.atan2(Math.sin(yaw - p.yaw), Math.cos(yaw - p.yaw));
+  p.yaw = yaw;
+  p.turn += (Math.max(-0.5, Math.min(0.5, (dYaw / Math.max(dt, 1e-3)) * 0.09)) - p.turn) * k;
+  p.headG.rotation.y = p.turn;
+  p.headG.rotation.x = -p.lean * 0.6 + (moving ? Math.sin(p.phase * 2) * 0.03 : Math.sin(p.phase * 0.7) * 0.03);
+  // Blink every few seconds
+  p.blink -= dt;
+  const shut = p.blink < 0.12;
+  if (p.blink <= 0) p.blink = rand(2.2, 5);
+  const fm = faceMat(p.skin, shut);
+  if (p.face.material !== fm) p.face.material = fm;
 }
 
 // Step toward a target on the floor; returns true on arrival
@@ -2532,6 +2593,7 @@ class Patient {
   sit(dt) {
     const p = this.person;
     p.body.position.y = -0.22;
+    p.body.rotation.set(0, 0, 0);
     p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
     p.arms[0].rotation.x = p.arms[1].rotation.x = -0.3;
     faceToward(p.group, 0, 1, dt);
@@ -3268,6 +3330,7 @@ function f2Pile(at) {
 
 function sitPose(p) {
   p.body.position.y = -0.22;
+  p.body.rotation.set(0, 0, 0);
   p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
   p.arms[0].rotation.x = p.arms[1].rotation.x = -0.3;
 }
@@ -4824,6 +4887,7 @@ function updateVisitors(dt) {
     if (vi.steps.length === 3 && flatDist(p.group.position, target) < 0.05 && vi.sit > 0) {
       vi.sit -= dt;
       p.body.position.y = -0.22;
+      p.body.rotation.set(0, 0, 0);
       p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
       faceToward(p.group, 0, -1, dt);
       continue;
