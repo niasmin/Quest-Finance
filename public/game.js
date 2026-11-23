@@ -1530,6 +1530,7 @@ const PG = {
   torso: new THREE.CapsuleGeometry(0.25, 0.3, 4, 12), head: new THREE.SphereGeometry(0.25, 14, 10),
   hair: new THREE.SphereGeometry(0.265, 12, 8, 0, Math.PI * 2, 0, Math.PI / 1.9), eye: new THREE.SphereGeometry(0.03, 6, 5),
   bun: new THREE.SphereGeometry(0.12, 8, 6), bob: new THREE.SphereGeometry(0.27, 14, 10, 0, Math.PI * 2, Math.PI / 2.4, Math.PI / 2.6),
+  belt: new THREE.CylinderGeometry(0.218, 0.214, 0.055, 14, 1, true),
   lock: new THREE.SphereGeometry(0.1, 8, 6).scale(1, 0.55, 0.7), spike: new THREE.ConeGeometry(0.075, 0.2, 6), tail: new THREE.CapsuleGeometry(0.07, 0.2, 3, 8),
 };
 // A dark rim drawn round the head and body (the back faces of a slightly bigger copy): reads like a cartoon outline
@@ -1625,6 +1626,15 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
   torso.scale.set(1, 1, 0.82);
   outlined(torso, 1.05);
   body.add(torso);
+  if (!coat) {
+    // A belt with a small gold buckle where the shirt meets the trousers
+    const belt = new THREE.Mesh(PG.belt, mat(0x3a2a20));
+    belt.position.set(0, 0.57, 0);
+    belt.scale.z = 0.84;
+    const buckle = box(0.07, 0.05, 0.02, 0xd8b04a, { shadow: false });
+    buckle.position.set(0, 0.57, 0.185);
+    body.add(belt, buckle);
+  }
   let front = null;
   if (coat) {
     // Shirt showing through an open coat
@@ -1641,7 +1651,7 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
   // a smaller head on the same body reads less like a toy
   const headG = new THREE.Group();
   headG.position.y = 1.3;
-  headG.scale.setScalar(0.96); // a slightly bigger head than before: friendlier, and the face reads from the game camera
+  headG.scale.setScalar(1.06); // a big, friendly cartoon head: the face reads from the game camera
   const hd = new THREE.Group();
   hd.position.y = -1.3;
   headG.add(hd);
