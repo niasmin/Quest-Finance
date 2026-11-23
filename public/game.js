@@ -1324,8 +1324,10 @@ function route(from, to) {
     return Math.abs(from.x - rx) > 0.6 ? v(rx, from.z) : v(rx, ROAD_Z - 1.2);
   }
   // Just out of the district on the front sidewalk: walk east along it past the district's corner
-  // first, or a straight line to the gate dips back into the district and turns around
-  if (from.x < FLOOR.x0 - 1.2 && from.z >= ROAD_Z - 1.8 && !inDistrict(to)) return v(FLOOR.x0 - 0.8, ROAD_Z - 1.2);
+  // first, or a straight line to the gate dips back into the district and turns around.
+  // A place south of the district's edge (the main road, the south road over the river) is a straight walk:
+  // going east first there sent walkers back and forth at the district gate for ever
+  if (from.x < FLOOR.x0 - 1.2 && from.z >= ROAD_Z - 1.8 && !inDistrict(to) && to.z < ROAD_Z - 1.8) return v(FLOOR.x0 - 0.8, ROAD_Z - 1.2);
   const outside = (p) => p.z > FLOOR.z1;
   // Going in or out: pass through the gate in two steps so nobody walks into the south wall
   if (outside(to) !== outside(from)) {
@@ -1335,6 +1337,13 @@ function route(from, to) {
     return inGate ? GATE_OUT : route(from, GATE);
   }
   if (outside(from)) {
+    // The south road over the river: along the main road to its junction, then down it (straight lines cut through the park fences)
+    const onSouth = (q) => Math.abs(q.x - DIST_ROAD_X) < 2 && q.z > ROAD_Z + 1.6;
+    if (onSouth(to) !== onSouth(from)) {
+      if (onSouth(from)) return Math.abs(from.x - DIST_ROAD_X) > 0.5 ? v(DIST_ROAD_X, from.z) : from.z > ROAD_Z + 0.4 ? v(DIST_ROAD_X, ROAD_Z) : to;
+      if (Math.abs(from.x - DIST_ROAD_X) > 0.5) return Math.abs(from.z - ROAD_Z) > 0.4 ? v(from.x, ROAD_Z) : v(DIST_ROAD_X, ROAD_Z);
+      return v(DIST_ROAD_X, to.z);
+    }
     // The kiosk's seller spot sits between the counter and the shelf: go in from the east end
     const inKiosk = (p) => Math.abs(p.x - KIOSK.x) < 1.5 && p.z > 20.9 && p.z < 21.9;
     if (OUT.kiosk && inKiosk(to) !== inKiosk(from) && flatDist(from, v(KIOSK.x + 1.9, 21.4)) > 0.4) return v(KIOSK.x + 1.9, 21.4);
