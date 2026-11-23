@@ -561,7 +561,7 @@ def person_parts():
     bpy.ops.mesh.primitive_uv_sphere_add(radius=1, segments=14, ring_count=9, location=(0, 0, 0))
     t = add(bpy.context.object, torso)
     # Half-width by height (sphere z from -1 to 1): hips, waist, chest, broad shoulders, then the neck
-    prof = [(-1.0, 0.2), (-0.7, 0.245), (-0.25, 0.225), (0.3, 0.26), (0.68, 0.29), (0.9, 0.2), (1.0, 0.1)]
+    prof = [(-1.0, 0.205), (-0.72, 0.24), (-0.2, 0.2), (0.3, 0.255), (0.66, 0.3), (0.88, 0.235), (1.0, 0.1)]
     def width(z):
         for (z0, w0), (z1, w1) in zip(prof, prof[1:]):
             if z <= z1:
@@ -576,6 +576,11 @@ def person_parts():
         v.co.z = z * 0.42
     t.location = (0, 0, 0)
     cyl(0.1, 0.08, (0, 0, 0.4), torso, verts=10)  # collar
+    # A button placket down the chest and a hem round the bottom (the game tints it all)
+    cube((0.035, 0.03, 0.34), (0, -0.205, 0.12), torso, bevel=0.008, seg=1)
+    bpy.ops.mesh.primitive_torus_add(major_radius=0.205, minor_radius=0.018, major_segments=16, minor_segments=4, location=(0, 0, -0.37))
+    hem = add(bpy.context.object, torso)
+    hem.scale = (1, 0.8, 1)
     write('pp_torso')
     begin()
     leg = mat('leg', [0.3, 0.3, 0.3], rough=0.8)
