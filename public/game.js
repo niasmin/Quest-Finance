@@ -6595,6 +6595,13 @@ function lockedZone(kind) {
   auto.task = null;
   updateCamera(0, true);
 }
+const exBtn = document.getElementById('exbtn');
+exBtn.addEventListener('click', () => {
+  if (player.floor !== 0 || lift.riding || awayZone()) return;
+  if (inside) inside = null;
+  exBtn.style.display = 'none';
+  startExercise();
+});
 const schedBtn = document.getElementById('schedbtn');
 schedBtn.addEventListener('click', openSchedule);
 airBtn.addEventListener('click', () => {
@@ -6642,6 +6649,9 @@ function updateHomeBtn() {
       fb.classList.toggle('locked', !farOpen(k));
       if (farOpen(k)) tip(`${k}Open`);
     }
+    // The big exercise, ready to watch (with its reward): a button for it, whether or not AUTO would start it
+    const exOk = free && baseHas('barracks') && (B().units.inf || 0) > 0 && exReady() && !BASE.mission?.deploy && !coverOpen();
+    if ((exBtn.style.display === 'block') !== exOk) exBtn.style.display = exOk ? 'block' : 'none';
     if (hudState.air !== txt) {
       hudState.air = txt;
       airBtn.style.display = listed ? 'block' : 'none';
@@ -10876,6 +10886,13 @@ function updateTeaser(dt) {
 const cineEl = document.getElementById('cine');
 const EX_COOLDOWN_MS = 5 * 60 * 1000;
 const exReady = () => Date.now() >= (B().exAt || 0);
+// Whether AUTO starts the big exercise by itself (a menu switch); with it off, the 🎖️ button starts it
+let autoEx = true;
+try {
+  autoEx = localStorage.getItem('drquest-autoex') !== 'off';
+} catch {
+  // Storage blocked: keep the default
+}
 // Everything the player earns a second, everywhere (hospital, other branches, the empire): rewards in the base are
 // worth a few minutes of it, so they still matter late in the game when power-based sums are pocket change
 function totalRate() {
@@ -11077,7 +11094,7 @@ function updateExercise(dt) {
     BASE.exCheck = (BASE.exCheck || 0) - dt;
     if (BASE.exCheck > 0) return;
     BASE.exCheck = 5;
-    if (running && auto.on && autoBadge.classList.contains('show') && !awayZone() && exReady() && baseHas('barracks') && (B().units.inf || 0) > 0 && !BASE.mission?.deploy && !BASE.defense && !BASE.flight && !mapView.active && !document.hidden && player.floor === 0 && !lift.riding && !coverOpen()) {
+    if (running && autoEx && auto.on && autoBadge.classList.contains('show') && !awayZone() && exReady() && baseHas('barracks') && (B().units.inf || 0) > 0 && !BASE.mission?.deploy && !BASE.defense && !BASE.flight && !mapView.active && !document.hidden && player.floor === 0 && !lift.riding && !coverOpen()) {
       startExercise();
       toast('🤖 AUTO เปิดการซ้อมรบใหญ่ให้แล้ว (กด ข้าม ได้)', 3000);
     }
@@ -17974,6 +17991,19 @@ document.getElementById('menushare').addEventListener('click', () => {
   menu.style.display = 'none';
   running = true;
   shareHospital();
+});
+const autoExBtn = document.getElementById('autoexbtn');
+const autoExLabel = () => tx(`🎖️ AUTO เปิดซ้อมรบใหญ่ให้เอง: ${autoEx ? 'เปิด' : 'ปิด'}`, `🎖️ AUTO starts the big exercise: ${autoEx ? 'on' : 'off'}`);
+autoExBtn.textContent = autoExLabel();
+autoExBtn.addEventListener('click', () => {
+  autoEx = !autoEx;
+  try {
+    localStorage.setItem('drquest-autoex', autoEx ? 'on' : 'off');
+  } catch {
+    // ignore
+  }
+  autoExBtn.textContent = autoExLabel();
+  toast(autoEx ? tx('🎖️ AUTO จะเปิดซ้อมรบใหญ่ให้เองเมื่อพร้อม', '🎖️ AUTO will start the big exercise when ready') : tx('🎖️ ปิดแล้ว · กดปุ่ม 🎖️ ซ้อมรบใหญ่ มุมขวาบนเมื่ออยากดู', '🎖️ Off · tap 🎖️ Exercise at the top right when you want it'), 3500);
 });
 const dnBtn = document.getElementById('daynightbtn');
 dnBtn.textContent = `🌗 กลางวัน-กลางคืนตามเวลาจริง: ${dayNightOn ? 'เปิด' : 'ปิด'}`;
