@@ -4021,7 +4021,7 @@ function defeatBoss(b) {
 function updateBoss(dt) {
   const b = ev.boss;
   if (!b) {
-    if (state.step >= 5 && tutorialDone()) {
+    if (state.step >= 5 && tutorialDone() && !awayZone()) {
       ev.bossTimer -= dt;
       if (ev.bossTimer <= 0) spawnBoss();
     }
@@ -6606,6 +6606,7 @@ airBtn.addEventListener('click', () => {
   if (inside) inside = null;
   player.group.position.copy(AIR_STOP_IN).add(v(0, -1.4));
   AIR.armed = false;
+  AIR.stay = true;
   auto.task = null;
   tip('airport');
   updateCamera(0, true);
@@ -11076,7 +11077,7 @@ function updateExercise(dt) {
     BASE.exCheck = (BASE.exCheck || 0) - dt;
     if (BASE.exCheck > 0) return;
     BASE.exCheck = 5;
-    if (running && auto.on && autoBadge.classList.contains('show') && exReady() && baseHas('barracks') && (B().units.inf || 0) > 0 && !BASE.mission?.deploy && !BASE.defense && !BASE.flight && !mapView.active && !document.hidden && player.floor === 0 && !lift.riding && !coverOpen()) {
+    if (running && auto.on && autoBadge.classList.contains('show') && !awayZone() && exReady() && baseHas('barracks') && (B().units.inf || 0) > 0 && !BASE.mission?.deploy && !BASE.defense && !BASE.flight && !mapView.active && !document.hidden && player.floor === 0 && !lift.riding && !coverOpen()) {
       startExercise();
       toast('🤖 AUTO เปิดการซ้อมรบใหญ่ให้แล้ว (กด ข้าม ได้)', 3000);
     }
@@ -11244,6 +11245,8 @@ document.getElementById('cineskip').addEventListener('click', () => {
   else if (BASE.rescue) endRescue('quit');
   else if (FAR.mode) endFarMode('quit');
 });
+// Off in the airport, the nuclear site or the space centre: town and base events wait, so nothing pulls you out
+const awayZone = () => Boolean(farAt(player.group.position) || inAirport(player.group.position));
 const modeBusy = () => Boolean(BASE.ex || BASE.coast || BASE.rescue || BASE.defense || BASE.flight || BASE.mission?.deploy || FAR.mode);
 function openCine(cap, sub, steer = false) {
   milEl.style.display = 'none';
@@ -11980,6 +11983,7 @@ function updateFarZone(k, dt) {
     R.opened = true;
     startFarMode(k, at.mode);
   }
+  farAutoShow(k, dt, onFloor);
   updateFarExit(k, dt);
   farLife(k, dt);
   updateFarBars(k);
@@ -12166,12 +12170,37 @@ function farTask(k) {
   }
   return null;
 }
+// Nothing to buy: AUTO stays in the zone and makes the rounds of its buildings, the way it does in the base
+function farIdle(k) {
+  const R = FAR[k];
+  const list = Object.values(R.stations).filter((S) => S.at);
+  if (!list.length) return { at: v(FAR_DEFS[k].stop.x, FAR_DEFS[k].stop.z - 3.6), keep: () => false };
+  R.idleI = ((R.idleI ?? -1) + 1) % list.length;
+  const S = list[R.idleI];
+  const until = performance.now() + 9000;
+  return { at: S.at, keep: () => performance.now() < until };
+}
+// With AUTO playing, each show starts by itself as soon as its reward is ready (like the base's big exercise)
+function farAutoShow(k, dt, onFloor) {
+  const R = FAR[k];
+  R.autoCheck = (R.autoCheck || 0) - dt;
+  if (R.autoCheck > 0) return;
+  R.autoCheck = 4;
+  if (!running || !autoBadge.classList.contains('show') || !onFloor || farAt(player.group.position) !== k || modeBusy() || document.hidden || coverOpen()) return;
+  for (const r of Object.values(R.rings)) {
+    if (farCooling(k, r.mode)) continue;
+    if (r.mode === 'missile' && !(FS(k).units.icbm > 0)) continue;
+    startFarMode(k, r.mode, true);
+    if (FAR.mode) toast('🤖 AUTO เปิดโชว์ให้แล้ว และเล่นให้ด้วย (กด ข้าม ได้)', 3000);
+    return;
+  }
+}
 
 // ---------- far-zone modes ----------
 function farCooling(k, mode) {
   return Date.now() < (FS(k).cd[mode] || 0);
 }
-function startFarMode(k, kind) {
+function startFarMode(k, kind, byAuto = false) {
   if (modeBusy()) return;
   if (kind === 'missile' && !(FS(k).units.icbm > 0)) {
     toast('🚀 ยังไม่มีขีปนาวุธ · ยืนวงเขียวที่ไซโลเพื่อผลิตก่อน', 3000);
@@ -12179,7 +12208,7 @@ function startFarMode(k, kind) {
   }
   const paid = !farCooling(k, kind);
   if (paid) FS(k).cd[kind] = Date.now() + FAR_CD_MS;
-  const X = { k, kind, t: 0, paid, fov: camera.fov, cam: v(0, 0), look: v(0, 0), snap: true, score: 0, taps: 0, stage: 0 };
+  const X = { k, kind, auto: byAuto, t: 0, paid, fov: camera.fov, cam: v(0, 0), look: v(0, 0), snap: true, score: 0, taps: 0, stage: 0 };
   FAR.mode = X;
   player.group.visible = false;
   scene.fog.near = 120;
@@ -12225,8 +12254,10 @@ function farGauge(on) {
   return el;
 }
 window.addEventListener('pointerdown', (e) => {
-  const X = FAR.mode;
-  if (!X || e.target?.closest?.('button')) return;
+  if (!FAR.mode || e.target?.closest?.('button')) return;
+  farTap(FAR.mode);
+}, true);
+function farTap(X) {
   X.taps++;
   if (X.kind === 'reactor') {
     X.heat = Math.max(0, X.heat - 6);
@@ -12247,7 +12278,34 @@ window.addEventListener('pointerdown', (e) => {
       noise(0.25, 0.05, { f0: 500, f1: 200 });
     }
   }
-}, true);
+}
+// When AUTO started the show, it plays it too: keeps the reactor in the green, taps in each window, lands the booster
+function farAutoPlay(X, dt) {
+  X.autoT = (X.autoT || 0) - dt;
+  if (X.autoT > 0) return;
+  if (X.kind === 'reactor') {
+    if (X.heat > 58) {
+      farTap(X);
+      X.autoT = 0.16;
+    }
+  } else if ((X.kind === 'missile' || X.kind === 'launch') && X.window && !X.tapped) {
+    X.autoT = 0.25;
+    if (X.waitT === undefined) X.waitT = rand(0.15, 0.5);
+    X.waitT -= dt + 0.25;
+    if (X.waitT <= 0) farTap(X);
+  } else if (X.kind === 'launch' && X.landing && !X.landed && X.boost) {
+    // A late burn: wait till just enough taps fit before touchdown, then fire them (late burns save fuel)
+    const g = 9.8 * 0.8;
+    const h = Math.max(0, X.boost.position.y - 0.15);
+    const hit = Math.sqrt(X.vy * X.vy + 2 * g * h);
+    const tHit = (X.vy + hit) / g;
+    const need = Math.ceil((hit - 4) / 5.5);
+    if (X.vy < -5 && need > 0 && X.fuel > 0 && tHit < need * 0.1 + 0.25) {
+      farTap(X);
+      X.autoT = 0.08;
+    }
+  }
+}
 const farCap = (a, b) => {
   document.getElementById('cinecap').textContent = a;
   document.getElementById('cinesub').textContent = b;
@@ -12256,6 +12314,7 @@ function updateFarMode(dt) {
   const X = FAR.mode;
   if (!X) return;
   X.t += dt;
+  if (X.auto) farAutoPlay(X, dt);
   if (X.kind === 'reactor') reactorTick(X, dt);
   else if (X.kind === 'missile') missileTick(X, dt);
   else launchTick(X, dt);
@@ -12968,7 +13027,7 @@ function startDefense() {
 }
 function updateDefense(dt) {
   if (!BASE.defense) {
-    if (baseHas('barracks') && tutorialDone()) {
+    if (baseHas('barracks') && tutorialDone() && !awayZone()) {
       BASE.raidTimer -= dt;
       if (BASE.raidTimer <= 0) {
         BASE.raidTimer = rand(420, 600);
@@ -15465,6 +15524,16 @@ function airportTask() {
   return null;
 }
 
+// Sent to the airport with its button: AUTO stays and walks between the counters until you take the shuttle home
+function airportIdle() {
+  const list = Object.values(AIR.counters).filter((st) => st.ring);
+  if (!list.length) return { at: AIR_STOP_IN.clone().add(v(0, -2.5)), keep: () => false };
+  AIR.idleI = ((AIR.idleI ?? -1) + 1) % list.length;
+  const st = list[AIR.idleI];
+  const until = performance.now() + 9000;
+  return { at: st.ring, keep: () => performance.now() < until };
+}
+
 // ---------- world look, part 2: roads, river and sky ----------
 // --- roads ---
 const flatPlane = (w, d, color, x, y, z) => {
@@ -15944,14 +16013,15 @@ try {
 const AUTO_DELAY = 2; // seconds without input before the autopilot takes over
 
 function autoTasks() {
-  // A giant germ beats everything else: go and zap it
-  if (ev.boss) {
+  // A giant germ beats everything else: go and zap it (not from the airport or a far zone: those wait till you're back)
+  const away = awayZone();
+  if (ev.boss && !away) {
     if (player.floor !== 0) return [{ at: ELEVATOR, ride: 0, keep: () => player.floor !== 0 }];
     const b = ev.boss;
     return [{ at: bossStand(b), keep: () => ev.boss === b }];
   }
   // A drone raid on the military base: go and defend it
-  if (BASE.defense && BASE.drones.length) {
+  if (BASE.defense && BASE.drones.length && !away) {
     if (player.floor !== 0) return [{ at: ELEVATOR, ride: 0, keep: () => player.floor !== 0 }];
     const bt = baseTask();
     if (bt) return [bt];
@@ -15959,8 +16029,10 @@ function autoTasks() {
   const fz = farAt(player.group.position);
   if (fz) {
     // At the nuclear site or space centre: build, hire and train there, then take the bus back
-    return [farTask(fz) || { at: FAR_TOWN, keep: () => true }];
+    return [farTask(fz) || farIdle(fz)];
   }
+  // Sent to the airport with its button: stay there (a city epidemic can wait for the shuttle back)
+  if (AIR.stay && inAirport(player.group.position)) return [airportTask() || airportIdle()];
   // A city epidemic comes next: go vaccinate the sick buildings
   const sick = epiTargets();
   if (sick.length) {
@@ -15971,8 +16043,9 @@ function autoTasks() {
   if (inAirport(player.group.position)) {
     // At the airport: finish the work there, then take the shuttle back
     const at = airportTask();
-    return [at || { at: AIR_STOP, keep: () => true }];
+    return [at || (AIR.stay ? airportIdle() : { at: AIR_STOP, keep: () => true })];
   }
+  AIR.stay = false;
   if (player.floor === 1) return floor2Tasks();
   if (player.floor === 2) return roofTasks();
   if (player.floor >= 3) return upperTasks(player.floor);
@@ -17960,4 +18033,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { FAR, FS, farTask, autoTasks: () => autoTasks(), farGo, farLeave, startFarMode, endFarMode, buildFar, farRate, farHas, THREE, startCoast, startRescue, endCoast, endRescue, totalRate, minutesOfIncome, teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { FAR, FS, farTask, farIdle, modeBusy: () => modeBusy(), coverOpen: () => coverOpen(), autoTasks: () => autoTasks(), farGo, farLeave, startFarMode, endFarMode, buildFar, farRate, farHas, THREE, startCoast, startRescue, endCoast, endRescue, totalRate, minutesOfIncome, teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
