@@ -6678,6 +6678,40 @@ function lockedZone(kind) {
   auto.task = null;
   updateCamera(0, true);
 }
+// Healthcare Empire: the separate care-centre management game, opened inside Dr. Quest (the game pauses meanwhile)
+const CARE_URL = 'https://niasmin.github.io/Healthcare-Simulator-Starter/';
+const careBtn = document.getElementById('carebtn');
+const careView = document.getElementById('careview');
+const careFrame = document.getElementById('careframe');
+let careWasRunning = false;
+function openCare() {
+  if (careView.style.display === 'flex') return;
+  menu.style.display = 'none';
+  careWasRunning = running || menu.dataset.was === '1';
+  delete menu.dataset.was;
+  running = false;
+  if (master) master.gain.value = 0;
+  if (!careFrame.src) {
+    careFrame.addEventListener('load', () => { document.getElementById('careload').style.display = 'none'; }, { once: true });
+    careFrame.src = CARE_URL;
+  }
+  careView.style.display = 'flex';
+  logProgress('care_open');
+}
+function closeCare() {
+  careView.style.display = 'none';
+  if (master) master.gain.value = soundOn ? 1 : 0;
+  running = careWasRunning || running;
+  last = performance.now();
+  save();
+}
+careBtn.addEventListener('click', openCare);
+document.getElementById('menucare').addEventListener('click', () => {
+  menu.dataset.was = '1';
+  openCare();
+});
+document.getElementById('careback').addEventListener('click', closeCare);
+document.getElementById('caretab').addEventListener('click', () => window.open(CARE_URL, '_blank', 'noopener'));
 const exBtn = document.getElementById('exbtn');
 exBtn.addEventListener('click', () => {
   if (player.floor !== 0 || lift.riding || awayZone()) return;
@@ -6733,6 +6767,7 @@ function updateHomeBtn() {
       if (farOpen(k)) tip(`${k}Open`);
     }
     // The big exercise, ready to watch (with its reward): a button for it, whether or not AUTO would start it
+    if ((careBtn.style.display === 'block') !== listed) careBtn.style.display = listed ? 'block' : 'none';
     const exOk = free && baseHas('barracks') && (B().units.inf || 0) > 0 && exReady() && !BASE.mission?.deploy && !coverOpen();
     if ((exBtn.style.display === 'block') !== exOk) exBtn.style.display = exOk ? 'block' : 'none';
     if (hudState.air !== txt) {
