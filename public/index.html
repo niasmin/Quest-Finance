@@ -392,6 +392,15 @@
   .newsrow span { font-size: 26px; line-height: 1.1; }
   .newsrow small { color: #5a6274; }
   #airbtn { background: linear-gradient(#42a5f5, #1e88e5); }
+  #carebtn { background: linear-gradient(#26c6da, #00838f); }
+  #careview { position: fixed; inset: 0; z-index: 60; display: none; flex-direction: column; background: #0f2f3a; }
+  #careview .bar { display: flex; align-items: center; gap: 8px; padding: calc(6px + env(safe-area-inset-top)) 10px 6px; background: linear-gradient(#00838f, #006064); color: #fff; font-family: Mitr, sans-serif; }
+  #careview .bar b { flex: 1; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #careview .bar button { font-family: Mitr, sans-serif; font-weight: 600; border: 0; border-radius: 12px; padding: 7px 12px; font-size: 14px; cursor: pointer; }
+  #careview .bar .back { background: #ffd54f; color: #3a2400; }
+  #careview .bar .tab { background: rgba(255,255,255,.2); color: #fff; }
+  #careview iframe { flex: 1; width: 100%; border: 0; background: #0f2f3a; }
+  #careview .load { position: absolute; left: 0; right: 0; top: 45%; text-align: center; color: #cfeff3; font-family: Mitr, sans-serif; pointer-events: none; }
   #exbtn { background: linear-gradient(#8d9e4a, #556b2f); }
   #nukebtn { background: linear-gradient(#66bb6a, #2e7d32); }
   #spacebtn { background: linear-gradient(#5c6bc0, #283593); }
@@ -447,6 +456,7 @@
     <button id="airbtn" class="evbtn" style="display:none">✈️ สนามบิน</button>
     <button id="nukebtn" class="evbtn" style="display:none">☢️ นิวเคลียร์</button>
     <button id="spacebtn" class="evbtn" style="display:none">🚀 อวกาศ</button>
+    <button id="carebtn" class="evbtn" style="display:none">🏡 ศูนย์ดูแล</button>
     <button id="exbtn" class="evbtn" style="display:none">🎖️ ซ้อมรบใหญ่</button>
     <button id="schedbtn" class="evbtn" style="display:none">🗓️ ตารางบิน</button>
     <button id="rushbtn" class="evbtn"><span class="ei">🚨</span><span class="el">เร่งด่วน</span></button>
@@ -499,10 +509,16 @@
   <p class="foot">เล่นฟรีบนเว็บและมือถือ · เซฟบนคลาวด์อัตโนมัติ</p>
 </div>
 
+<div id="careview">
+  <div class="bar"><button class="back" id="careback">← Dr. Quest</button><b>🏡 Healthcare Empire · ศูนย์ดูแลผู้สูงอายุ</b><button class="tab" id="caretab">↗ แท็บใหม่</button></div>
+  <div class="load" id="careload">กำลังเปิด Healthcare Empire…</div>
+  <iframe id="careframe" title="Healthcare Empire" allow="fullscreen; clipboard-write" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+</div>
 <div id="menu">
   <div class="box">
     <h3>⚙️ เมนู</h3>
     <button id="resume" class="btn ghost">เล่นต่อ</button>
+    <button id="menucare" class="btn">🏡 Healthcare Empire · เกมบริหารศูนย์ดูแล</button>
     <button id="soundbtn" class="btn ghost">🔊 เสียง: เปิด</button>
     <button id="litebtn" class="btn ghost">⚡ โหมดประหยัด: ปิด</button>
     <button id="hqbtn" class="btn ghost">✨ ภาพคุณภาพสูง: ปิด</button>
