@@ -17592,20 +17592,112 @@ function hqSetup(w, h) {
     });
   }
 }
+// ---------- storybook mode: flat colours, ink outlines and paper grain, in one full-screen pass ----------
+// Like a hand-drawn print: shading is flattened to a few bands, every silhouette and colour edge gets a dark
+// ink line (from the depth and the picture itself), and a faint paper grain sits over it all. Optional: it costs a pass.
+let inkOn = false;
+try {
+  inkOn = location.search.includes('ink=1') || localStorage.getItem('drquest-ink') === 'on';
+} catch {
+  inkOn = false;
+}
+function inkMat() {
+  if (HQ.mats.ink) return HQ.mats.ink;
+  HQ.mats.ink = new THREE.ShaderMaterial({
+    uniforms: { tColor: { value: null }, tDepth: { value: null }, res: { value: new THREE.Vector2() }, near: { value: 0.1 }, far: { value: 200 } },
+    vertexShader: fullVert, depthTest: false, depthWrite: false, toneMapped: true,
+    fragmentShader: `#include <packing>
+      #include <tonemapping_pars_fragment>
+      uniform sampler2D tColor; uniform sampler2D tDepth; uniform vec2 res; uniform float near; uniform float far; varying vec2 vUv;
+      float lin(vec2 uv){ return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, near, far); }
+      vec3 tone(vec3 c){ c = ACESFilmicToneMapping(c); return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }
+      vec3 hsv(vec3 c){ vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0); vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+        vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r)); float d = q.x - min(q.w, q.y);
+        return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x); }
+      vec3 rgb(vec3 c){ vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0); return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y); }
+      float luma(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main(){
+        vec2 px = 1.0 / res;
+        float w = max(1.0, res.y / 520.0);
+        vec3 c = tone(texture2D(tColor, vUv).rgb * 1.08);
+        // Flat colour: brightness in a few bands, a little more saturation, like printed inks
+        vec3 h = hsv(c);
+        float v = h.z;
+        float band = floor(v * 4.0) / 4.0;
+        float vq = mix(band, band + 0.25, smoothstep(0.42, 0.58, fract(v * 4.0)));
+        h.z = mix(v, clamp(vq + 0.06, 0.0, 1.0), 0.75);
+        h.y = clamp(h.y * 1.28 + 0.03, 0.0, 1.0);
+        vec3 flt = rgb(h);
+        // Ink: depth jumps (silhouettes) and colour jumps (painted edges) from a small cross of samples
+        float raw = texture2D(tDepth, vUv).x;
+        float d = lin(vUv);
+        float de = 0.0;
+        float ce = 0.0;
+        float l0 = luma(c);
+        vec2 o[4];
+        o[0] = vec2(w, 0.0); o[1] = vec2(-w, 0.0); o[2] = vec2(0.0, w); o[3] = vec2(0.0, -w);
+        for (int i = 0; i < 4; i++) {
+          vec2 uv = vUv + o[i] * px;
+          float dn = lin(uv);
+          de = max(de, abs(dn - d) / max(d, 0.5));
+          // colour edges from a 1-pixel step only: fine lines, so lettering on the signs stays readable
+          ce = max(ce, abs(luma(tone(texture2D(tColor, vUv + o[i] * px / w).rgb)) - l0));
+        }
+        float far1 = smoothstep(120.0, 60.0, d);
+        float ink = max(smoothstep(0.025, 0.07, de), smoothstep(0.12, 0.3, ce) * 0.45) * far1;
+        vec3 col = mix(flt, vec3(0.1, 0.09, 0.16), ink * 0.95);
+        // The sky is bare paper, as in a print
+        vec3 paper = vec3(0.97, 0.94, 0.86);
+        if (raw > 0.9999) col = mix(paper, vec3(0.78, 0.88, 0.95), smoothstep(0.35, 1.0, vUv.y) * 0.6);
+        // Paper: a faint cream in the whites, fibres of grain and a soft vignette
+        float g = hash(floor(vUv * res / 1.5)) - 0.5;
+        col = mix(col, paper, 0.12 * smoothstep(0.75, 1.0, luma(col))) + g * 0.035;
+        vec2 q = vUv - 0.5;
+        col *= 1.0 - dot(q, q) * 0.28;
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  });
+  HQ.mats.ink.toneMapped = false;
+  return HQ.mats.ink;
+}
 function hqPass(mat, target) {
   HQ.quad.material = mat;
   renderer.setRenderTarget(target);
   renderer.render(HQ.scene, HQ.cam);
 }
 function renderFrame() {
-  if (!hqOn) {
+  if (!hqOn && !inkOn) {
     renderer.render(scene, camera);
     return;
   }
   renderer.getDrawingBufferSize(HQ.size);
   if (!HQ.rt || HQ.rt.width !== HQ.size.x || HQ.rt.height !== HQ.size.y) hqSetup(HQ.size.x, HQ.size.y);
   renderer.setRenderTarget(HQ.rt);
+  // A print has no haze: push the fog far away for this draw
+  const fog = inkOn && scene.fog;
+  const fn = fog ? fog.near : 0;
+  const ff = fog ? fog.far : 0;
+  if (fog) {
+    fog.near = Math.max(fn, 160);
+    fog.far = Math.max(ff, 420);
+  }
   renderer.render(scene, camera);
+  if (fog) {
+    fog.near = fn;
+    fog.far = ff;
+  }
+  if (inkOn) {
+    // (the scene was drawn without its haze: see below)
+    const m = inkMat();
+    m.uniforms.tColor.value = HQ.rt.texture;
+    m.uniforms.tDepth.value = HQ.rt.depthTexture;
+    m.uniforms.res.value.copy(HQ.size);
+    m.uniforms.near.value = camera.near;
+    m.uniforms.far.value = camera.far;
+    hqPass(m, null);
+    return;
+  }
   const [a, b] = HQ.small;
   HQ.mats.bright.uniforms.tColor.value = HQ.rt.texture;
   hqPass(HQ.mats.bright, a);
@@ -17624,6 +17716,20 @@ function renderFrame() {
   f.far.value = camera.far;
   hqPass(HQ.mats.final, null);
 }
+const inkBtn = document.getElementById('inkbtn');
+const inkLabel = () => {
+  inkBtn.textContent = `🎨 ${tx('ภาพแบบภาพวาด (ทดลอง)', 'Storybook look (beta)')}: ${inkOn ? tx('เปิด', 'on') : tx('ปิด', 'off')}`;
+};
+inkLabel();
+inkBtn.addEventListener('click', () => {
+  inkOn = !inkOn;
+  try {
+    localStorage.setItem('drquest-ink', inkOn ? 'on' : 'off');
+  } catch {
+    // just this session
+  }
+  inkLabel();
+});
 const hqBtn = document.getElementById('hqbtn');
 const hqLabel = () => {
   hqBtn.textContent = `✨ ${tx('ภาพคุณภาพสูง', 'High-quality graphics')}: ${hqOn ? tx('เปิด', 'on') : tx('ปิด', 'off')}`;
@@ -18181,4 +18287,4 @@ document.getElementById('awayok').addEventListener('click', () => {
 });
 
 // Expose a little for automated tests
-window.__game = { FAR, FS, farTask, farIdle, modeBusy: () => modeBusy(), coverOpen: () => coverOpen(), autoTasks: () => autoTasks(), farGo, farLeave, startFarMode, endFarMode, buildFar, farRate, farHas, THREE, startCoast, startRescue, endCoast, endRescue, totalRate, minutesOfIncome, teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
+window.__game = { FAR, FS, farTask, farIdle, modeBusy: () => modeBusy(), coverOpen: () => coverOpen(), autoTasks: () => autoTasks(), farGo, farLeave, startFarMode, endFarMode, buildFar, farRate, farHas, THREE, startCoast, startRescue, endCoast, endRescue, totalRate, minutesOfIncome, teaser, teaserFlyby, startExercise, get FX() { return FX; }, quality, renderFrame, setHQ: (on) => { hqOn = on; }, setInk: (on) => { inkOn = on; }, openSchedule, AIRLINES, gateSched, curSlot, autoFillSchedule, setOverlay, overlay, cityPopulation, utilMult, utilCover, utilDemand, POP_GOALS, MODELS, modelGroup, tankModelX: () => tankModel(), heliX: () => helicopterModel(), makePersonX: (o) => makePerson(o), animatePersonX: (p, m, dt) => animatePerson(p, m, dt), startMove, confirmMove, mover, synergyAt, plotMult, cityPower, district, CITY_GLOW, syncDistrict, setZoom, AIR, AIRPORT_UNLOCKS, AIR_STOP, AIR_STOP_IN, airportTask, fmt, cityState, openCityHub, citizenCount, citizen, jam, setSpeed, traffic, tourismScore, advise, buyTraffic, get gameSpeed() { return gameSpeed; }, buildPlot, advanceTier, upgradeNode, buyLand, advanceCheck, plotCost, nodeCost, nodeLevels, canOpenBranch, newBranchCost, openBranch, emp, CITY_BUILDINGS, LAND_COSTS, starsToGain, otherBranchesRate, BASE_UNLOCKS, STORY, story, openStory, showEnding, topStep, updateStory, BASE, startDefense, newMission, dispatchMission, startFlight, militaryPower, openMilitary, INT, CENTERS, get inside() { return inside; }, colliders, campus, CAMPUS_LOTS, epi, startEpidemic, KT, pullCard, openQuiz, shareHospital, makeShareCard, UPPER, UPPER_ROOMS, openMapView, closeMapView, mapView, visitDistrict, renderEmpire, empireRate, renderer, setFloor, OUT, F3, startRide, ev, spawnBoss, spawnSpecial, startRush, grantStyle, applyOutfit, camera, scene, route, F2, lift, basket, state, player, LINES, ROOMS, UNLOCKS, input: touchVec, patients, auto, idleIncome, UPGRADES, buyUpgrade, PATIENT_TYPES, SEATS };
