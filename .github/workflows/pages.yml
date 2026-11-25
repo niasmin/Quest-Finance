@@ -16,16 +16,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Upload in its own job: the deploy job then starts only once the artifact is finalized.
+  # (In one job, deploy-pages sometimes asked for the artifact before GitHub listed it and failed
+  # with "No artifacts named github-pages were found".)
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
+    steps:
       - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      # One more try after a short wait if GitHub hadn't listed the artifact yet
+      - if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - id: retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
