@@ -14,7 +14,7 @@
 <meta property="og:type" content="website">
 <meta property="og:title" content="Dr. Quest World">
 <meta property="og:description" content="เกมไทคูน 3D สร้างโรงพยาบาล ขยายเมือง วิทยาเขต ค่ายทหาร สู่อาณาจักรโลก เล่นฟรีบนเว็บและมือถือ">
-<meta property="og:image" content="https://niasmin.github.io/Quest-Finance/og-image.png">
+<meta property="og:image" content="https://niasmin.github.io/Quest-Finance/og-image.jpg">
 <meta property="og:url" content="https://niasmin.github.io/Quest-Finance/">
 <meta name="twitter:card" content="summary_large_image">
 <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@500;600;700&display=swap" rel="stylesheet">
@@ -358,7 +358,18 @@
   #military h3 { margin: 0 0 4px; text-align: center; }
   #military .sub { text-align: center; color: #3a4520; font-size: 13px; margin: 0 0 8px; }
   #military .btn.ghost { display: block; margin: 12px auto 0; }
-  #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; }
+  #loading { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: max(28px, env(safe-area-inset-top)) 20px max(36px, env(safe-area-inset-bottom)); color: #fff; font-size: 17px; font-weight: 700;
+    background: #0c1424 url(keyart.jpg) 40% 50% / cover no-repeat;
+    background: #0c1424 image-set(url(keyart.webp) type("image/webp"), url(keyart.jpg) type("image/jpeg")) 40% 50% / cover no-repeat; transition: opacity .6s ease; }
+  #loading::before { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,18,40,.55) 0%, rgba(10,18,40,0) 30%, rgba(10,18,40,0) 70%, rgba(10,18,40,.7) 100%); pointer-events: none; }
+  #loading > * { position: relative; }
+  #loading img { width: min(86vw, 520px); filter: drop-shadow(0 6px 0 rgba(0,0,0,.25)); }
+  #loading .lbar { display: block; margin: 8px auto 0; width: min(70vw, 320px); height: 10px; border-radius: 99px; background: rgba(255,255,255,.3); overflow: hidden; }
+  #loading .lbar i { display: block; height: 100%; width: 40%; border-radius: 99px; background: linear-gradient(90deg, #ffe08a, #f5a623); animation: lbar 1.4s ease-in-out infinite; }
+  @keyframes lbar { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+  #loading p { margin: 0; text-align: center; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
+  #loading.out { opacity: 0; pointer-events: none; }
+  @media (orientation: portrait) { #loading { background-position: 20% 50%; } }
 
   /* ---- UI cleanup: compact HUD, one bottom message, toasts from the top, bottom-sheet panels ---- */
   #substats { display: flex; gap: 5px; flex-wrap: wrap; max-width: 72vw; }
@@ -441,7 +452,7 @@
 </head>
 <body>
 <div id="view"></div>
-<div id="loading">กำลังโหลด…</div>
+<div id="loading"><img src="logo.png" alt="Dr. Quest World"><p>กำลังโหลด…<span class="lbar"><i></i></span></p></div>
 
 <div id="hud">
   <div id="left">

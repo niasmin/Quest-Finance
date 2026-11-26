@@ -17775,7 +17775,7 @@ spawnCrew();
 showNextTile();
 updateBag();
 updateCamera(0, true);
-document.getElementById('loading').style.display = 'none';
+{ const ld = document.getElementById('loading'); ld.classList.add('out'); setTimeout(() => { ld.style.display = 'none'; }, 650); }
 requestAnimationFrame(frame);
 // Probe storage up front so a browser that can't keep saves is flagged right away
 save();
