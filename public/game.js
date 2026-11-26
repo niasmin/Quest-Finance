@@ -769,7 +769,7 @@ function trunkMesh(h, r = 0.14, color = 0x7a5230) {
 // ---------- models made in Blender (public/models/*.json, built by tools/blender/models.py) ----------
 // Each file lists one part per material: positions (×1000) and normals (×100) as integers, plus triangle
 // indices. Geometry is shared by every copy; materials are mapped onto the game's own.
-const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'pp_torso', 'pp_leg', 'pp_arm', 'pp_shoe', 'pp_hand', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags', 'terminal_back', 'submarine'];
+const MODEL_NAMES = ['car_sedan', 'car_suv', 'car_pickup', 'tree_round', 'tree_tall', 'tree_wide', 'ambulance', 'airliner', 'jet', 'tank_hull', 'tank_turret', 'ship', 'lamp', 'bench', 'heli_body', 'heli_rotor', 'armored', 'hospital_front', 'entrance_canopy', 'kit_cornice', 'kit_plinth', 'kit_corner', 'bus_shelter', 'control_tower', 'hangar', 'temple', 'mil_hq', 'mil_barracks', 'mil_depot', 'mil_shed', 'navy_pier', 'navy_hq', 'watchtower', 'radar_dome', 'sandbags', 'terminal_back', 'submarine'];
 const MODELS = {};
 async function loadModel(n) {
   {
@@ -1519,20 +1519,100 @@ function moveToStack(mesh, stack, flyDur) {
 }
 
 // ---------- people ----------
-const SKIN = [0xf1c27d, 0xe0ac69, 0xffdbac, 0xc68642];
+const SKIN = [0xffd6bd, 0xf7c4a2, 0xeab088, 0xd39a6e, 0xb97c52];
 const HAIR = [0x3b2a20, 0x1f1f1f, 0x7a4a24, 0xd9a441, 0x5b3a1e];
 const SHIRTS = [0x8ecae6, 0xffb703, 0xfb8500, 0x90be6d, 0xb5838d, 0x6d6875, 0xf28482, 0x84a59d];
 
-// Shared shapes: rounded limbs, shoes and heads instead of blocks
+// Chibi proportions: a big round head on a short, soft body. Feet on the floor, hips at HIP, the head
+// pivots at NECK and is drawn in its own space (the old 1.3 neck, 0.25 head) scaled up by HEAD_K.
+const HIP = 0.42;
+const NECK = 0.98;
+const HEAD_K = 1.62;
+const SIT_Y = 0.33 - HIP; // body drop that puts the hips on a 0.33 seat
+// A torso turned on a lathe: a soft pear, widest at the tummy, rounding into the shoulders
+function torsoGeo() {
+  const prof = [[0, -0.34], [0.15, -0.33], [0.215, -0.29], [0.242, -0.2], [0.247, -0.08], [0.236, 0.06], [0.214, 0.17], [0.172, 0.26], [0.1, 0.315], [0.0, 0.33]];
+  const g = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 20);
+  g.computeVertexNormals();
+  return g;
+}
+// Shared shapes
 const PG = {
-  leg: new THREE.CapsuleGeometry(0.088, 0.3, 3, 8), arm: new THREE.CapsuleGeometry(0.066, 0.28, 3, 8),
-  shoe: new THREE.CapsuleGeometry(0.075, 0.13, 3, 8).rotateX(Math.PI / 2), hand: new THREE.SphereGeometry(0.075, 8, 6),
-  torso: new THREE.CapsuleGeometry(0.25, 0.3, 4, 12), head: new THREE.SphereGeometry(0.25, 14, 10),
-  hair: new THREE.SphereGeometry(0.265, 12, 8, 0, Math.PI * 2, 0, Math.PI / 1.9), eye: new THREE.SphereGeometry(0.03, 6, 5),
-  bun: new THREE.SphereGeometry(0.12, 8, 6), bob: new THREE.SphereGeometry(0.27, 14, 10, 0, Math.PI * 2, Math.PI / 2.4, Math.PI / 2.6),
-  belt: new THREE.CylinderGeometry(0.218, 0.214, 0.055, 14, 1, true),
-  lock: new THREE.SphereGeometry(0.1, 8, 6).scale(1, 0.55, 0.7), spike: new THREE.ConeGeometry(0.075, 0.2, 6), tail: new THREE.CapsuleGeometry(0.07, 0.2, 3, 8),
+  leg: new THREE.CapsuleGeometry(0.088, 0.13, 4, 10), arm: new THREE.CapsuleGeometry(0.072, 0.15, 4, 10),
+  shoe: new THREE.CapsuleGeometry(0.088, 0.1, 4, 10).rotateX(Math.PI / 2).scale(1, 0.82, 1), hand: new THREE.SphereGeometry(0.082, 10, 8),
+  torso: torsoGeo(), head: new THREE.SphereGeometry(0.25, 20, 14),
+  cap: new THREE.SphereGeometry(0.27, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2.25),
+  placket: new THREE.CapsuleGeometry(0.07, 0.16, 4, 10),
+  belt: new THREE.CylinderGeometry(0.236, 0.232, 0.05, 20, 1, true),
+  skirt: new THREE.CylinderGeometry(0.238, 0.268, 0.2, 20, 1, true),
+  collar: new THREE.TorusGeometry(0.15, 0.03, 6, 20).rotateX(Math.PI / 2),
+  scopeTube: new THREE.CylinderGeometry(0.012, 0.012, 0.2, 6), scopeDisk: new THREE.CylinderGeometry(0.035, 0.035, 0.02, 12).rotateX(Math.PI / 2),
+  nurseCap: new THREE.CylinderGeometry(0.15, 0.17, 0.11, 18).scale(1, 1, 0.68),
 };
+// Hair as one mesh per look: a crown cap, a full back, swept fringe locks and a style piece, all merged
+const hairCache = new Map();
+function hairGeo(style, side) {
+  const key = `${style}|${side}`;
+  if (hairCache.has(key)) return hairCache.get(key);
+  const bits = [];
+  const add = (geo, x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => {
+    const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(sx, sy, sz));
+    bits.push(geo.clone().applyMatrix4(m));
+  };
+  const blob = new THREE.SphereGeometry(0.1, 10, 8);
+  const tear = new THREE.SphereGeometry(1, 8, 6).translate(0, -0.35, 0); // a drop pulled to a point at the bottom
+  {
+    const pos = tear.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i);
+      const k = y < -0.35 ? 1 - Math.min(1, (-0.35 - y) / 1.0) * 0.85 : 1;
+      pos.setX(i, pos.getX(i) * k);
+      pos.setZ(i, pos.getZ(i) * k);
+    }
+    tear.computeVertexNormals();
+  }
+  // A lock of hair lying on the head: az round from the face, pol down from the crown, pointing down the curve
+  const C = new THREE.Vector3(0, 1.52, 0);
+  const strand = (az, pol, len, wid, tilt = 0, lift = 1.0) => {
+    const n = new THREE.Vector3(Math.sin(pol) * Math.sin(az), Math.cos(pol), Math.sin(pol) * Math.cos(az));
+    const t = new THREE.Vector3(Math.cos(pol) * Math.sin(az), -Math.sin(pol), Math.cos(pol) * Math.cos(az));
+    t.applyAxisAngle(n, tilt);
+    const bn = new THREE.Vector3().crossVectors(t, n);
+    const m = new THREE.Matrix4().makeBasis(bn.multiplyScalar(-wid), t.multiplyScalar(-len), n.clone().multiplyScalar(wid * 0.45));
+    m.setPosition(C.clone().addScaledVector(n, 0.255 * lift));
+    bits.push(tear.clone().applyMatrix4(m));
+  };
+  // Back of the head (behind the ears) down to the nape, so the hair has volume rather than being a painted cap
+  add(new THREE.SphereGeometry(0.268, 18, 10, Math.PI - 0.12, Math.PI + 0.24, Math.PI / 2.4, Math.PI / 3.4), 0, 1.535, -0.03, 0, 0, 0, 1, 1, 0.98);
+  // Fringe: pointed locks fanned over the forehead and swept to one side, longer at the temples
+  for (let i = -2; i <= 2; i++) {
+    const az = i * 0.33 + side * 0.08;
+    const edge = Math.abs(i) / 2;
+    strand(az, 0.84 + edge * edge * 0.2, 0.066 + edge * 0.018, 0.12, side * (0.42 - edge * 0.2), 1.02);
+  }
+  for (let i = -1; i <= 1; i += 2) strand(i * 0.17 + side * 0.08, 0.86, 0.06, 0.1, side * 0.35, 1.045);
+  if (style === 'bob') {
+    for (const sx of [-1, 1]) add(blob, sx * 0.2, 1.43, -0.04, 0, 0, sx * 0.15, 0.75, 1.15, 1.25);
+    add(blob, 0, 1.42, -0.17, 0, 0, 0, 1.9, 1.05, 0.9);
+  } else if (style === 'buns') {
+    for (const sx of [-1, 1]) add(blob, sx * 0.17, 1.72, -0.12, 0, 0, 0, 1.1, 1.1, 1.1);
+  } else if (style === 'bun') {
+    add(blob, 0, 1.78, -0.15, 0, 0, 0, 1.25, 1.2, 1.25);
+  } else if (style === 'spikes') {
+    const cone = new THREE.ConeGeometry(0.08, 0.2, 7);
+    for (const [x, z, rx, rz] of [[0, 0.02, -0.5, 0], [0.11, -0.02, -0.4, -0.55], [-0.11, -0.02, -0.4, 0.55], [0.05, -0.13, 0.35, -0.3], [-0.06, -0.12, 0.35, 0.35]]) add(cone, x, 1.79, z, rx, 0, rz);
+  } else if (style === 'tail') {
+    add(blob, 0, 1.6, -0.25, 0, 0, 0, 0.8, 0.8, 0.8);
+    add(new THREE.CapsuleGeometry(0.075, 0.2, 4, 8), 0, 1.46, -0.31, 0.35);
+  } else {
+    // Short and tousled: a swoosh rising off the parting and a tuft at the crown
+    add(blob, -0.03 * side, 1.79, 0.07, -0.55, 0, 0.45 * side, 1.25, 0.55, 0.95);
+    add(blob, 0.02 * side, 1.795, -0.09, 0.5, 0, -0.35 * side, 0.85, 0.5, 0.8);
+  }
+  const geo = mergeGeos(bits);
+  hairCache.set(key, geo);
+  return geo;
+}
 // A dark rim drawn round the head and body (the back faces of a slightly bigger copy): reads like a cartoon outline
 const OUTLINE = new THREE.MeshBasicMaterial({ color: 0x2a1c14, side: THREE.BackSide });
 function outlined(m, k = 1.06) {
@@ -1549,8 +1629,8 @@ const part = (geo, color, x, y, z, shadow = true) => {
   m.position.set(x, y, z);
   return m;
 };
-// A face painted on the head: eyes with a highlight, brows, a small smile and a touch of blush.
-// One texture per skin tone, so it costs less than the two eye meshes it replaces.
+// A painted face: big glossy eyes (iris gradient, lash line, two catch-lights), soft brows,
+// rosy cheeks and an open smile. One texture per skin tone, plus a blink.
 const faceCache = new Map();
 function faceMat(skin, shut = false) {
   const key = shut ? `${skin}|shut` : skin;
@@ -1559,47 +1639,83 @@ function faceMat(skin, shut = false) {
   if (REAL) {
     const h = {};
     base.getHSL(h);
-    base.setHSL(h.h, Math.min(1, h.s * 1.18), h.l * (h.l > 0.8 ? 0.93 : 0.86));
+    base.setHSL(h.h, Math.min(1, h.s * 1.12), h.l * (h.l > 0.8 ? 0.95 : 0.9));
   }
-  const tex = canvasTexture(256, 128, (g) => {
+  const tex = canvasTexture(512, 256, (g) => {
     g.fillStyle = `#${base.getHexString()}`;
-    g.fillRect(0, 0, 256, 128);
-    const cx = 64; // u = 0.25 is the front of a three.js sphere
-    const cy = 63;
+    g.fillRect(0, 0, 512, 256);
+    const cx = 128; // u = 0.25 is the front of a three.js sphere
+    const cy = 128;
     g.lineCap = 'round';
+    g.lineJoin = 'round';
     for (const sx of [-1, 1]) {
-      // Big round cartoon eyes: white, a dark iris and two highlights (or a closed curve for a blink)
-      const ex = cx + sx * 14.5;
-      g.fillStyle = 'rgba(255,110,110,0.32)';
-      g.beginPath(); g.ellipse(cx + sx * 23, cy + 10, 7.5, 4.5, 0, 0, Math.PI * 2); g.fill();
+      const ex = cx + sx * 30;
+      // Cheeks: a soft pink glow
+      const bl = g.createRadialGradient(cx + sx * 50, cy + 24, 1, cx + sx * 50, cy + 24, 15);
+      bl.addColorStop(0, 'rgba(255,105,120,0.5)');
+      bl.addColorStop(1, 'rgba(255,105,120,0)');
+      g.fillStyle = bl;
+      g.beginPath(); g.ellipse(cx + sx * 50, cy + 24, 16, 10, 0, 0, Math.PI * 2); g.fill();
+      g.save();
+      g.translate(ex, cy); g.scale(1.25, 1.25); g.translate(-ex, -cy);
       if (shut) {
-        g.strokeStyle = '#2a1c14';
-        g.lineWidth = 2.6;
-        g.beginPath(); g.moveTo(ex - 6, cy + 1); g.quadraticCurveTo(ex, cy + 5, ex + 6, cy + 1); g.stroke();
+        // A happy closed eye
+        g.strokeStyle = '#2a1a12';
+        g.lineWidth = 4.5;
+        g.beginPath(); g.moveTo(ex - 11, cy + 2); g.quadraticCurveTo(ex, cy - 7, ex + 11, cy + 2); g.stroke();
       } else {
+        // White, then a tall iris that darkens to the top, a pupil and catch-lights
         g.fillStyle = '#ffffff';
-        g.beginPath(); g.ellipse(ex, cy, 6.6, 7.6, 0, 0, Math.PI * 2); g.fill();
-        g.fillStyle = '#2a1c14';
-        g.beginPath(); g.ellipse(ex + sx * 0.5, cy + 1, 4.8, 6, 0, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.ellipse(ex, cy, 12.5, 15.5, 0, 0, Math.PI * 2); g.fill();
+        const ir = g.createLinearGradient(0, cy - 14, 0, cy + 14);
+        ir.addColorStop(0, '#1c0f08');
+        ir.addColorStop(0.55, '#4a2a16');
+        ir.addColorStop(1, '#9a6234');
+        g.fillStyle = ir;
+        g.beginPath(); g.ellipse(ex + sx * 0.8, cy + 1.2, 10.4, 13.6, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#120804';
+        g.beginPath(); g.ellipse(ex + sx * 0.8, cy + 0.5, 5, 6.4, 0, 0, Math.PI * 2); g.fill();
         g.fillStyle = '#ffffff';
-        g.beginPath(); g.arc(ex - 1.6, cy - 2.2, 1.8, 0, Math.PI * 2); g.fill();
-        g.beginPath(); g.arc(ex + 1.6, cy + 3, 0.9, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.ellipse(ex - 3.6, cy - 5.6, 4.2, 4.8, -0.3, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(ex + 3.8, cy + 6.4, 1.9, 0, Math.PI * 2); g.fill();
+        g.fillStyle = 'rgba(255,255,255,0.35)';
+        g.beginPath(); g.ellipse(ex + 1, cy + 9, 5, 2.4, 0, 0, Math.PI * 2); g.fill();
+        // Upper lash line with a little flick at the outer corner
+        g.strokeStyle = '#1e120c';
+        g.lineWidth = 4;
+        g.beginPath(); g.ellipse(ex, cy, 12.8, 15.8, 0, Math.PI * 1.08, Math.PI * 1.92); g.stroke();
+        g.lineWidth = 3;
+        g.beginPath(); g.moveTo(ex + sx * 11.5, cy - 7.5); g.lineTo(ex + sx * 16.5, cy - 11); g.stroke();
       }
-      g.strokeStyle = 'rgba(50,30,20,0.85)';
-      g.lineWidth = 2.2;
-      g.beginPath(); g.moveTo(ex - 5.5, cy - 12); g.quadraticCurveTo(ex, cy - 14.5, ex + 5.5, cy - 12); g.stroke();
+      // Soft, slightly arched brows
+      g.strokeStyle = 'rgba(70,40,25,0.8)';
+      g.lineWidth = 3.4;
+      g.beginPath(); g.moveTo(ex - sx * 8, cy - 23); g.quadraticCurveTo(ex + sx * 1, cy - 27.5, ex + sx * 10, cy - 24); g.stroke();
+      g.restore();
     }
-    g.strokeStyle = 'rgba(120,40,40,0.9)';
-    g.lineWidth = 2.4;
-    g.beginPath(); g.moveTo(cx - 6, cy + 14); g.quadraticCurveTo(cx, cy + 19.5, cx + 6, cy + 14); g.stroke();
-    g.fillStyle = 'rgba(0,0,0,0.10)';
-    g.beginPath(); g.ellipse(cx, cy + 6, 2, 1.4, 0, 0, Math.PI * 2); g.fill(); // nose shadow
+    // Open smile: a dark mouth with a pink tongue and a soft lip line
+    const my = cy + 29;
+    g.save();
+    g.translate(cx, my); g.scale(1.3, 1.3); g.translate(-cx, -my);
+    g.fillStyle = '#7a2a2a';
+    g.beginPath(); g.moveTo(cx - 10, my); g.quadraticCurveTo(cx, my + 1.5, cx + 10, my); g.quadraticCurveTo(cx + 8, my + 13, cx, my + 13); g.quadraticCurveTo(cx - 8, my + 13, cx - 10, my); g.fill();
+    g.fillStyle = '#f08a8a';
+    g.beginPath(); g.ellipse(cx, my + 9.5, 5.5, 3.4, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.9)';
+    g.fillRect(cx - 6, my + 0.6, 12, 2.2);
+    g.restore();
+    g.fillStyle = 'rgba(0,0,0,0.08)';
+    g.beginPath(); g.ellipse(cx, cy + 12, 2.6, 1.8, 0, 0, Math.PI * 2); g.fill(); // nose shadow
   });
-  const m = REAL ? new THREE.MeshStandardMaterial({ map: tex, roughness: 0.86, metalness: 0.02, envMapIntensity: 0.38 }) : new THREE.MeshLambertMaterial({ map: tex });
+  tex.anisotropy = 4;
+  // a little of the skin's own glow, like light through skin: faces stay bright in shade
+  const glow = base.clone().multiplyScalar(0.26);
+  const m = REAL ? new THREE.MeshStandardMaterial({ map: tex, roughness: 0.62, metalness: 0.0, envMapIntensity: 0.45, emissive: glow }) : new THREE.MeshLambertMaterial({ map: tex, emissive: glow });
   if (REAL) realMats.push(m);
   faceCache.set(key, m);
   return m;
 }
+const HAIR_STYLES = ['short', 'short', 'bob', 'buns', 'bun', 'spikes', 'tail'];
 function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HAIR), coat = null, cap = null, apron = null }) {
   const group = new THREE.Group();
   group.userData.person = true; // people keep their shadows when small props lose theirs
@@ -1610,83 +1726,88 @@ function makePerson({ shirt, pants = 0x3b4a6b, skin = pick(SKIN), hair = pick(HA
   const shoe = pick([0x2b2b2b, 0x4a3426, 0xf2f2f2, 0x1f3a5f]);
   for (const side of [-1, 1]) {
     const hip = new THREE.Group();
-    hip.position.set(side * 0.12, 0.55, 0);
-    hip.add(part(PG.leg, pants, 0, -0.26, 0), part(PG.shoe, shoe, 0, -0.5, 0.05));
+    hip.position.set(side * 0.105, HIP, 0);
+    hip.add(part(PG.leg, pants, 0, -0.17, 0), part(PG.shoe, shoe, 0, -HIP + 0.072, 0.045));
     body.add(hip);
     legs.push(hip);
 
     const shoulder = new THREE.Group();
-    shoulder.position.set(side * 0.33, 1.2, 0);
-    shoulder.add(part(PG.arm, coat ?? shirt, 0, -0.2, 0), part(PG.hand, skin, 0, -0.44, 0, false));
-    shoulder.rotation.z = side * 0.08;
+    shoulder.position.set(side * 0.27, 0.9, 0);
+    shoulder.add(part(PG.arm, coat ?? shirt, 0, -0.14, 0), part(PG.hand, skin, 0, -0.3, 0, false));
+    shoulder.rotation.z = side * 0.16;
     body.add(shoulder);
     arms.push(shoulder);
   }
-  const torso = part(PG.torso, coat ?? shirt, 0, 0.95, 0);
-  torso.scale.set(1, 1, 0.82);
+  const torso = part(PG.torso, coat ?? shirt, 0, 0.71, 0);
+  torso.scale.set(1, 1, 0.84);
   outlined(torso, 1.05);
   body.add(torso);
-  if (!coat) {
-    // A belt with a small gold buckle where the shirt meets the trousers
-    const belt = new THREE.Mesh(PG.belt, mat(0x3a2a20));
-    belt.position.set(0, 0.57, 0);
-    belt.scale.z = 0.84;
-    const buckle = box(0.07, 0.05, 0.02, 0xd8b04a, { shadow: false });
-    buckle.position.set(0, 0.57, 0.185);
-    body.add(belt, buckle);
-  }
   let front = null;
   if (coat) {
-    // Shirt showing through an open coat
-    front = box(0.16, 0.42, 0.06, shirt);
-    front.position.set(0, 1.0, 0.2);
-    body.add(front);
+    // An open white coat: the shirt shows down the front, the coat flares over the hips, a stethoscope
+    front = part(PG.placket, shirt, 0, 0.79, 0.168);
+    front.scale.z = 0.35;
+    const skirt = part(PG.skirt, coat, 0, 0.34, 0);
+    skirt.scale.z = 0.86;
+    const sc = new THREE.Group();
+    sc.position.set(0, 0.99, 0);
+    const ring = part(PG.collar, 0x37474f, 0, 0.01, 0, false);
+    ring.scale.set(1.08, 0.3, 0.95);
+    sc.add(ring);
+    for (const sx of [-1, 1]) {
+      const tube = part(PG.scopeTube, 0x37474f, sx * 0.1, -0.1, 0.165, false);
+      tube.rotation.set(0.25, 0, sx * -0.12);
+      sc.add(tube);
+    }
+    sc.add(part(PG.scopeDisk, 0xb0bec5, 0.115, -0.21, 0.2, false));
+    body.add(front, skirt, sc);
+  } else {
+    // A belt with a small gold buckle where the shirt meets the trousers
+    const belt = new THREE.Mesh(PG.belt, mat(0x3a2a20));
+    belt.position.set(0, 0.45, 0);
+    belt.scale.z = 0.86;
+    const buckle = box(0.07, 0.05, 0.02, 0xd8b04a, { shadow: false });
+    buckle.position.set(0, 0.45, 0.205);
+    body.add(belt, buckle);
   }
+  const collar = part(PG.collar, coat ?? shirt, 0, 1.0, 0, false);
+  collar.scale.z = 0.86;
+  body.add(collar);
   if (apron) {
-    const a = box(0.46, 0.5, 0.05, apron);
-    a.position.set(0, 0.92, 0.215);
+    const a = box(0.4, 0.42, 0.04, apron);
+    a.position.set(0, 0.66, 0.215);
     body.add(a);
   }
-  // The head and everything on it sits in its own group, scaled down a little about the neck:
-  // a smaller head on the same body reads less like a toy
+  // The head and everything on it sits in its own group, scaled up about the neck: hats and hair
+  // made for that head space follow it
   const headG = new THREE.Group();
-  headG.position.y = 1.3;
-  headG.scale.setScalar(1.06); // a big, friendly cartoon head: the face reads from the game camera
+  headG.position.y = NECK;
+  headG.scale.setScalar(HEAD_K);
   const hd = new THREE.Group();
   hd.position.y = -1.3;
   headG.add(hd);
   body.add(headG);
   const head = part(PG.head, skin, 0, 1.52, 0);
   head.material = faceMat(skin);
-  head.scale.set(1.0, 1.0, 0.98);
-  outlined(head, 1.07);
-  const cap0 = outlined(part(PG.hair, hair, 0, 1.545, -0.025, false), 1.05);
-  hd.add(head, cap0);
-  // Hairstyles: short with a side fringe, a bob over the neck, a bun, spikes or a ponytail
-  const style = Math.random();
-  if (style < 0.25) hd.add(part(PG.bob, hair, 0, 1.52, -0.04, false));
-  else if (style < 0.38) hd.add(part(PG.bun, hair, 0, 1.76, -0.14, false));
-  else if (style < 0.52) {
-    for (const [x, z, rx, rz] of [[0, 0.02, -0.5, 0], [0.11, -0.02, -0.4, -0.55], [-0.11, -0.02, -0.4, 0.55], [0.05, -0.13, 0.35, -0.3], [-0.06, -0.12, 0.35, 0.35]]) {
-      const sp = part(PG.spike, hair, x, 1.79, z, false);
-      sp.rotation.set(rx, 0, rz);
-      hd.add(sp);
-    }
-  } else if (style < 0.64) {
-    const t = part(PG.tail, hair, 0, 1.5, -0.27, false);
-    t.rotation.x = 0.35;
-    hd.add(t);
-  }
-  // A fringe sweeping over the forehead, so the hair isn't a plain cap
-  const fringe = part(PG.lock, hair, style < 0.5 ? 0.07 : -0.07, 1.715, 0.155, false);
-  fringe.rotation.set(-0.45, 0, style < 0.5 ? -0.35 : 0.35);
-  hd.add(fringe);
+  head.scale.set(1.04, 0.97, 0.98);
+  outlined(head, 1.06);
+  const cap0 = outlined(part(PG.cap, hair, 0, 1.545, -0.02, false), 1.045);
+  const style = cap ? pick(['buns', 'bun', 'bob']) : pick(HAIR_STYLES);
+  const locks = part(hairGeo(style, Math.random() < 0.5 ? 1 : -1), hair, 0, 0, 0, false);
+  // Ears peeking out under the hair
+  const ears = [-1, 1].map((sx) => part(PG.hand, skin, sx * 0.245, 1.5, -0.01, false));
+  for (const e of ears) e.scale.set(0.45, 0.62, 0.4);
+  hd.add(head, cap0, locks, ...ears);
   if (cap) {
-    const c = box(0.34, 0.12, 0.2, 0xffffff);
-    c.position.set(0, 1.8, 0.04);
-    const cross = box(0.08, 0.08, 0.02, 0xe5484d, { shadow: false });
-    cross.position.set(0, 1.8, 0.15);
-    hd.add(c, cross);
+    // A nurse's cap with a red cross, tipped back on the head
+    const c = new THREE.Group();
+    c.position.set(0, 1.79, 0.03);
+    c.rotation.x = -0.32;
+    const cross = new THREE.Group();
+    cross.position.set(0, 0.0, 0.118);
+    cross.add(box(0.075, 0.025, 0.012, 0xe5484d, { shadow: false }), box(0.025, 0.075, 0.012, 0xe5484d, { shadow: false }));
+    c.add(part(PG.nurseCap, 0xffffff, 0, 0, 0), cross);
+    hd.add(c);
   }
   return { group, body, legs, arms, head: hd, headG, face: head, skin, phase: Math.random() * 6, blink: rand(1, 4), lean: 0, turn: 0, yaw: null, parts: { torso, front } };
 }
@@ -2602,7 +2723,7 @@ class Patient {
   // Sitting pose on a waiting-room chair, facing the hallway
   sit(dt) {
     const p = this.person;
-    p.body.position.y = -0.22;
+    p.body.position.y = SIT_Y;
     p.body.rotation.set(0, 0, 0);
     p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
     p.arms[0].rotation.x = p.arms[1].rotation.x = -0.3;
@@ -3338,8 +3459,14 @@ function f2Pile(at) {
   return s;
 }
 
+// On the back: the shorter chibi body slides up so the big head rests on the pillow, a touch higher off the mattress
+function lieDown(p) {
+  p.group.rotation.x = -Math.PI / 2;
+  p.body.position.set(0, 0.2, 0.07);
+}
+
 function sitPose(p) {
-  p.body.position.y = -0.22;
+  p.body.position.y = SIT_Y;
   p.body.rotation.set(0, 0, 0);
   p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
   p.arms[0].rotation.x = p.arms[1].rotation.x = -0.3;
@@ -3576,7 +3703,7 @@ function updateWard(dt) {
       if (bed.empty <= 0) {
         // Admit a new patient, lying down with the head on the pillow
         const p = makePerson({ shirt: 0xa7d8ee, pants: 0xa7d8ee });
-        p.group.rotation.x = -Math.PI / 2;
+        lieDown(p);
         p.group.position.set(bed.at.x, 0.62, bed.at.z + 0.85);
         F2.group.add(p.group);
         bed.patient = p;
@@ -4896,7 +5023,7 @@ function updateVisitors(dt) {
     const target = vi.steps[0];
     if (vi.steps.length === 3 && flatDist(p.group.position, target) < 0.05 && vi.sit > 0) {
       vi.sit -= dt;
-      p.body.position.y = -0.22;
+      p.body.position.y = SIT_Y;
       p.body.rotation.set(0, 0, 0);
       p.legs[0].rotation.x = p.legs[1].rotation.x = -1.45;
       faceToward(p.group, 0, -1, dt);
@@ -5132,7 +5259,7 @@ function addIcuBeds(n, animate) {
 }
 function lyingPatient() {
   const p = makePerson({ shirt: 0xbfe3ff });
-  p.group.rotation.x = -Math.PI / 2;
+  lieDown(p);
   p.group.position.y = 0.62;
   return p;
 }
@@ -8487,7 +8614,7 @@ function campusPerson(kind) {
     for (const s of [-0.34, 0.34]) chair.add(at3(cylM(0.3, 0.3, 0.05, 0x37474f, 14), s, 0.3, -0.05).rotateZ(Math.PI / 2));
     p.group.add(chair);
     p.chair = chair;
-    p.body.position.y = -0.05;
+    p.body.position.y = 0.5 - HIP;
     p.seated = true;
     for (const leg of p.legs) leg.rotation.x = -1.4;
   }
@@ -17748,18 +17875,6 @@ hqBtn.addEventListener('click', () => {
 
 // ---------- start ----------
 await loadModels();
-// People keep their own rig and colours; the Blender parts only replace the shapes of the pieces
-{
-  const before = { ...PG };
-  for (const k of ['torso', 'leg', 'arm', 'shoe', 'hand']) {
-    const part = MODELS[`pp_${k}`]?.find((p) => p.key === k);
-    if (part) PG[k] = part.geo;
-  }
-  // The player was made before the models arrived: swap its pieces too
-  player.group.traverse((o) => {
-    for (const k of Object.keys(before)) if (o.geometry && o.geometry === before[k]) o.geometry = PG[k];
-  });
-}
 buildWorld();
 buildPartitions();
 buildTrash();
